@@ -1,0 +1,414 @@
+%=======================================================================
+% SEAM — Emotion-Aware Sign Language Translation
+% IEEEtran conference skeleton. See PAPER_TEMPLATE.md for what goes where.
+%
+% Build:  latexmk -pdf main.tex     (or)  make paper
+%
+% RULES (see WRITING_GUIDE.md):
+%   * Every number must trace to a run ID in EXPERIMENT_LOG.md.
+%   * Placeholders stay as \TODO{} or XX.X -- never invent a plausible number.
+%   * Every table caption states the split protocol.
+%=======================================================================
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{url}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+
+% Placeholder macro: renders loudly so nothing unfilled ships by accident.
+\newcommand{\TODO}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
+% Unmeasured number macro: use instead of typing a fake value.
+\newcommand{\NUM}{\textcolor{red}{XX.X}}
+
+\begin{document}
+
+\title{Grammar or Feeling? Factorized Non-Manual Modeling for\\
+Emotion-Aware Sign Language Translation on Commodity Hardware}
+
+\author{
+\IEEEauthorblockN{Author One, Author Two, Author Three, Author Four}
+\IEEEauthorblockA{\textit{Affiliation} \\ \textit{Institution} \\ email@domain}
+}
+
+\maketitle
+
+%=======================================================================
+\begin{abstract}
+\TODO{180--220 words. Follow the 5-sentence recipe in PAPER\_TEMPLATE.md:
+(1) gap: systems model hands, discard the grammatically-obligatory and affect-bearing face;
+(2) insight: grammatical and affective non-manual function can be explicitly factorized, and
+manual prosody belongs to affect;
+(3) method: two-branch encoder with gradient reversal, orthogonality and MI minimization, feeding
+emotion-conditioned text generation and an expressive avatar;
+(4) result: \NUM{} wF1 on EmoSign under leave-one-signer-out CV vs 20.76 for GPT-4o from video;
+(5) efficiency: end-to-end in \NUM{}~MB VRAM at \NUM{}~ms p95 on an RTX 3050, versus the 80\,GB
+A100 used for the baseline evaluations.}
+\end{abstract}
+
+\begin{IEEEkeywords}
+sign language translation, non-manual markers, emotion recognition, affective computing,
+disentangled representations, expressive avatars, efficient inference
+\end{IEEEkeywords}
+
+%=======================================================================
+\section{Introduction}
+\label{sec:intro}
+
+\TODO{P1 -- the stakes. Sign language is a full language; affect-free translation strips the person
+from the message. Cite documented consequences as motivation, not as a deployment pitch.}
+
+\TODO{P2 -- the technical gap. Non-manual signals are grammatically obligatory (brow raise marks
+yes/no questions, brow furrow marks wh-questions, head-shake marks negation, mouth morphemes modify
+predicates) \cite{valli2000linguistics,pfau2012signlanguage} and simultaneously affective
+\cite{elliott2013facial}. Affective prosody in ASL is carried partly by the hands
+\cite{reilly1992affective,hietanen2004perception}.}
+
+\TODO{P3 -- the hook. Hearing non-signers systematically misread linguistic markers as negative
+emotion, and so do frontier models: on EmoSign, GPT-4o reaches wF1 20.76 on emotion from video,
+AffectGPT collapses to ``neutral'' (11.03), and a hearing annotator scores wAF 21.39 on 7-class
+sentiment \cite{chua2025emosign}.}
+
+\TODO{P4 -- our approach in one paragraph.}
+
+\noindent\textbf{Contributions.}
+\begin{enumerate}
+  \item \TODO{C1: factorized non-manual encoder separating grammatical from affective function,
+        with an explicit disentanglement metric rather than an assertion.}
+  \item \TODO{C2: a manual prosody channel for affect, quantified by ablation.}
+  \item \TODO{C3: state of the art on EmoSign under signer-independent LOSO, at orders of magnitude
+        fewer parameters and less memory than MLLM baselines.}
+  \item \TODO{C4: end-to-end emotion-aware pipeline deployable on a 4\,GB consumer GPU, with a full
+        accuracy/latency/VRAM Pareto analysis.}
+\end{enumerate}
+
+%=======================================================================
+\section{Related Work}
+\label{sec:related}
+
+\subsection{Isolated Sign Language Recognition}
+\TODO{ST-GCN lineage \cite{yan2018stgcn}; SAM-SLR/SL-GCN \cite{jiang2021samslr}; SPOTER
+\cite{bohacek2022spoter}; sub-1M-parameter skeleton models \cite{signbart2025}; training-strategy
+gains \cite{trainingstrategies2024}; RGB upper bounds \cite{sandoval2023ssvt}. End with our
+position: we adopt compact recipes and claim no ISLR novelty.}
+
+\subsection{Sign Language Translation}
+\TODO{Neural SLT and PHOENIX14T \cite{camgoz2018neural}; gloss-free line
+\cite{zhou2023gfsltvlp,lin2023glofe,wong2024sign2gpt,liang2024llavaslt}; compact SLT
+\cite{chen2026compactslt}; YouTube-ASL T5-base scaling \cite{uthus2023youtubeasl}; the caution that
+reported gains often stem from data rather than architecture \cite{unbiased2026}.}
+
+\subsection{Emotion in Sign Language}
+\TODO{EmoSign \cite{chua2025emosign}; eJSL \cite{ejsl2026}; DGS with facial action units
+\cite{dgs_aus2026}; emotion in sign language conversation \cite{slconversation2026}. Note the field
+is 2025--2026 and nascent; nobody treats the grammatical/affective confound as an explicit training
+objective.}
+
+\subsection{Sign Language Production and Avatars}
+\TODO{SignLLM \cite{fang2024signllm}; SignAvatar \cite{signavatar2024}; MediaPipe's 52
+ARKit-compatible blendshapes \cite{lugaresi2019mediapipe}. Our position: deterministic retargeting
+with emotion-parametric modulation; generative motion is future work.}
+
+%=======================================================================
+\section{Datasets}
+\label{sec:datasets}
+
+\begin{table}[t]
+\caption{Datasets used. Splits are signer-independent throughout;
+EmoSign uses 4-fold leave-one-signer-out cross-validation.}
+\label{tab:datasets}
+\centering
+\small
+\begin{tabular}{@{}llrrl@{}}
+\toprule
+Dataset & Lang. & Clips & Signers & Role \\
+\midrule
+ASL Citizen \cite{desai2023aslcitizen} & ASL & 83{,}399 & 52 & ISLR training \\
+WLASL-100/300 \cite{li2020wlasl}       & ASL & \TODO{n} & --- & Comparability \\
+ASLLRP \cite{neidle2022asllrp}         & ASL & 2{,}651  & 19 & Video + $L$ labels \\
+EmoSign \cite{chua2025emosign}         & ASL & 200      & 4  & Affect benchmark \\
+How2Sign \cite{duarte2021how2sign}     & ASL & $\sim$35k & 11 & Continuous SLT \\
+DFEW \cite{jiang2020dfew}              & --- & 16{,}000 & --- & NM pretraining \\
+MAFW \cite{liu2022mafw}                & --- & 10{,}045 & --- & NM pretraining \\
+INCLUDE \cite{sridhar2020include}      & ISL & 4{,}287  & 7  & Cross-lingual ablation \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\TODO{Prose: why ASL Citizen over WLASL (first-party hosting, no link rot, IRB consent);
+EmoSign's inter-annotator ceiling (mean Krippendorff $\alpha=0.593$; sentiment 0.738, joy 0.699,
+worry 0.555, surprise$-$ 0.119, disgust 0.166) and what it bounds; the key methodological point
+that EmoSign is built on ASLLRP so the same utterances carry both grammatical-marker and affect
+labels; How2Sign keypoints only; rejected datasets and why (PHOENIX14T is affectively flat;
+YouTube-ASL quality unverified).}
+
+%=======================================================================
+\section{Method}
+\label{sec:method}
+
+\begin{figure}[t]
+\centering
+% \includegraphics[width=\columnwidth]{figures/pipeline.pdf}
+\TODO{Fig. 1 -- pipeline architecture}
+\caption{SEAM pipeline. Keypoints and 52 blendshapes feed three channels (manual, non-manual,
+prosody); the non-manual stream is factorized into a linguistic factor $z_L$ and an affective
+factor $z_A$, which condition text generation and avatar animation.}
+\label{fig:pipeline}
+\end{figure}
+
+\subsection{Perception and Preprocessing}
+\TODO{MediaPipe Tasks \cite{lugaresi2019mediapipe}: 543 landmarks, 52 ARKit-compatible blendshapes,
+head pose, gaze. One Euro Filter smoothing \cite{casiez2012oneeuro}. 12\,fps sampling, $T=64$
+windows; justify 12\,fps by the $O(n^2)$ attention argument and the published 0.5 BLEU-4 cost
+\cite{chen2026compactslt}.}
+
+\subsection{Three Channels}
+\TODO{Manual $M$ (85 keypoints, 255-dim/frame); non-manual $NM$ (52 blendshapes, AU proxies, head
+dynamics, gaze); prosody $P$ (speed, amplitude, repetition, pause, jerk). Justify $P$ from the
+literature: EmoSign annotators named sign size, speed and repetition as cues
+\cite{chua2025emosign}, and hand motion improves signer-emotion recognition \cite{ejsl2026}.}
+
+\subsection{Factorized Non-Manual Encoder}
+Let $z_L = \mathrm{Enc}_L(NM)$ and $z_A = \mathrm{Enc}_A(NM, P)$. We train
+\begin{align}
+\mathcal{L} =\;& \lambda_1 \mathrm{CE}\!\left(h_L(z_L), y_{\text{mark}}\right)
+              + \lambda_2 \mathrm{CE}\!\left(h_A(z_A), y_{\text{emo}}\right) \nonumber\\
+             &+ \lambda_3 \mathrm{MSE}\!\left(h_{VA}(z_A), y_{VA}\right) \nonumber\\
+             &+ \lambda_4 \mathrm{CE}\!\left(h_A'(\mathrm{GRL}(z_L)), y_{\text{emo}}\right)
+              + \lambda_5 \mathrm{CE}\!\left(h_L'(\mathrm{GRL}(z_A)), y_{\text{mark}}\right)
+              \nonumber\\
+             &+ \lambda_6 \left\lVert z_L^{\top} z_A \right\rVert_F^2
+              + \lambda_7\, \mathrm{vCLUB}(z_L; z_A).
+\label{eq:loss}
+\end{align}
+\TODO{One sentence per term explaining why it exists. $\lambda_4,\lambda_5$ use gradient reversal
+\cite{ganin2015dann} so neither factor can predict the other's label; $\lambda_6$ penalises feature
+overlap; $\lambda_7$ minimises a contrastive log-ratio upper bound on mutual information
+\cite{cheng2020club}.}
+
+\subsection{Measuring Disentanglement}
+\TODO{Frozen cross-probes: predict emotion from $z_L$ and markers from $z_A$. Report
+cross-prediction AUC, where 0.5 denotes perfect separation. Define this before showing results.}
+
+\subsection{Emotion-Conditioned Generation}
+\TODO{Control tokens derived from $z_A$ injected into T5-small \cite{raffel2020t5}.
+\textbf{Disclose here} that the emotion-styled paraphrase corpus is LLM-generated and
+semantically filtered.}
+
+\subsection{Avatar Control}
+\TODO{Bone retargeting with joint clamping and quaternion continuity; 52 blendshapes mapped to
+VRM/ARKit expression targets; $z_A$ modulates blendshape gain, movement amplitude and timing,
+motivated by ASL affective prosody \cite{reilly1992affective}.}
+
+\subsection{Efficiency by Design}
+\TODO{State that the system is lightweight by design, not by post-hoc compression: keypoints rather
+than pixels, 12\,fps rather than 24, $\leq$2M-parameter recognition, T5-small, INT8 export.}
+
+%=======================================================================
+\section{Experimental Setup}
+\label{sec:setup}
+\TODO{Training on RTX 4060 16\,GB and free cloud; \textbf{inference measured on RTX 3050 4\,GB},
+contrasted with the 80\,GB A100 used for the published MLLM baselines \cite{chua2025emosign}.
+AdaFactor, constant lr $1\times10^{-3}$, 10-epoch warmup, grad-clip 1.0, label smoothing 0.1,
+effective batch 128, beam 5, 256-frame input / 128-token output caps. Seeds and repetitions.
+SacreBLEU \cite{post2018sacrebleu} default tokenization; BERTScore \cite{zhang2020bertscore};
+weighted accuracy and weighted F1. Restate the LOSO protocol. State that every reported number
+comes from a logged run.}
+
+%=======================================================================
+\section{Results}
+\label{sec:results}
+
+\subsection{Isolated Recognition}
+\begin{table}[t]
+\caption{Isolated recognition. Signer-independent splits. Latency measured on an RTX 3050.}
+\label{tab:recognition}
+\centering
+\small
+\begin{tabular}{@{}llrrrr@{}}
+\toprule
+Dataset & Model & Params & Top-1 & Top-5 & ms \\
+\midrule
+\multirow{3}{*}{WLASL-100}
+ & GRU              & \NUM & \NUM & \NUM & \NUM \\
+ & ST-GCN           & \NUM & \NUM & \NUM & \NUM \\
+ & Pose Transformer & \NUM & \NUM & \NUM & \NUM \\
+\midrule
+\multirow{3}{*}{ASL Citizen}
+ & GRU              & \NUM & \NUM & \NUM & \NUM \\
+ & ST-GCN           & \NUM & \NUM & \NUM & \NUM \\
+ & Pose Transformer & \NUM & \NUM & \NUM & \NUM \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Affect Recognition versus Frontier MLLMs}
+\begin{table}[t]
+\caption{EmoSign affect recognition. Baseline rows are quoted from \cite{chua2025emosign}
+(evaluated on an 80\,GB A100); our rows are mean\,$\pm$\,std over 4-fold
+leave-one-signer-out cross-validation.
+\TODO{Re-check every quoted baseline cell against the published Tables 3 and 4 of
+\cite{chua2025emosign} before submission.}}
+\label{tab:affect}
+\centering
+\small
+\begin{tabular}{@{}llrrr@{}}
+\toprule
+Modality & Model & Sent-7 wF1 & Emo wF1 & Params \\
+\midrule
+video & MiniGPT4-video   & 13.03 & 22.02 & 7B+ \\
+video & Qwen2.5-VL-7B    & \TODO{verify} & 18.53 & 7B \\
+video & AffectGPT        & ---   & 11.03 & 7B+ \\
+video & GPT-4o           & 26.35 & 20.76 & --- \\
+video & Hearing person   & 21.39 & ---   & --- \\
+video & \textbf{SEAM (ours)} & \NUM & \NUM & \NUM \\
+\midrule
+video+cap & GPT-4o       & ---   & 55.09 & --- \\
+video+cap & AffectGPT    & ---   & 47.77 & 7B+ \\
+video+cap & \textbf{SEAM (ours)} & \NUM & \NUM & \NUM \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Disentanglement}
+\begin{table}[t]
+\caption{Disentanglement ablation. Cross-prediction AUC: 0.5 denotes perfect separation.
+4-fold LOSO, mean\,$\pm$\,std.}
+\label{tab:disentangle}
+\centering
+\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Configuration & Cross-AUC $\downarrow$ & Emo wF1 $\uparrow$ & Marker F1 $\uparrow$ \\
+\midrule
+Single branch (entangled)      & \NUM & \NUM & \NUM \\
+Two branch, no separation loss & \NUM & \NUM & \NUM \\
+\ + GRL                        & \NUM & \NUM & \NUM \\
+\ + orthogonality              & \NUM & \NUM & \NUM \\
+\ + vCLUB \textbf{(full)}      & \NUM & \NUM & \NUM \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\TODO{Fig. 3 -- qualitative: wh-question / negation clips with neutral affect. Entangled baseline
+predicts anger/frustration; factorized model does not. This is the most persuasive figure.}
+\caption{Grammatical markers misread as affect by the entangled baseline.}
+\label{fig:qualitative}
+\end{figure}
+
+\subsection{Prosody and Pretraining Ablations}
+\begin{table}[t]
+\caption{Channel and pretraining ablations. 4-fold LOSO on EmoSign.}
+\label{tab:ablation}
+\centering
+\small
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Configuration & Sent-7 wAF & Emo wF1 \\
+\midrule
+Non-manual only, from scratch        & \NUM & \NUM \\
+\ + prosody channel                  & \NUM & \NUM \\
+\ + DFEW/MAFW pretraining            & \NUM & \NUM \\
+\ + both \textbf{(full)}             & \NUM & \NUM \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Emotion-Conditioned Generation}
+\begin{table}[t]
+\caption{Emotion-conditioned generation. Style accuracy from a held-out classifier; semantic
+preservation as BERTScore-F1 against the neutral reference; human preference is blinded pairwise.}
+\label{tab:generation}
+\centering
+\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Condition & Style acc. & BERTScore-F1 & Human pref. \\
+\midrule
+Neutral (reference) & ---  & 1.00 & --- \\
+Happy               & \NUM & \NUM & \NUM \\
+Sad                 & \NUM & \NUM & \NUM \\
+Angry               & \NUM & \NUM & \NUM \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Continuous Translation}
+\begin{table}[t]
+\caption{Gloss-free continuous translation on How2Sign. Baselines quoted from
+\cite{chen2026compactslt,uthus2023youtubeasl}.}
+\label{tab:slt}
+\centering
+\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+System & Params & fps & BLEU-4 \\
+\midrule
+T5-base \cite{uthus2023youtubeasl}       & 248M & 12--30 & 11.89 \\
+Compact SLT \cite{chen2026compactslt}    & 77M  & 24 & 10.06 \\
+Compact SLT \cite{chen2026compactslt}    & 77M  & 12 & 9.53 \\
+SEAM (ours)                              & \NUM & 24 & \NUM \\
+SEAM (ours)                              & \NUM & 12 & \NUM \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Efficiency}
+\begin{table}[t]
+\caption{End-to-end efficiency measured on an RTX 3050 (4\,GB). Peak VRAM is the maximum observed
+across the full pipeline.}
+\label{tab:efficiency}
+\centering
+\small
+\begin{tabular}{@{}llrrrr@{}}
+\toprule
+Config & Precision & fps & p50 (ms) & p95 (ms) & Peak VRAM (MB) \\
+\midrule
+Full        & FP32 & \NUM & \NUM & \NUM & \NUM \\
+Full        & INT8 & \NUM & \NUM & \NUM & \NUM \\
+12\,fps     & INT8 & \NUM & \NUM & \NUM & \NUM \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%=======================================================================
+\section{System and Demo}
+\label{sec:system}
+\TODO{FastAPI + WebSocket runtime, React Three Fiber + three-vrm viewer, measured latency HUD,
+avatar screenshots under four emotions, demo video link. Note the deliberate localhost-only,
+unauthenticated-by-default posture for webcam-derived biometric data.}
+
+%=======================================================================
+\section{Limitations and Ethics}
+\label{sec:ethics}
+\TODO{Do not soften this section. Cover: 200 clips / 4 signers and high variance even under LOSO;
+the annotation ceiling ($\bar\alpha=0.593$, surprise$-$ 0.119, disgust 0.166) bounding per-class
+reliability; whether $L$ supervision used ASLLRP annotations or the pseudo-label fallback;
+disclosure of the LLM-generated paraphrase corpus; domain shift from lab-recorded scripted
+utterances; the level of Deaf-community involvement in \emph{our} work, stated honestly; no
+clinical, legal or emergency-setting readiness claim; data stewardship (no video redistribution ---
+we release code, weights and labels only); and which INCLUDE categories were available if the
+cross-lingual ablation ran on a partial download.}
+
+%=======================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+\TODO{Restate the factorization insight and the two headline numbers. Name future work concretely:
+continuous emotion-aware translation, generative expressive motion, ISL/NSL extension, and larger
+Deaf-annotated affect corpora.}
+
+%=======================================================================
+\section*{Acknowledgments}
+\TODO{Deaf annotators and consultants, dataset providers, compute providers.}
+
+\bibliographystyle{IEEEtran}
+\bibliography{refs}
+
+\end{document}
