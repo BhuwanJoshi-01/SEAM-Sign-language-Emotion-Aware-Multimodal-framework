@@ -1,0 +1,2 @@
+[console_scripts]
+seam = seam.cli:main

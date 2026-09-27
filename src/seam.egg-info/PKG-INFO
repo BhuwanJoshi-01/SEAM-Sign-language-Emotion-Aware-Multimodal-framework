@@ -1,0 +1,37 @@
+Metadata-Version: 2.4
+Name: seam
+Version: 0.1.0
+Summary: SEAM - Sign-language Emotion-Aware Multimodal framework: factorized non-manual modeling for emotion-aware ASL translation and expressive avatar generation
+Requires-Python: <3.14,>=3.11
+Requires-Dist: mediapipe==0.10.14
+Requires-Dist: torch==2.13.0
+Requires-Dist: numpy==2.5.2
+Requires-Dist: opencv-contrib-python==5.0.0.93
+Requires-Dist: pandas==3.0.5
+Requires-Dist: pyarrow==25.0.1
+Requires-Dist: PyYAML==6.0.3
+Requires-Dist: fastapi==0.141.1
+Requires-Dist: uvicorn==0.52.3
+Requires-Dist: websockets==15.0.1
+Requires-Dist: onnx==1.22.0
+Requires-Dist: onnxruntime==1.29.0
+Requires-Dist: scikit-learn==1.9.0
+Requires-Dist: scipy==1.18.0
+Requires-Dist: matplotlib==3.11.1
+Requires-Dist: pillow==12.3.0
+Requires-Dist: protobuf==4.25.9
+Requires-Dist: absl-py==2.5.0
+Provides-Extra: gpu
+Requires-Dist: onnxruntime-gpu==1.29.0; extra == "gpu"
+Provides-Extra: text
+Requires-Dist: transformers==5.14.1; extra == "text"
+Requires-Dist: tokenizers==0.23.0; extra == "text"
+Requires-Dist: sacrebleu==2.6.0; extra == "text"
+Requires-Dist: bert-score==0.3.13; extra == "text"
+Provides-Extra: dev
+Requires-Dist: pytest==9.1.1; extra == "dev"
+Requires-Dist: pytest-asyncio==1.3.0; extra == "dev"
+Requires-Dist: httpx==0.28.1; extra == "dev"
+Requires-Dist: ruff==0.16.3; extra == "dev"
+Requires-Dist: mypy==2.3.1; extra == "dev"
+Requires-Dist: pre-commit==4.6.2; extra == "dev"

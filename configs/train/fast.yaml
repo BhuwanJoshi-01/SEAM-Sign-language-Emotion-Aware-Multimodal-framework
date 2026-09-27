@@ -1,0 +1,6 @@
+# Smoke/CI schedule. Short enough to run in a unit-test fixture.
+epochs: 12
+patience: 6
+seeds: [0]
+amp: false
+num_workers: 0

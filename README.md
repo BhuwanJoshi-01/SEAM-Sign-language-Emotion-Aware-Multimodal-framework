@@ -16,8 +16,9 @@ then uses the recovered affect to condition both the translated text and an expr
 | File | What it is | Read it when |
 |---|---|---|
 | **[project_breakdown.md](project_breakdown.md)** | The technical bible: motivation, literature synthesis, datasets, architecture, losses, evaluation protocol, risks, ethics, glossary | You want to understand *why* |
-| **[plan.md](plan.md)** | The executable checklist: 5 phases, 16 tasks, tests, definitions of done, KPI dashboard, critical path | You want to know *what to do next* |
-| **[team.md](team.md)** | Squad roles (R1–R4), 10-week sprint calendar, RACI, review gates, escalation paths | You want to know *who owns what* |
+| **[plan.md](plan.md)** | The executable plan: 10 milestones with evidence gates, kill switches, KPI dashboard, revised operating rules | You want to know *what to do next* |
+| **[implimentation.md](implimentation.md)** | Task-level expansion of `plan.md`: repo map, command map, per-milestone file and test breakdown | You are implementing |
+| ~~[team.md](team.md)~~ | Squad roles (R1–R4), 10-week sprint calendar, RACI | **Superseded** for planning by `plan.md`; retained for role history and review-gate language |
 | **[paper/PAPER_TEMPLATE.md](paper/PAPER_TEMPLATE.md)** | Section-by-section paper scaffold with word budgets and evidence requirements | You are writing |
 | **[paper/main.tex](paper/main.tex)** | IEEEtran skeleton with every result table pre-stubbed | You are writing |
 | **[paper/WRITING_GUIDE.md](paper/WRITING_GUIDE.md)** | House style, terminology rules, honesty patterns | You are writing |
@@ -26,34 +27,54 @@ then uses the recovered affect to condition both the translated text and an expr
 | **[paper/refs.bib](paper/refs.bib)** | Bibliography seeded with the full literature survey | You are citing |
 | [signemotionaware.md](signemotionaware.md) | The original concept note, kept for provenance | Historical interest |
 
-## The four numbers that are the paper
+## The headline numbers
 
-| KPI | Reference | Target |
+| KPI | Reference | Target | Milestone |
+|---|---|---|---|
+| Non-signer FER bias from grammatical markers | 0 = no bias | ≠ 0, 2+ models, CIs | M1 |
+| Disentanglement cross-prediction AUC | 0.5 = perfect separation | **≤0.60**, no affect loss | M4 |
+| EmoSign emotion macro-F1, video-only, LOSO | **21.09** eJSL EANwH · 20.76 GPT-4o | **>21.09** | M4 |
+| Peak inference VRAM / p95 latency on RTX 3050 | 4096 MB hard limit | **<2500 MB / <400 ms** | M2, M7 |
+
+Every published baseline ran on an 80 GB A100 or a 300M-parameter model. We target 4 GB, and the
+efficiency claim is currently unshared.
+
+## Schedule
+
+**Milestone-driven, no dates.** Ten milestones (M0–M9) ordered by dependency × evidence-value ÷
+cost, each closing on an *evidence gate* rather than a deadline. Each declares a kill switch and
+what survives if everything after it is cut. See `plan.md`.
+
+## Status
+
+| Milestone | Gate | State |
 |---|---|---|
-| EmoSign emotion wF1, video-only, leave-one-signer-out | GPT-4o: **20.76** | **≥35** |
-| Disentanglement cross-prediction AUC | 0.5 = perfect separation | **≤0.60** |
-| End-to-end p95 latency on RTX 3050 | — | **<400 ms** |
-| Peak inference VRAM | 4096 MB hard limit | **<2500 MB** |
+| **M0** data spine | readiness table · 200/200 clips · face gate · tests green | **OPEN** |
+| M1 confound audit | measured FER bias, 2+ models, CIs | next |
+| M2 efficiency | 3050 p95 + peak VRAM, CI-enforced | — |
+| M3 `L` labels | marker labels with provenance + cue correlation | — |
+| M4 factorized encoder ★ | cross-pred AUC ≤0.60, no affect loss, positive control | — |
+| M5 recognition + translation | How2Sign BLEU-4 at ≤80M params | — |
+| M6 conditioned generation | style acc ≥80% @ BERTScore ≥0.90 | — |
+| M7 avatar + live demo | preference ≥60%, browser smoke test | — |
+| M8 cross-lingual | zero-shot Top-1 vs chance | — |
+| M9 paper + release | `repro_all.sh` green, submission filed | — |
 
-Baselines were evaluated on an 80 GB A100. We target 4 GB.
+**M0 closed 2026-09-26.** The EmoSign affect benchmark is reachable: its `video_name` trailing
+numeric token is the ASLLRP utterance ID, measured at **200/200**, and the face-visibility gate
+passed **24/24** sampled clips (face detected in 94–100% of frames, median 30 of 52 blendshapes
+carrying real temporal variance). See `paper/EXPERIMENT_LOG.md`.
 
-## Timeline
+## The remaining data risk
 
-10 weeks, Mon 2026-08-10 → Sun 2026-10-18. Five phases: Foundations → Recognition → Affect →
-Contribution → Ship. Phase gates every second Friday. Full detail in `plan.md`.
+The 200 clips resolve through an **ungated re-upload of a Boston-University-controlled corpus**
+(ASLLRP). Decision on record: use for research now, formalize before submission. The Ethics
+section owes the reader an answer on provenance; owner is the reviewer. A parallel BU access
+request runs as the clean fallback for the linguistic non-manual annotations, which the mirror
+does **not** contain.
 
-## The single most urgent action
-
-**Submit the ASLLRP data-access request on day 1.** ASLLRP supplies both the source video and the
-*linguistic non-manual annotations* for the same 200 utterances that EmoSign labels with affect —
-the only place in existence where both label types coexist. It gates the core contribution.
-
-## Known data caveat
-
-`/home/bhuwan/Videos/data/` is the **INCLUDE** dataset (Indian Sign Language, 4,287 videos, 263
-signs), **not WLASL**, and 12 of its archives are truncated `.part` downloads — including
-`Train_Test_Split`. It is now scoped as an optional cross-lingual ablation. See
-`project_breakdown.md` §5.2.
+WLASL is local (3,863 clips / 668 glosses / 7.4 GB) but needs a repair pass: a 300-file sample
+found 2 undecodable, truncated `.part` containers. M1 repairs before extracting.
 
 ## Ethics summary
 

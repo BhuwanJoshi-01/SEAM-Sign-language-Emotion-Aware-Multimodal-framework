@@ -1,0 +1,44 @@
+# Derived data and model weights are reproducible from the fetchers; never commit them.
+artifacts/
+data/
+*.npz
+*.npy
+*.pt
+*.pth
+*.onnx
+*.parquet
+*.mp4
+*.jpg
+*.jpeg
+*.png
+!paper/figures/*.png
+
+# Environments
+.venv/
+venv/
+.env
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# LaTeX
+paper/main.aux
+paper/main.bbl
+paper/main.blg
+paper/main.fdb_latexmk
+paper/main.fls
+paper/main.log
+paper/main.out
+paper/main.synctex.gz
+paper/main.pdf
+
+# W&B
+wandb/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp

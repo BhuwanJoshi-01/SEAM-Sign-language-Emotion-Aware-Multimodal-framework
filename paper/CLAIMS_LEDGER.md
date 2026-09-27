@@ -13,25 +13,27 @@ must be rewritten in the paper to match what the evidence actually supports.
 
 ## Headline claims
 
-| ID | Claim | Evidence required | Task | Run ID | Status |
+| ID | Claim | Evidence required | Milestone | Run ID | Status |
 |---|---|---|---|---|---|
-| **C1** | Grammatical and affective non-manual signals can be explicitly factorized, and separation is measurable | Cross-prediction AUC drops from entangled baseline toward 0.5; per-loss-term ablation | T10 | — | hypothesis |
+| **C1** | Off-the-shelf non-signer facial-emotion models systematically misread grammatical non-manual markers in sign language as negative affect | Marker-bearing vs matched marker-free segments, >=2 pretrained FER models, >=500 clips, CIs + effect sizes + marker->emotion confusion matrix | M1 | — | hypothesis |
+| **C1b** | Grammatical and affective non-manual signals can be explicitly factorized, and separation is measurable | Cross-prediction AUC drops from entangled baseline toward 0.5; per-loss-term ablation | M4 | — | hypothesis |
+| **C1c** | The disentanglement metric detects entanglement when entanglement exists (positive control) | Signer-embedding probe AUC >= 0.80 on the same features; a metric that reads 0.5 on everything is not evidence | M4 | — | hypothesis |
 | **C2** | Factorization improves affect recognition rather than trading against it | Affect wF1 with factorization ≥ entangled baseline under LOSO | T10 | — | hypothesis |
 | **C3** | A compact specialist model beats frontier MLLMs on EmoSign from video alone | wF1 > 20.76 (GPT-4o), > 18.53 (Qwen2.5-VL), > 11.03 (AffectGPT), > 22.02 (MiniGPT4) under 4-fold LOSO | T8, T9 | — | hypothesis |
 | **C4** | The full emotion-aware pipeline runs on a 4 GB consumer GPU at interactive latency | Measured on RTX 3050: peak VRAM < 2500 MB, p95 < 400 ms, ≥20 FPS | T13 | — | hypothesis |
 
 ## Supporting claims
 
-| ID | Claim | Evidence required | Task | Run ID | Status |
+| ID | Claim | Evidence required | Milestone | Run ID | Status |
 |---|---|---|---|---|---|
-| C5 | Manual prosody (speed, amplitude, repetition, pause, jerk) carries affective information | Ablation: ±prosody channel changes affect wF1 by a margin exceeding LOSO std | T7, T8 | — | hypothesis |
-| C6 | Dynamic-FER pretraining transfers to sign-video affect | Ablation: pretrained > from-scratch; linear probe > chance | T9 | — | hypothesis |
-| C7 | A ≤2M-parameter keypoint model is competitive for isolated ASL recognition | Within 3 pts of published ASL Citizen pose baselines; WLASL-100 Top-1 ≥80% | T5 | — | hypothesis |
-| C8 | 12 fps input preserves translation quality while cutting attention cost ~75% | BLEU-4 at 12 vs 24 fps; measured FLOPs | T12 | — | hypothesis |
-| C9 | Emotion conditioning changes style while preserving meaning | Style accuracy ≥80% at BERTScore-F1 ≥0.90 | T11 | — | hypothesis |
-| C10 | Emotion-modulated avatar output is preferred over neutral | Blinded pairwise human preference ≥60% with reported inter-rater agreement | T15 | — | hypothesis |
+| C5 | Manual prosody (speed, amplitude, repetition, pause, jerk) carries affective information | Ablation: ±prosody channel changes affect wF1 by a margin exceeding LOSO std | M3, M4 | — | hypothesis |
+| C6 | Dynamic-FER pretraining transfers to sign-video affect | Ablation: pretrained > from-scratch; linear probe > chance | M4 | — | hypothesis |
+| C7 | A ≤2M-parameter keypoint model is competitive for isolated ASL recognition | Within 3 pts of published ASL Citizen pose baselines; WLASL-100 Top-1 ≥80% | M5 | — | hypothesis |
+| C8 | 12 fps input preserves translation quality while cutting attention cost ~75% | BLEU-4 at 12 vs 24 fps; measured FLOPs | M5 | — | hypothesis |
+| C9 | Emotion conditioning changes style while preserving meaning | Style accuracy ≥80% at BERTScore-F1 ≥0.90 | M6 | — | hypothesis |
+| C10 | Emotion-modulated avatar output is preferred over neutral | Blinded pairwise human preference ≥60% with reported inter-rater agreement | M7 | — | hypothesis |
 | C11 | The entangled baseline reproduces the documented hearing-non-signer error (grammatical markers read as negative affect) | Qualitative set of neutral-affect wh-question / negation clips, with per-clip predictions | T10 | — | hypothesis |
-| C12 | The system generalizes partially across sign languages | INCLUDE zero-shot and few-shot Top-1 vs chance | T16 | — | hypothesis |
+| C12 | The system generalizes partially across sign languages | INCLUDE zero-shot and few-shot Top-1 vs chance | M8, M9 | — | hypothesis |
 
 ## Claims we explicitly do NOT make
 

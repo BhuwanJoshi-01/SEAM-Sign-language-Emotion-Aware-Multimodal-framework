@@ -1,0 +1,8 @@
+epochs: 120
+schedule: cosine
+warmup_epochs: 5
+min_lr_ratio: 0.01
+patience: 25
+monitor: top1
+num_workers: 0
+seeds: [0, 1, 2]

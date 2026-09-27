@@ -1,0 +1,107 @@
+# Base configuration. Every path and knob the pipeline reads lives here or in a
+# family config beside it; nothing in src/ reads an environment variable for
+# anything except the three root overrides in seam/paths.py.
+#
+# Rationale for the non-obvious values is inline. Where a number came from a
+# measurement, the measurement is named.
+
+project:
+  name: seam
+  seed: 42
+
+paths:
+  # The repository sits on a 36 GB volume. Bulk data goes to the 110 GB volume;
+  # see seam/paths.py for the resolution order.
+  data_root: /mnt/DevProd/seam_data
+  artifacts_root: artifacts
+  mediapipe_models: /mnt/Volume2/Sign_Language_Recognition/artifacts/mp_tasks
+
+data:
+  emosign:
+    n_clips: 200
+    # LOSO folds are keyed on signer, not on the raw name: Rachel appears under
+    # Rachel_2011 and Rachel_2012 and must be one fold.
+    n_signers: 4
+    signer_counts:
+      Ben: 7
+      Cory: 87
+      Jonathan: 54
+      Rachel: 52
+  wlasl:
+    # Measured on disk 2026-09-26. The raw tree contains truncated .part
+    # downloads that fail to decode; see plan.md section 1.
+    root: /home/bhuwan/Videos/wlasl/videos
+    n_videos: 3863
+    n_gloss_dirs: 668
+
+perception:
+  # MediaPipe Tasks, not the legacy solutions API: only Tasks emits the 52
+  # blendshape coefficients, which are the entire non-manual channel.
+  backend: mediapipe_tasks
+  # The three graphs are independent and run concurrently on threads. Measured
+  # 2026-09-26: 109.7 -> 67.3 ms/frame, a 1.63x speedup.
+  parallel_graphs: true
+  delegate: CPU
+  # 478 points, not 468: the Tasks face mesh includes iris.
+  face_points: 478
+  blendshapes: 52
+  min_detection_confidence: 0.3
+  min_presence_confidence: 0.3
+  min_tracking_confidence: 0.3
+  landmarks_dtype: float16
+  blendshapes_dtype: float32
+
+preprocess:
+  # 12 fps. Halving the rate quarters the O(n^2) self-attention cost; the
+  # published compact-SLT recipe measures BLEU-4 10.06 @24fps vs 9.53 @12fps.
+  target_fps: 12
+  window_T: 64
+  # Cap for the translation path.
+  max_frames_translation: 256
+  # One Euro filter rather than a moving average: lower lag on a live stream.
+  smoother: one_euro
+  one_euro_min_cutoff: 1.0
+  one_euro_beta: 0.007
+  one_euro_d_cutoff: 1.0
+  # Absent data stays absent. Filling a missing hand would make "not visible"
+  # indistinguishable from "still", which the prosody channel depends on.
+  missing_policy: zero_and_mask
+
+train:
+  batch_size: 32
+  epochs: 100
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  grad_clip: 1.0
+  label_smoothing: 0.1
+  amp: true
+  # This machine has ~3 GB of free RAM. Do not raise without re-measuring.
+  num_workers: 0
+  seeds: [0, 1, 2]
+  monitor: top1
+
+deploy:
+  # The hard constraint. nvidia-smi reports 4096 MiB for the board, but torch
+  # reports 3770 MB usable: ~326 MB is reserved by the display/EGL path before
+  # any process starts. Budget against the usable figure, not the board figure,
+  # or the first VRAM assertion fails for a reason that has nothing to do with
+  # the model. Measured 2026-09-26.
+  device: cuda:0
+  gpu_name: NVIDIA GeForce RTX 3050 Laptop GPU
+  vram_board_mb: 4096
+  vram_usable_mb: 3770
+  # 2500 MB is 66% of usable. The headroom is deliberate: a desktop session
+  # shares the card, and the ceiling has to hold while a browser is compositing.
+  vram_ceiling_mb: 2500
+  p95_latency_budget_ms: 400
+  # NOT YET MET: measured 14.9 FPS with the 3 graphs concurrent, under external
+  # load. Verdict belongs to M2's dedicated benchmark on an idle machine; if it
+  # still misses, the target is relaxed and the miss published.
+  min_capture_fps: 20
+  capture_fps_measured: 14.9
+  onnxruntime: cpu          # M2 installs onnxruntime-gpu for the CUDA EP
+  # The server streams webcam-derived biometrics, so it binds to loopback with
+  # no authentication. Asserted in tests; changing it needs auth + TLS.
+  host: 127.0.0.1
+  port: 8000
+  auth_required: false

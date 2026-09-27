@@ -50,6 +50,7 @@ benchmark, and runs end-to-end in under 2.5 GB of VRAM.*
 ## 2. Motivation
 
 ### 2.1 The communication gap
+
 Sign language is the primary language of a large Deaf and hard-of-hearing population. Automatic
 translation systems that produce flat, affect-free text create a second-order barrier: the message
 survives, the person does not. The consequences are documented and concrete — misreading a
@@ -57,6 +58,7 @@ signer's emotional state has been reported as a source of bias in legal settings
 departments.
 
 ### 2.2 Why non-manual signals cannot be ignored
+
 Sign languages are composed of five parameters: handshape, place of articulation, movement,
 orientation, and **non-manual behaviours**. The fifth is not decoration. Some published facts we
 build directly on:
@@ -74,7 +76,9 @@ is, in effect, a hearing non-signer: it will read a wh-question furrow as anger.
 requires modelling the two functions separately. That is SEAM's reason to exist.
 
 ### 2.3 Why now
+
 Two things changed in 2025–2026 that make this project feasible and timely:
+
 1. **A benchmark exists.** EmoSign (2025) is the first sign-video dataset with sentiment and
    emotion labels, and its baselines are weak enough that a small specialist model can win.
 2. **Lightweight SLT is a solved recipe.** A 77M-parameter pose→T5-small pipeline was shown to
@@ -85,15 +89,15 @@ Two things changed in 2025–2026 that make this project feasible and timely:
 
 ## 3. Research Objectives and Hypotheses
 
-| ID | Objective | Testable hypothesis |
-|---|---|---|
-| O1 | Recognize isolated ASL signs from keypoints under a strict parameter budget | A ≤2M-param ST-GCN on 85 keypoints comes within 3 points of published pose baselines on ASL Citizen |
-| O2 | Translate glosses / continuous pose sequences to fluent English at small scale | T5-small with a linear pose projection reaches BLEU-4 ≥ 8 on How2Sign |
-| O3 | Recognize signer affect from non-manual + manual-prosody cues | A specialist model exceeds GPT-4o video-only wF1 (20.76) by ≥ 14 points on EmoSign under LOSO CV |
-| O4 | **Separate grammatical from affective non-manual signals** | Adding GRL + orthogonality + MI-minimization drives cross-prediction AUC from >0.75 toward ≤0.60 while *improving* affect wF1 |
-| O5 | Preserve emotion through generation | Emotion-conditioned decoding achieves ≥80% style accuracy at ≥0.90 BERTScore semantic preservation |
-| O6 | Render emotion in an expressive avatar | Human raters prefer emotion-modulated avatar output over neutral ≥60% of the time |
-| O7 | Deploy on 4 GB VRAM at interactive latency | End-to-end p95 < 400 ms, ≥20 FPS capture, peak VRAM < 2500 MB on RTX 3050 |
+| ID | Objective                                                                      | Testable hypothesis                                                                                                             |
+| -- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| O1 | Recognize isolated ASL signs from keypoints under a strict parameter budget    | A ≤2M-param ST-GCN on 85 keypoints comes within 3 points of published pose baselines on ASL Citizen                            |
+| O2 | Translate glosses / continuous pose sequences to fluent English at small scale | T5-small with a linear pose projection reaches BLEU-4 ≥ 8 on How2Sign                                                          |
+| O3 | Recognize signer affect from non-manual + manual-prosody cues                  | A specialist model exceeds GPT-4o video-only wF1 (20.76) by ≥ 14 points on EmoSign under LOSO CV                               |
+| O4 | **Separate grammatical from affective non-manual signals**               | Adding GRL + orthogonality + MI-minimization drives cross-prediction AUC from >0.75 toward ≤0.60 while*improving* affect wF1 |
+| O5 | Preserve emotion through generation                                            | Emotion-conditioned decoding achieves ≥80% style accuracy at ≥0.90 BERTScore semantic preservation                            |
+| O6 | Render emotion in an expressive avatar                                         | Human raters prefer emotion-modulated avatar output over neutral ≥60% of the time                                              |
+| O7 | Deploy on 4 GB VRAM at interactive latency                                     | End-to-end p95 < 400 ms, ≥20 FPS capture, peak VRAM < 2500 MB on RTX 3050                                                      |
 
 O4 is the scientific core. O1, O2, O7 are engineering enablers. O5, O6 are the application payoff.
 
@@ -102,6 +106,7 @@ O4 is the scientific core. O1, O2, O7 are engineering enablers. O5, O6 are the a
 ## 4. Related Work — synthesis and positioning
 
 ### 4.1 Isolated sign language recognition (ISLR)
+
 - **Skeleton/keypoint methods.** SAM-SLR (SL-GCN + multi-modal fusion) won the 2021 ChaLearn
   signer-independent challenge with 98.42% (RGB) / 98.53% (RGB-D) on AUTSL. ST-GCN is the
   structural ancestor: the body is naturally a graph.
@@ -120,6 +125,7 @@ O4 is the scientific core. O1, O2, O7 are engineering enablers. O5, O6 are the a
 SPOTER) as a solid, honest backbone and spend our novelty budget on the non-manual factorization.
 
 ### 4.2 Sign language translation (SLT)
+
 - **Gloss-based.** Neural Sign Language Translation (Camgoz et al., CVPR 2018) with
   RWTH-PHOENIX-Weather 2014T defined the task.
 - **Gloss-free.** GFSLT-VLP, GloFE, Sign2GPT and LLaVA-SLT remove gloss supervision by borrowing
@@ -135,7 +141,9 @@ SPOTER) as a solid, honest backbone and spend our novelty budget on the non-manu
 conditioning — which nobody in this line of work does.
 
 ### 4.3 Emotion in sign language
+
 This is a nearly empty field, which is exactly why we are here.
+
 - **EmoSign (2025)** — first sign-emotion dataset. 200 ASL utterances from ASLLRP, ~16 min total,
   4 signers, annotated by 3 Deaf native signers with professional interpreting experience:
   7-point sentiment, 10 emotion intensities (joy, excited, surprise+, surprise−, worry, sadness,
@@ -155,28 +163,48 @@ This is a nearly empty field, which is exactly why we are here.
 it enters our paper** — the Qwen2.5-VL sentiment-7 row in particular was ambiguous in transcription
 and is marked `verify` in `paper/main.tex`.
 
-| Model | Modality | Sentiment-3 wAcc | Sentiment-3 wF1 | Sentiment-7 wAcc | Sentiment-7 wF1 | Emotion wAcc | Emotion wF1 |
-|---|---|---|---|---|---|---|---|
-| MiniGPT4-video | video | 34.68 | 40.00 | 14.46 | 13.03 | 13.01 | 22.02 |
-| Qwen2.5-VL-7B | video | 27.34 | 16.47 | 10.26 | *verify* | 14.39 | 18.53 |
-| AffectGPT | video | — | — | — | — | 12.62 | 11.03 |
-| GPT-4o | video | 52.13 | 76.72 | 22.89 | 26.35 | 11.50 | 20.76 |
-| Hearing non-signer | video | 55.64 | 57.64 | 25.48 | 21.39 | — | — |
-| MiniGPT4-video | video+caption | — | — | — | — | 23.56 | 35.89 |
-| Qwen2.5-VL-7B | video+caption | — | — | — | — | 34.96 | 44.67 |
-| AffectGPT | video+caption | — | — | — | — | 30.17 | 47.77 |
-| GPT-4o | video+caption | — | — | — | — | 35.97 | 55.09 |
+| Model              | Modality      | Sentiment-3 wAcc | Sentiment-3 wF1 | Sentiment-7 wAcc | Sentiment-7 wF1 | Emotion wAcc | Emotion wF1 |
+| ------------------ | ------------- | ---------------- | --------------- | ---------------- | --------------- | ------------ | ----------- |
+| MiniGPT4-video     | video         | 34.68            | 40.00           | 14.46            | 13.03           | 13.01        | 22.02       |
+| Qwen2.5-VL-7B      | video         | 27.34            | 16.47           | 10.26            | *verify*      | 14.39        | 18.53       |
+| AffectGPT          | video         | —               | —              | —               | —              | 12.62        | 11.03       |
+| GPT-4o             | video         | 52.13            | 76.72           | 22.89            | 26.35           | 11.50        | 20.76       |
+| Hearing non-signer | video         | 55.64            | 57.64           | 25.48            | 21.39           | —           | —          |
+| MiniGPT4-video     | video+caption | —               | —              | —               | —              | 23.56        | 35.89       |
+| Qwen2.5-VL-7B      | video+caption | —               | —              | —               | —              | 34.96        | 44.67       |
+| AffectGPT          | video+caption | —               | —              | —               | —              | 30.17        | 47.77       |
+| GPT-4o             | video+caption | —               | —              | —               | —              | 35.97        | 55.09       |
 
 Qualitative failure modes reported (and which we must not reproduce): AffectGPT collapses to
 "neutral"; GPT-4o and Qwen skew positive; models construct post-hoc explanations consistent with
 the *text* sentiment rather than genuinely reading the video. All inference was run on an 80 GB
 A100 — our entire system targets 4 GB, which sharpens the efficiency comparison.
 
-**Position:** we are the first to (a) treat grammatical vs affective non-manual function as an
-explicit factorization objective on this benchmark, and (b) propagate the recovered affect into
-both text generation and avatar animation.
+- **eJSL / "Emotion Recognition in Signers"** (Funakoshi & Zhu, arXiv 2512.15376v2, Jul 2026) — the
+  closest prior work, and it postdates the original framing of this project. JSL dataset eJSL
+  (2 signers × 78 utterances × 7 emotions = 1,092 clips) plus weak labels derived from BOBSL
+  subtitles. Three findings we reuse: subtitle-derived text emotion mitigates data scarcity;
+  **temporal segment selection matters a lot** (eJSL macro-F1 15.11 full-clip → 23.17 on the
+  post-signing 2 s segment); **hand motion helps** (EANwH 24.63 full-clip). On EmoSign's
+  single-expression set it reports macro-F1 **21.09** vs GPT-4o **11.15** and Qwen2.5 **11.17**.
+  Its own conclusion states that its models *"do not understand signed linguistic content in
+  utterances… integration with sign language understanding also must be explored."*
+- **Silva et al. 2020** (ECCV workshops) — BSL corpus annotated with facial Action Units to encode
+  **Grammatical Facial Expressions** separately from **Affective Facial Expressions**. This is
+  prior work on exactly our factorization problem, and it is the paper most likely to be raised by
+  a reviewer. It is annotation-driven rather than representation-driven: it establishes the
+  GFE/AFE distinction in the data, not a learned separation objective with a measured
+  cross-prediction metric.
+
+**Position, restated against both.** eJSL/BOBSL occupies the *data-scarcity* axis: more weak
+labels, better segments, more hand features. Silva et al. occupy the *annotation* axis. Neither
+factorizes the non-manual representation or measures the separation. Our claim is narrower and
+sharper: **an explicit factorization objective with a measured cross-prediction metric, plus a
+confound audit that quantifies the cost of not doing it** — and the eJSL paper's stated future
+work is the space we occupy. Its 21.09 is also the number to beat, not GPT-4o's 20.76.
 
 ### 4.4 Sign language production and avatars
+
 SLP typically goes text → gloss → pose → render. SignLLM tokenizes sign video into language-like
 tokens; SignAvatar uses a transformer CVAE for word-level sign motion reconstruction/generation.
 On the engineering side, MediaPipe `FaceLandmarker` emits **52 ARKit-compatible blendshape
@@ -188,6 +216,7 @@ coefficients** that map near-1:1 onto VRM/ARKit avatar expressions, and communit
 explicitly future work — it cannot be de-risked inside 10 weeks.
 
 ### 4.5 Techniques we borrow for the factorization
+
 - **Gradient reversal / DANN** (Ganin & Lempitsky, 2015) — adversarially remove information about
   one factor from the other branch's features.
 - **CLUB / vCLUB** (Cheng et al., ICML 2020) — a contrastive log-ratio *upper bound* on mutual
@@ -202,31 +231,39 @@ explicitly future work — it cannot be de-risked inside 10 weeks.
 
 ### 5.1 Primary datasets
 
-| Dataset | Language | Content | Scale | Role in SEAM | Access |
-|---|---|---|---|---|---|
-| **ASL Citizen** | ASL | Isolated signs, crowdsourced, everyday environments | 83,399 videos / 2,731 signs / 52 signers | **Primary ISLR training set** | Microsoft Download Center, first-party, IRB-consented; no redistribution |
-| **EmoSign** | ASL | Sentiment + 10 emotions + cue text on ASLLRP utterances | 200 utterances / 4 signers / ~16 min | **Primary affect benchmark** | HuggingFace `catfang/emosign` (labels + IDs only) |
-| **ASLLRP** | ASL | Glosses, English text, **linguistic non-manual annotations** | 2,651 utterances / 19 signers | **Source video + `L` supervision** | Boston University data-access interface — request required |
-| **How2Sign** | ASL | Continuous ASL, multiview, **keypoints published separately** | ~80 h / ~35k clips | **Phase B continuous SLT** | Public; download keypoints only, not video |
-| **WLASL-100 / 300** | ASL | Isolated signs (YouTube-sourced) | subset of ~12k videos / 2k glosses | Literature comparability only | Public; expect link rot |
-| **DFEW** | — | Dynamic FER in the wild (movies) | ~16,000 clips, 7 classes | Non-manual encoder pretraining | License request |
-| **MAFW** | — | Multi-modal compound affective, in the wild | 10,045 clips | Non-manual encoder pretraining | License request |
-| **INCLUDE** | ISL | Isolated Indian SL, 15 word categories | 4,287 videos / 263 signs / 0.27M frames | **Cross-lingual generalization ablation** | Already local (partially) |
+| Dataset                   | Language | Content                                                            | Scale                                    | Role in SEAM                                    | Access                                                                   |
+| ------------------------- | -------- | ------------------------------------------------------------------ | ---------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------ |
+| **ASL Citizen**     | ASL      | Isolated signs, crowdsourced, everyday environments                | 83,399 videos / 2,731 signs / 52 signers | ISLR training set                         | Microsoft Download Center returns **403** here. Sidestepped: `SorensenAI/asl-citizen-poses` publishes 81 GB of pre-extracted MediaPipe `.pose` **ungated** (1000 files/batch). Manual channel only — **no blendshapes** |
+| **EmoSign**         | ASL      | Sentiment + 10 emotions + cue text on ASLLRP utterances            | 200 utterances / 4 signers / ~16 min     | **Primary affect benchmark**              | HuggingFace `catfang/emosign`, **ungated** (labels, 43 KB). Video resolved via the ASLLRP mirror: the trailing numeric token of `video_name` **is** the ASLLRP utterance ID — **200/200 join**, measured |
+| **ASLLRP**          | ASL      | Glosses, English text,**linguistic non-manual annotations**  | 2,651 utterances / 19 signers            | **Source video + `L` supervision**      | Boston University data-access interface — request required. A mirror carries the video, the 17,522 gloss tokens and the utterance map, but **not** the non-manual XML and **not** the English |
+| **How2Sign**        | ASL      | Continuous ASL, multiview,**keypoints published separately** | ~80 h / ~35k clips                       | **Phase B continuous SLT**                | Public; download keypoints only, not video                               |
+| **WLASL-100 / 300** | ASL      | Isolated signs (YouTube-sourced)                                   | **3,863 clips / 668 glosses / 7.4 GB local** | M1 confound-audit substrate; M5 recognition | Local at `/home/bhuwan/Videos/wlasl/videos`. **Needs a repair pass**: a 300-file sample found 2 undecodable, truncated `.part` containers with no `moov` atom |
+| **DFEW**            | —       | Dynamic FER in the wild (movies)                                   | ~16,000 clips, 7 classes                 | Non-manual encoder pretraining                  | License request                                                          |
+| **MAFW**            | —       | Multi-modal compound affective, in the wild                        | 10,045 clips                             | Non-manual encoder pretraining                  | License request                                                          |
+| **INCLUDE**         | ISL      | Isolated Indian SL, 15 word categories                             | 4,287 videos / 263 signs / 0.27M frames  | **Cross-lingual generalization ablation** | Already local (partially)                                                |
 
-### 5.2 Local data status — verified 2026-08-07
-Path `/home/bhuwan/Videos/data/` contains **INCLUDE**, not WLASL. Category zips present:
-Adjectives (8 parts), Animals (2), Clothes (2), Colours (2), Days_and_Time (3), Electronics (2),
-Greetings (2), Home (4), Jobs (2), Means_of_Transportation (2), People (5), Places (4),
-Pronouns (2), Seasons (1), Society (3), plus `Train_Test_Split`.
+### 5.2 Local data status — re-verified 2026-09-26
 
-**12 archives are truncated `.part` downloads** and must be re-fetched before use:
-`Electronics_1of2`, `Home_2of4`, `Home_3of4`, `Jobs_1of2`, `Colours_2of2`, `People_1of5`,
-`People_2of5`, `People_5of5`, `Places_2of4`, `Greetings_2of2`, `Means_of_Transportation_2of2`,
-and critically **`Train_Test_Split`** — without which the official INCLUDE split cannot be
-reproduced. There is an official baseline repo (`AI4Bharat/INCLUDE`) with pretrained models and
-an INCLUDE-50 subset for comparison.
+The v1 audit is **void**. The path it described, `/home/bhuwan/Videos/data/`, no longer exists.
+What is actually on this machine:
+
+| Path | What it is | Size | State |
+|---|---|---|---|
+| `/home/bhuwan/Videos/wlasl/videos` | **WLASL** — 3,863 mp4 across 668 gloss dirs | 7.4 GB | **Needs repair.** A 300-file sample found 2 undecodable: untrimmed `.part` downloads whose mp4 containers have no `moov` atom. Same failure the prior ISLR system measured and fixed with an ffmpeg re-cut to the annotated frame range. |
+| `/home/bhuwan/Videos/Sign_Language` | Indian Sign Language: Olenepal, FULL_NSL_DATA, Rabin/Bidhayeka annotations | 8.6 GB | Present. Provenance and terms **not established**; M8 blocked until they are. Integrity not yet re-audited. |
+| `/mnt/DevProd` | 110 GB free | — | Chosen as the SEAM data root |
+| `/mnt/Volume2` | 36 GB free | — | Repository only |
+
+**Two corrections to the v1 assumptions.** v1 recorded this machine as holding INCLUDE, not WLASL;
+it holds WLASL, and the ISL material is in a different tree. v1 also recorded 12 truncated INCLUDE
+archives including `Train_Test_Split`; that finding is stale and must be re-derived before M8.
+
+**Storage rule, unchanged and still correct:** video is a transient artifact. Download → extract
+keyframes once → persist compressed `.npz` shards + a manifest → delete or archive the video. The
+200 EmoSign clips are 87 MB of video and will become landmark shards of a few MB.
 
 ### 5.3 Datasets deliberately rejected
+
 - **RWTH-PHOENIX-Weather 2014T** — excellent for translation, useless for affect: weather-news
   signing is near affectively flat. EmoSign's authors rejected several corpora for this exact
   reason after VADER analysis showed captions clustered at neutral.
@@ -238,12 +275,14 @@ an INCLUDE-50 subset for comparison.
   gated) remains the natural vehicle for a future ISL/NSL follow-up paper.
 
 ### 5.4 Storage strategy
+
 Video is a transient artifact. For every dataset: download → extract keypoints once → persist
 compressed `.npz` shards + a manifest → delete or archive the video. Keypoint sequences for
 83k clips are on the order of a few GB; the source video is orders of magnitude larger. Disk
 headroom on `/mnt/Volume2` must be confirmed in Phase 1 before any bulk download starts.
 
 ### 5.5 The EmoSign / ASLLRP coincidence — why it matters
+
 EmoSign is built **on top of ASLLRP**, and ASLLRP independently publishes *linguistic non-manual
 annotations* alongside glosses and English text. Therefore the same 200 utterances carry:
 
@@ -252,7 +291,22 @@ annotations* alongside glosses and English text. Therefore the same 200 utteranc
 - text — English translation and gloss (from ASLLRP)
 
 No other corpus in existence gives both label types on the same frames. This is the entire
-empirical foundation of objective O4, and it is why **ASLLRP access is week-1 critical path**.
+empirical foundation of O4.
+
+**Measured 2026-09-26: the video is already reachable, and O4 is unblocked.** EmoSign's
+`video_name` is not a filename — its trailing numeric token is the ASLLRP utterance ID:
+
+```
+Jonathan_2012-11-27_sc93_5572615  ->  5572615  ->  crop_original_video.mp4
+```
+
+**200/200 rows join**, across all four signers. All 200 clips download (87 MB) and all 200 decode.
+The face-visibility gate passed 24/24 sampled clips: face detected in 94–100% of frames, median 30
+of 52 blendshapes carrying real temporal variance, median brow-coefficient SD 0.271.
+
+What the mirror does **not** carry is the SignStream non-manual XML, so the `L` labels still need
+the heuristic route (M3 Track A) with the BU request running in parallel as the clean path, and
+gloss→English still needs the M5 ladder. The bottleneck moved; it did not disappear.
 
 ---
 
@@ -286,6 +340,7 @@ Webcam / video (720p)
 ```
 
 ### 6.2 Why person detection was removed
+
 The source concept placed YOLO11/RT-DETR before landmark extraction. MediaPipe already runs its
 own person/pose detector internally, so a separate detection stage is redundant work on the
 critical path — pure latency and VRAM cost for no accuracy gain on single-signer framing (which
@@ -343,17 +398,20 @@ This is a pseudo-label fallback and must be labelled as such in the paper — it
 not destroy O4.
 
 ### 6.5 Emotion-conditioned generation
+
 No paired emotional-paraphrase corpus for ASL exists. We construct one: for each utterance's
 neutral English reference, generate emotion-styled paraphrases with an LLM across the target
 emotion set, filter for semantic equivalence, and disclose the procedure in the paper. The `A`
 factor is then injected into T5-small as control tokens / a prefix embedding.
 
 Three-axis evaluation, because BLEU alone is meaningless for style transfer:
+
 1. **Style accuracy** — a held-out classifier recovers the intended emotion from the output text.
 2. **Semantic preservation** — BERTScore-F1 against the neutral reference ≥ 0.90.
 3. **Human preference** — pre-registered rubric, blinded pairwise comparison vs neutral output.
 
 ### 6.6 Avatar controller
+
 - **Body:** pose landmarks → VRM humanoid bone rotations (three-vrm), with joint-limit clamping and
   quaternion continuity to prevent gimbal flips.
 - **Face:** the 52 MediaPipe blendshapes map near-1:1 onto VRM/ARKit expression targets. No trained
@@ -364,6 +422,7 @@ Three-axis evaluation, because BLEU alone is meaningless for style transfer:
 - **Output:** live WebSocket stream to a React Three Fiber viewer, plus GLB / VRMA clip export.
 
 ### 6.7 Deployment
+
 FastAPI + WebSocket; frames in, glosses/text/emotion/avatar-control out. Bounded queues with
 backpressure and graceful degradation when the GPU saturates. All models exported to ONNX; T5
 dynamically quantized to INT8; ONNX Runtime CUDA EP, TensorRT optional.
@@ -374,24 +433,39 @@ loopback requires a token/API key and TLS. This constraint is asserted in code a
 
 ### 6.8 Latency and VRAM budget
 
-| Stage | Latency target | VRAM target |
-|---|---|---|
-| MediaPipe holistic | ≤ 25 ms/frame | ≤ 200 MB |
-| ST-GCN recognition (T=64) | ≤ 5 ms | ≤ 200 MB |
-| Factorized affect encoder | ≤ 3 ms | ≤ 100 MB |
-| T5-small INT8, beam 2 | ≤ 120 ms/utterance | ≤ 600 MB |
-| Avatar rendering | browser-side | 0 MB server |
-| **End-to-end p95** | **< 400 ms** | **< 2500 MB peak** |
-| Sustained capture | ≥ 20 FPS | — |
+**Measured 2026-09-26, CPU delegate, 480×320, machine under external load.** Per-module: face +
+blendshapes **15.9 ms**, 2× hand **41.2 ms**, pose **29.5 ms**. Hands cost more than the face, which
+the v1 budget assumed the other way round. Sequential **109.7 ms/frame (9.1 FPS)**; 3-graph
+concurrent **67.3 ms/frame (14.9 FPS)**. Input resolution is irrelevant from 160px to 480px
+(78–86 ms) and thread count is irrelevant, so the cost is fixed per-graph overhead — which is why
+concurrency helps and downscaling does not.
 
-The 2500 MB ceiling is deliberate: a 4 GB laptop 3050 driving a desktop session leaves roughly
-3.0–3.2 GB usable. CI asserts the ceiling from Phase 5 onward.
+| Stage                     | Latency target      | VRAM target              |
+| ------------------------- | ------------------- | ------------------------ |
+| MediaPipe, 3 graphs concurrent | ≤ 70 ms/frame (measured) | ≤ 200 MB           |
+| ST-GCN recognition (T=64) | ≤ 5 ms             | ≤ 200 MB                |
+| Factorized affect encoder | ≤ 3 ms             | ≤ 100 MB                |
+| T5-small INT8, beam 2     | ≤ 120 ms/utterance | ≤ 600 MB                |
+| Avatar rendering          | browser-side        | 0 MB server              |
+| **End-to-end p95**  | **< 400 ms**  | **< 2500 MB peak** |
+| Sustained capture         | ≥ 20 FPS target; **14.9 FPS measured** — K6 is not yet met | — |
+
+The 20 FPS target is currently missed at 14.9 FPS. Machine load is a confound (sequential measured
+82 ms unloaded, 110 ms loaded), so the verdict belongs to M2's dedicated benchmark on an idle
+machine. If it still misses, the target is relaxed and the miss published — the measurement is not
+massaged to fit.
+
+The 2500 MB ceiling is deliberate. Measured 2026-09-26: `nvidia-smi` reports 4096 MiB for the
+board but torch reports **3770 MB usable** — ~326 MB is reserved by the display/EGL path before
+any process starts. Budget against the usable figure; the ceiling is 66% of it. CI asserts the
+ceiling from M2 onward.
 
 ---
 
 ## 7. Evaluation Protocol
 
 ### 7.1 Non-negotiable methodology
+
 1. **Leave-one-signer-out CV on EmoSign.** 200 clips, 4 signers → 4 folds. Any random split leaks
    signer identity and the result is worthless. Report mean ± std across folds, always.
 2. **Signer-independent splits everywhere else too** (ASL Citizen ships signer metadata; use it).
@@ -404,17 +478,18 @@ The 2500 MB ceiling is deliberate: a 4 GB laptop 3050 driving a desktop session 
 
 ### 7.2 Metrics by stage
 
-| Stage | Metrics |
-|---|---|
-| Isolated recognition | Top-1, Top-5, precision, recall, macro-F1, params, latency |
-| Translation | BLEU-1..4 (SacreBLEU, default tokenization), ROUGE-L, METEOR, BERTScore |
-| Affect | weighted accuracy, weighted F1, per-class accuracy, confusion matrix, MAE on valence/arousal |
-| Disentanglement | cross-prediction AUC (target ≤0.60), probe accuracy, per-loss-term ablation |
-| Conditioned generation | style accuracy, BERTScore-F1, human preference, degeneracy rate |
-| Efficiency | FPS, p50/p95/p99 end-to-end latency, peak VRAM, params, FLOPs |
-| Cross-lingual | Top-1/Top-5 on INCLUDE without ISL fine-tuning, then few-shot |
+| Stage                  | Metrics                                                                                      |
+| ---------------------- | -------------------------------------------------------------------------------------------- |
+| Isolated recognition   | Top-1, Top-5, precision, recall, macro-F1, params, latency                                   |
+| Translation            | BLEU-1..4 (SacreBLEU, default tokenization), ROUGE-L, METEOR, BERTScore                      |
+| Affect                 | weighted accuracy, weighted F1, per-class accuracy, confusion matrix, MAE on valence/arousal |
+| Disentanglement        | cross-prediction AUC (target ≤0.60), probe accuracy, per-loss-term ablation                 |
+| Conditioned generation | style accuracy, BERTScore-F1, human preference, degeneracy rate                              |
+| Efficiency             | FPS, p50/p95/p99 end-to-end latency, peak VRAM, params, FLOPs                                |
+| Cross-lingual          | Top-1/Top-5 on INCLUDE without ISL fine-tuning, then few-shot                                |
 
 ### 7.3 Baselines we must beat or honestly report against
+
 - Affect: GPT-4o, Qwen2.5-VL-7B, AffectGPT, MiniGPT4-video (video-only and video+caption), plus
   the reported hearing-non-signer score — all from the EmoSign paper, so no re-running required.
 - Recognition: ASL Citizen paper's own baselines; SPOTER-class pose results on WLASL-100.
@@ -426,24 +501,24 @@ The 2500 MB ceiling is deliberate: a 4 GB laptop 3050 driving a desktop session 
 
 ## 8. Technology Stack
 
-| Layer | Choice | Rationale |
-|---|---|---|
-| Language | Python 3.11 | ecosystem |
-| DL framework | PyTorch 2.x | ecosystem, ONNX export |
-| Landmarks | MediaPipe **Tasks** API (`HolisticLandmarker`, `FaceLandmarker`) | legacy Holistic is superseded; Tasks gives 52 ARKit blendshapes natively |
-| Graph models | ST-GCN family (decoupled spatial-temporal) | body is a graph; ≤2M params |
-| Sequence models | GRU baseline, SPOTER-style pose transformer | compact, published ISLR baselines |
-| Translation | T5-small (`google/t5-v1_1-small`) | 77M-param recipe is literature-validated |
-| FER pretraining | DFEW, MAFW (fallback RAF-DB/AffectNet, OpenFace AUs) | dynamic in-the-wild affect |
-| Smoothing | One Euro Filter | low lag for interactive use |
-| Tracking | Weights & Biases | sweeps + run IDs for the experiment log |
-| Serving | FastAPI + WebSocket | streaming, async |
-| Export/runtime | ONNX, ONNX Runtime (CUDA EP), INT8 dynamic quant, TensorRT optional | the 4 GB target |
-| Frontend | React + Three.js / React Three Fiber + three-vrm | VRM/ARKit blendshape compatibility |
-| Avatar assets | VRM / Ready Player Me / Mixamo, Blender for rigging | 52-blendshape ARKit convention |
-| Metrics | SacreBLEU, BERTScore, scikit-learn | standard, comparable |
-| Quality | pytest, ruff, pre-commit, mypy | test-first discipline |
-| Paper | LaTeX (IEEEtran), BibTeX | workshop/conference target |
+| Layer           | Choice                                                                    | Rationale                                                                |
+| --------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Language        | Python 3.11                                                               | ecosystem                                                                |
+| DL framework    | PyTorch 2.x                                                               | ecosystem, ONNX export                                                   |
+| Landmarks       | MediaPipe **Tasks**: `FaceLandmarker` + 2× `HandLandmarker` + `PoseLandmarker`, composed | Tasks gives the 52 ARKit blendshapes. **There is no Tasks `HolisticLandmarker`** — v1 named one. The legacy `solutions.holistic` is superseded and emits **no blendshapes**, so it is unusable here. Tasks face mesh is **478** points, not 468 |
+| Graph models    | ST-GCN family (decoupled spatial-temporal)                                | body is a graph; ≤2M params                                             |
+| Sequence models | GRU baseline, SPOTER-style pose transformer                               | compact, published ISLR baselines                                        |
+| Translation     | T5-small (`google/t5-v1_1-small`)                                       | 77M-param recipe is literature-validated                                 |
+| FER pretraining | DFEW, MAFW (fallback RAF-DB/AffectNet, OpenFace AUs)                      | dynamic in-the-wild affect                                               |
+| Smoothing       | One Euro Filter                                                           | low lag for interactive use                                              |
+| Tracking        | Weights & Biases                                                          | sweeps + run IDs for the experiment log                                  |
+| Serving         | FastAPI + WebSocket                                                       | streaming, async                                                         |
+| Export/runtime  | ONNX, ONNX Runtime (CUDA EP), INT8 dynamic quant, TensorRT optional       | the 4 GB target                                                          |
+| Frontend        | React + Three.js / React Three Fiber + three-vrm                          | VRM/ARKit blendshape compatibility                                       |
+| Avatar assets   | VRM / Ready Player Me / Mixamo, Blender for rigging                       | 52-blendshape ARKit convention                                           |
+| Metrics         | SacreBLEU, BERTScore, scikit-learn                                        | standard, comparable                                                     |
+| Quality         | pytest, ruff, pre-commit, mypy                                            | test-first discipline                                                    |
+| Paper           | LaTeX (IEEEtran), BibTeX                                                  | workshop/conference target                                               |
 
 **Dropped from the original concept, with reasons:** YOLO11/RT-DETR/YOLO-NAS as a mandatory stage
 (redundant with MediaPipe); Video Swin Transformer for deployment (violates the VRAM/latency
@@ -454,19 +529,19 @@ compact choice; more variants is breadth without depth); PHOENIX14T (affectively
 
 ## 9. Risk Register
 
-| ID | Risk | Likelihood | Impact | Mitigation | Owner |
-|---|---|---|---|---|---|
-| RK1 | ASLLRP access delayed/denied → no `L` labels | Medium | **Critical** (kills O4) | Apply day 1; heuristic + caption-syntax pseudo-label fallback, disclosed | R1 |
-| RK2 | 200 EmoSign clips, 4 signers → fragile results | High | High | LOSO CV, mean±std, CIs, no single-split claims | R3 |
-| RK3 | DFEW/MAFW license lag | Medium | Medium | RAF-DB/AffectNet + OpenFace AU fallback | R1 |
-| RK4 | ASL Citizen download size / disk exhaustion | Medium | High | Verify free space first; keypoints-then-delete strategy | R1 |
-| RK5 | 4 GB VRAM ceiling breached late in the project | Medium | High | CI assertion from Phase 5; budget tracked from Phase 2 | R2 |
-| RK6 | WLASL YouTube link rot | High | Low | ASL Citizen is primary; WLASL is comparability-only |R1 |
-| RK7 | 10-week overrun | Medium | High | Declared cut-lines: Phase-B SLT and the INCLUDE ablation | R4 |
-| RK8 | Overclaiming affect accuracy | Medium | **Critical** (rejection) | Claims ledger; α-bounded per-class reporting | R3 |
-| RK9 | Emotion-conditioned generation degenerates / paraphrase corpus is low quality | Medium | Medium | Semantic-preservation floor 0.90 BERTScore; human spot-check; disclose LLM generation | R3 |
-| RK10 | Avatar retargeting instability (gimbal flips, finger distortion) — a documented pain point in community reports | High | Medium | Quaternion continuity, joint clamping, unit tests on known poses | R4 |
-| RK11 | Ethical/consent misstep with signer biometric data | Low | **Critical** | Respect ASLLRP/ASL Citizen no-redistribution terms; release IDs+labels only; localhost-only server; Deaf-community statement in the paper | R4 |
+| ID   | Risk                                                                                                             | Likelihood | Impact                         | Mitigation                                                                                                                                | Owner |
+| ---- | ---------------------------------------------------------------------------------------------------------------- | ---------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- | ----- |
+| RK1  | ASLLRP access delayed/denied → no`L` labels                                                                   | Medium     | **Critical** (kills O4)  | Apply day 1; heuristic + caption-syntax pseudo-label fallback, disclosed                                                                  | R1    |
+| RK2  | 200 EmoSign clips, 4 signers → fragile results                                                                  | High       | High                           | LOSO CV, mean±std, CIs, no single-split claims                                                                                           | R3    |
+| RK3  | DFEW/MAFW license lag                                                                                            | Medium     | Medium                         | RAF-DB/AffectNet + OpenFace AU fallback                                                                                                   | R1    |
+| RK4  | ASL Citizen download size / disk exhaustion                                                                      | Medium     | High                           | Verify free space first; keypoints-then-delete strategy                                                                                   | R1    |
+| RK5  | 4 GB VRAM ceiling breached late in the project                                                                   | Medium     | High                           | CI assertion from Phase 5; budget tracked from Phase 2                                                                                    | R2    |
+| RK6  | WLASL YouTube link rot                                                                                           | High       | Low                            | ASL Citizen is primary; WLASL is comparability-only                                                                                       | R1    |
+| RK7  | 10-week overrun                                                                                                  | Medium     | High                           | Declared cut-lines: Phase-B SLT and the INCLUDE ablation                                                                                  | R4    |
+| RK8  | Overclaiming affect accuracy                                                                                     | Medium     | **Critical** (rejection) | Claims ledger; α-bounded per-class reporting                                                                                             | R3    |
+| RK9  | Emotion-conditioned generation degenerates / paraphrase corpus is low quality                                    | Medium     | Medium                         | Semantic-preservation floor 0.90 BERTScore; human spot-check; disclose LLM generation                                                     | R3    |
+| RK10 | Avatar retargeting instability (gimbal flips, finger distortion) — a documented pain point in community reports | High       | Medium                         | Quaternion continuity, joint clamping, unit tests on known poses                                                                          | R4    |
+| RK11 | Ethical/consent misstep with signer biometric data                                                               | Low        | **Critical**             | Respect ASLLRP/ASL Citizen no-redistribution terms; release IDs+labels only; localhost-only server; Deaf-community statement in the paper | R4    |
 
 ---
 
@@ -531,28 +606,28 @@ Sign_Language_EmotionAware/
 
 ## 12. Glossary
 
-| Term | Meaning |
-|---|---|
-| **Gloss** | A written label for a sign (e.g. `THANK-YOU`); an intermediate representation, not a translation |
-| **Manual features** | Handshape, orientation, location, movement — the hands and arms |
-| **Non-manual features** | Face, brows, mouth, gaze, head, torso |
-| **Non-manual marker (NMM)** | A non-manual signal with *grammatical* function (brow raise = yes/no question) |
-| **Affective prosody** | Emotion carried by *how* signs are produced: speed, amplitude, path shape, repetition |
-| **ISLR** | Isolated Sign Language Recognition — one sign per clip |
-| **CSLR / SLT** | Continuous recognition / translation — full utterances |
-| **Gloss-free SLT** | Video/pose → text without gloss supervision |
-| **Blendshape** | A named facial deformation coefficient; MediaPipe emits 52 ARKit-compatible ones |
-| **AU** | Action Unit — a FACS facial muscle-movement code |
-| **LOSO** | Leave-One-Signer-Out cross-validation |
-| **GRL** | Gradient Reversal Layer — adversarially removes information from a representation |
-| **vCLUB** | Variational Contrastive Log-ratio Upper Bound on mutual information |
-| **VRM** | An open 3D humanoid avatar format with standardized humanoid bones and expressions |
-| **Krippendorff α** | Inter-annotator agreement; EmoSign averages 0.593 |
+| Term                              | Meaning                                                                                           |
+| --------------------------------- | ------------------------------------------------------------------------------------------------- |
+| **Gloss**                   | A written label for a sign (e.g.`THANK-YOU`); an intermediate representation, not a translation |
+| **Manual features**         | Handshape, orientation, location, movement — the hands and arms                                  |
+| **Non-manual features**     | Face, brows, mouth, gaze, head, torso                                                             |
+| **Non-manual marker (NMM)** | A non-manual signal with*grammatical* function (brow raise = yes/no question)                   |
+| **Affective prosody**       | Emotion carried by*how* signs are produced: speed, amplitude, path shape, repetition            |
+| **ISLR**                    | Isolated Sign Language Recognition — one sign per clip                                           |
+| **CSLR / SLT**              | Continuous recognition / translation — full utterances                                           |
+| **Gloss-free SLT**          | Video/pose → text without gloss supervision                                                      |
+| **Blendshape**              | A named facial deformation coefficient; MediaPipe emits 52 ARKit-compatible ones                  |
+| **AU**                      | Action Unit — a FACS facial muscle-movement code                                                 |
+| **LOSO**                    | Leave-One-Signer-Out cross-validation                                                             |
+| **GRL**                     | Gradient Reversal Layer — adversarially removes information from a representation                |
+| **vCLUB**                   | Variational Contrastive Log-ratio Upper Bound on mutual information                               |
+| **VRM**                     | An open 3D humanoid avatar format with standardized humanoid bones and expressions                |
+| **Krippendorff α**         | Inter-annotator agreement; EmoSign averages 0.593                                                 |
 
 ---
 
 ## 13. Changelog
 
-| Date | Version | Change |
-|---|---|---|
-| 2026-08-07 | 1.0 | Initial breakdown. Dataset audit corrected local data from "WLASL" to INCLUDE (12 truncated archives found). ASL spine selected; EmoSign adopted as affect benchmark; factorized non-manual encoder adopted as core contribution; 4 GB inference budget specified. |
+| Date       | Version | Change                                                                                                                                                                                                                                                             |
+| ---------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 2026-08-07 | 1.0     | Initial breakdown. Dataset audit corrected local data from "WLASL" to INCLUDE (12 truncated archives found). ASL spine selected; EmoSign adopted as affect benchmark; factorized non-manual encoder adopted as core contribution; 4 GB inference budget specified. |
