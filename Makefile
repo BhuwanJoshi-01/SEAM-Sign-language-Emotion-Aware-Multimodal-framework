@@ -15,8 +15,8 @@ setup: ## Editable install + pre-commit hooks
 	$(PY) -m pre_commit install
 
 lint: ## ruff check + format check
-	$(PY) -m ruff check src tests
-	$(PY) -m ruff format --check src tests
+	$(PY) -m ruff check src tests scripts
+	$(PY) -m ruff format --check src tests scripts
 
 fmt: ## Apply ruff formatting
 	$(PY) -m ruff format src tests
@@ -52,6 +52,18 @@ facegate: ## Face-visibility gate over sampled EmoSign clips  [M0 GATE]
 
 bench: ## Latency / VRAM harness on the RTX 3050  [M2]
 	$(PY) -m seam.cli bench
+
+bench-seq: ## Sequential perception baseline for the concurrency ablation  [M2]
+	$(PY) -m seam.cli bench --sequential
+
+export: ## ONNX export + FP32/INT8 parity; non-zero on a failed gate  [M2]
+	$(PY) -m seam.cli export
+
+parity-report: ## Print the last parity verdict  [M2]
+	@$(PY) -c "import json,pathlib; d=json.loads(pathlib.Path('artifacts/export/parity.json').read_text()); \
+	[print(r['summary']()) for r in d.get('results_summary',[])]; \
+	print('providers:', d['execution_providers']['active_on_probe']); \
+	print('inputs:', d['parity_input_source'])"
 
 train: ## Train from configs/
 	$(PY) -m seam.cli train

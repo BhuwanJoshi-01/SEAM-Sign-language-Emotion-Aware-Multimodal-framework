@@ -38,6 +38,14 @@ Added or replaced in v2:
     This machine has ~3 GB free RAM.
 15. **When blocked, escalate in writing.** Fallbacks already documented here may be taken freely
     but must be recorded as taken, with the reason, in `EXPERIMENT_LOG.md`.
+16. **One front end, asserted by test.** The fit and inference preprocessing paths must be the
+    same function, and a test must assert it. Two independent instances of the same defect in
+    this project - a `mask=None` normalization call in the prior ISLR system, worth 19 accuracy
+    points, and the FER front-end skew in M1, which invalidated a whole audit - make this a rule
+    rather than an anecdote.
+17. **Every null carries its power.** No result is reported as "no effect" without the minimum
+    detectable effect beside it, in the same units. A null without its MDE is an absence of
+    measurement, and the two are indistinguishable to a reader who is not told which it is.
 
 ---
 
@@ -123,18 +131,46 @@ from measurement (median top-1 confidence was 0.29), never from intuition.
 **Kill switch:** none.
 **Survives:** everything.
 
-### M1 — The confound audit ★ first headline result, needs zero emotion labels
-Extract the non-manual channel (52 ARKit blendshapes + head pose + gaze) from ≥2,000 WLASL clips.
-Run ≥3 pretrained non-signer FER models (EMO-AffectNet, RAF-DB, AffectNet) over it. Detect
-grammatical markers by rule on the *same* blendshapes: brow-raise (yes/no Q), brow-furrow (wh-Q),
-head-shake (negation), mouth-morpheme clusters. Test whether FER output shifts toward negative
-affect on marker-bearing vs matched marker-free segments.
+### M1 — The confound audit ★ **GATE CLOSED 2026-09-27 — C1 REFUTED on WLASL**
 
-**Gate:** measured, replicated across ≥2 pretrained models on ≥500 clips, with CIs and effect
-sizes, plus a marker→emotion confusion matrix.
-**Kill switch:** a null result is still a paper — "non-manual markers do *not* confound non-signer
-FER in ASL" is a genuine result and reframes the contribution honestly.
-**Survives:** a complete first contribution plus the feature stack for every later milestone.
+Extract the non-manual channel (52 ARKit blendshapes + head pose + gaze) from WLASL. Run ≥3
+non-signer FER models over it. Detect grammatical markers by rule on the *same* blendshapes:
+brow-raise (yes/no Q), brow-furrow (wh-Q), head-shake (negation), mouth-morpheme clusters. Test
+whether FER output shifts toward negative affect on marker-bearing vs matched marker-free
+segments, within clip.
+
+**What happened.** 2,565 clips, 4,168 scorable windows, three non-signer FER models
+(RAF-DB, 61.7 / 63.7 / 66.3% on their own test split). **No marker-induced negative bias is
+detectable.** The two effects that reach significance run the *wrong way* and do not replicate
+across models. MDE is 0.0030–0.0083, i.e. 1.0–2.8% of the 0.297 baseline, over 202–329 clips —
+a powered null, not an absence of measurement.
+
+**Gate:** met. Measured, 3 models, 2,565 clips (≥500), CIs + effect sizes + MDE, marker→emotion
+table, `mouth_positive` control null in all three, uniform-random null model null in all six rows.
+**Kill switch, taken:** the null is the result. It is published as a localisation, not a failure.
+**Survives:** the feature stack for every later milestone, plus a real negative result.
+
+**The finding, precisely.** The confound is a **discourse** phenomenon — a signer raises their
+brows *because the utterance is a question*. WLASL is isolated dictionary signing, one gloss per
+clip, neutral and posed, with no discourse context for a marker to be syntactically determined by.
+So this audit bounds the effect on *isolated* signing and says nothing about continuous signing.
+
+**Consequence for M3/M4, which is the point.** The testable version of C1 needs continuous
+signing where markers are determined by syntax: **ASLLRP utterances (we have 200) or How2Sign
+(media-pipe keypoints published, plus official English).** Point M3's marker labeller and M4's
+LOSO evaluation there rather than at isolated signs.
+
+**An instrument bug worth keeping in the record.** The first run of this audit was **invalid**:
+all three FER models predicted one class for all 200 EmoSign clips (sadness 200/200, fear
+200/200, anger 200/200), with per-frame spread *within* a clip of 0.0002 against 0.283 *across*
+clips. They were reading lighting, background and resolution, not faces. The cause was the
+absence of a FER front end - and of a shared one: the fitting path took tight uint8 boxes from
+PIL while the inference path took [0,1] float crops at a 0.35 margin. Fixed with grayscale +
+histogram equalisation + per-image z-score in **one function on both paths**; the negative-mass
+baseline fell from 0.78 to 0.297, which is where most of the apparent bias in the broken run
+came from. The broken models are kept at `artifacts/fer_v1_broken_preproc/`. This is the second
+occurrence in this project of the same failure family, so `plan.md` §0 rule 16 now requires the
+fit and inference front ends to be asserted equal by test.
 
 ### M2 — Efficiency harness & the 4 GB budget, proven early
 Benchmark MediaPipe-Tasks throughput and VRAM on the 3050 now, so M3+ are designed against real
@@ -145,6 +181,33 @@ rather than degrading silently**. Add `onnxruntime-gpu` for the CUDA EP.
 fails above the ceiling.
 **Kill switch:** never cut — headline claim.
 **Survives:** the efficiency section.
+
+**Status: in progress.** Export and parity are done; the perception latency sweep and the CLI
+wiring are not.
+
+- **Export/parity complete** (run `m2-onnx-001`, 24 batches / 56 real held-out faces per model).
+  FP32 accepted for all three FER models, max probability deviation 3.91e-04, argmax 100%.
+  INT8 accepted for `fer_cnn_b`/`fer_cnn_c`, **rejected for `fer_cnn_a`** at 95.8% argmax
+  agreement against a 98% gate. INT8 is also *slower* than FP32 on this GPU for `fer_cnn_b`
+  (31.96 ms vs 9.12 ms), so no blanket INT8 speed claim is available.
+- **VRAM is not the binding constraint.** 102 + 72 + 0 MB resident for the three FER graphs
+  against the 2500 MB ceiling. The 0 MB is correct incremental accounting — the first model absorbs
+  the CUDA context — not a failed measurement. What this does *not* license is a "6 models
+  resident" claim; that needs a simultaneous-load measurement.
+- **Three measurement instruments were wrong and are now fixed**, each of which had been
+  producing numbers that looked fine: the CUDA execution provider silently failed while
+  `get_available_providers()` advertised it; torch's allocator reports `0.0 MB` for a live ONNX
+  Runtime session; and a VRAM baseline taken after session creation measures neither the CUDA
+  context nor the weights. Details in `paper/EXPERIMENT_LOG.md`.
+- **A silent data defect was found and fixed while building the parity harness.** The
+  `bbox_xyxy_768` boxes were never mapped from their 768-pixel frame into image space; measured
+  face containment in the crop was 52%, and is 100% after the fix. Re-training on corrected crops
+  moved `fer_cnn_a` from 0.6165 to 0.6136 — inside the noise band, so **M1 stands and is not
+  reopened**, but the defect was real and the measurement is now pinned by
+  `tests/test_rafdb_bbox.py`.
+- **Outstanding:** `seam bench` is still a stub and has no Makefile target; the K6 idle sweep
+  (17.8 FPS vs a 20 FPS target) is measured but not yet written up as a verdict; no M2 tests cover
+  export, quantization, the provider probe, or the budget enforcer.
 
 ### M3 — Linguistic-marker supervision (`L` labels)
 **Track A (blocking):** rule-based marker labeller over blendshapes + syntactic analysis of the
@@ -248,7 +311,7 @@ Never fill a cell from an estimate. Every cell cites a run ID.
 
 | # | KPI | Reference | Target | Current | Milestone |
 |---|---|---|---|---|---|
-| **K1** | Non-signer FER bias from grammatical markers | 0 = no bias | ≠ 0, 2+ models, CIs | — | M1 |
+| **K1** | Non-signer FER bias from grammatical markers | 0 = no bias | ≠ 0, 2+ models, CIs | **refuted on WLASL: −0.008…+0.002, MDE 0.003–0.008** | M1 |
 | **K2** | Disentanglement cross-prediction AUC | 0.5 = perfect | **≤ 0.60**, no affect loss | — | M4 |
 | **K3** | Positive control: signer probe AUC | — | ≥ 0.80 | — | M4 |
 | **K4** | EmoSign emotion macro-F1, video-only, LOSO | **eJSL EANwH 21.09**; GPT-4o 20.76 | **> 21.09** | — | M4 |

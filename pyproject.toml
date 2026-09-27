@@ -84,6 +84,9 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["E501"]
+# Scripts put ``sys.path``/repo-root bootstrapping before the seam imports so they
+# run from a checkout without an install. The ordering is deliberate.
+"scripts/*" = ["E402"]
 
 [tool.mypy]
 python_version = "3.12"

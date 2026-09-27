@@ -158,3 +158,253 @@ that supersedes it and say so.
   explicitly rather than the nominal one being assumed.
 
 <!-- Append new entries below this line. -->
+
+### 2026-09-27 · — · M1 · WLASL manifest, integrity census, and three corrections
+- **Commit:** see `git log -1`
+- **Config:** `seam.data.wlasl` — annotation join, ffprobe sweep, failure classification
+- **Data:** WLASL_v0.3.json (21,083 annotated instances) against the local tree
+- **Metrics:** 2,657 distinct `(gloss, instance_id)` keys · **2,565 usable** · 92
+  html_placeholder · 0 genuinely truncated · 189,352 frames · 665 glosses · 67 signers ·
+  splits train 1,706 / val 522 / test 337. Full ffprobe sweep of 2,657 files in 19 s
+  (8 threads).
+- **Claim(s) touched:** prerequisite for C1
+- **Verdict:** supports. The M1 substrate is larger than the gate requires (2,565 ≥ 500).
+- **Notes:**
+  1. **The on-disk filename is the `instance_id`, not the `video_id`.** The annotation carries
+     both; the files are named `<gloss>/<instance_id>.mp4`. Joining on `video_id` matched 25 of
+     3,863 files and looked like a catastrophic data loss rather than a key mismatch.
+  2. **WLASL is 2,657 clips on this machine, not 3,863.** Of the 3,863 files, 2,657 are
+     `<n>.mp4` and **1,206 are `_yt.mp4.part.mp4` duplicates** of instances that also have a
+     good copy. The 3,863 figure in `plan.md` §1 is corrected here.
+  3. **All 92 unusable clips are HTML error pages saved with an `.mp4` extension**, not
+     truncated video: the first bytes are `<!DOCTYPE html>` (`CTYP`/`E html><` box). An
+     ffmpeg re-cut to the annotated frame range cannot help, because there is no video in the
+     file. The prior ISLR system reported these as "1,130 untrimmed, repairable"; that
+     population does not exist in this copy. Failures are now *classified* —
+     `html_placeholder` vs `truncated` vs `no_index_other` — because the three have different
+     remedies and lumping them as "corrupt" sends you looking for a repair that cannot work.
+  4. The 300-file sampled integrity check run in M0 found 2/300 undecodable; the full sweep
+     puts it at **92/2,657 = 3.5%**, consistent.
+
+### 2026-09-27 · — · M1 · Preprocessing and feature property tests
+- **Commit:** see `git log -1`
+- **Metrics:** 39 property tests over `preprocess/` and `features/`, plus 20 over the audit
+  machinery. Suite total **132 passing**.
+- **Verdict:** supports. Four real defects were found by the properties, not by inspection.
+- **Notes:**
+  1. **`interpolate_gaps` conflated the presence *column* index with the landmark *slice*
+     offset.** Presence column 1 is the left hand; its landmark rows are 33..54. Indexing the
+     landmark array with the column index filled the wrong block while every shape assertion
+     still passed — the exact class of bug that produces plausible, meaningless features. The
+     signature now requires `part_slices` and the reason is in its docstring.
+  2. **A relative-only pause threshold reports a motionless signer as 93% *active*.** The
+     threshold was `0.15 × the clip's own peak speed`, and on a still clip the "peak" is
+     tracker noise, so the cut sat below the noise. `pause_stats` now takes
+     `max(rel_threshold × peak, abs_floor)`; the property test that forced it is
+     `test_still_signing_is_all_pause`.
+  3. **Jerk is meaningless without pre-smoothing, and the default bandwidth is wrong for it.**
+     The third derivative amplifies noise by 1/dt³: on raw landmarks a *linear ramp* scored
+     higher jerk (6.12) than a *square wave* (4.22), so the feature was measuring the
+     detector. `jerk` now smooths at `min_cutoff=6.0` rather than the interactive 1.0, because
+     at 1 Hz a real 3 Hz repetition is attenuated as hard as the noise.
+  4. **Two fixture traps, both instructive.** (a) Moving the two wrists in *opposite*
+     directions holds their mean perfectly still, so every speed-based assertion over a
+     symmetric-motion fixture is vacuous — this is a real property of two-handed signs, now
+     pinned by `test_two_handed_opposed_motion_has_a_stationary_centroid`, and it is a genuine
+     limitation of a centroid-based speed feature. (b) `arr[:, (0, 33)]` is *fancy* indexing and
+     selects rows 0 and 33, not the range; the same column-vs-slice confusion as defect 1, in
+     the test suite this time.
+  5. Marker thresholds are **clip-relative** (`median + 1.5·MAD`) rather than absolute. A fixed
+     cut would label a signer who holds a mild furrow throughout as marker-bearing on every
+     frame, at which point the audit would be measuring the signer's face. Asserted by
+     `test_marker_thresholding_is_clip_relative`.
+
+### 2026-09-27 · — · M1 · Non-signer FER baselines: a broken instrument, diagnosed and fixed
+- **Commit:** see `git log -1`
+- **Config:** `scripts/train_fer.py`, RAF-DB (via `Pelmeshek/raf-db-7emotions-mediapipe-768`),
+  three compact CNNs, no pretrained backbone
+- **Data:** 5,164 train / 2,652 test (the dataset's own test split), 7 classes, 112×112
+- **Hardware:** RTX 3050 4 GB, CPU training
+- **Metrics:** first run 59.9 / 64.1 / 65.4% test accuracy. **After the front-end fix:
+  61.7 / 63.7 / 66.3%.** Published RAF-DB SOTA is ~86% with ResNet-50-class backbones; these
+  are small CNNs trained from scratch, so the gap is expected and is not hidden.
+- **Claim(s) touched:** prerequisite for C1
+- **Verdict:** **inconclusive, then informative.** The first run produced a broken instrument;
+  the second run is sound and its result is a null.
+- **Notes:**
+  1. **The first audit was invalid and is recorded as such.** All three FER models, applied to
+     sign-video face crops, predicted **one class for all 200 EmoSign clips** - sadness 200/200,
+     fear 200/200, anger 200/200 - with Spearman correlation to true sentiment of **+0.03,
+     -0.09, +0.16**. Per-frame probability spread *within* a clip was **0.0002** while the
+     spread *across* clips was **0.283**: one output per clip. A model that emits one answer per
+     clip is reading lighting, background and resolution, not a face, and cannot show a
+     marker-dependent shift in a within-clip contrast however large the marker is.
+  2. **The cause and the fix.** No FER front end at all: RGB crops, tight box at fit, 0.35
+     margin at inference, raw [0,1] input. The fix is the conventional one - grayscale,
+     histogram equalisation, per-image z-score - applied by **a single function on both the
+     fitting and the inference path**. The broken models are kept at
+     `artifacts/fer_v1_broken_preproc/` rather than deleted.
+  3. **After the fix the instrument is live.** Predicted-label distributions on the 200 clips
+     became non-degenerate: fer_cnn_a happiness 162 / sadness 19 / neutral 19; fer_cnn_b
+     happiness 88 / surprise 68 / neutral 31 / sadness 13; fer_cnn_c happiness 62 / sadness 63
+     / neutral 74. The **negative-mass baseline fell from 0.78 to 0.297**, which is most of the
+     apparent "negative bias" in the first run - it was the model collapsing onto negative
+     classes, not markers driving it there.
+  4. **The recovered affect signal is weak but correctly signed.** Spearman(sentiment, negative
+     mass) = +0.133 [-0.004, +0.269], +0.035 [-0.108, +0.179], +0.128 [-0.012, +0.267]. Right
+     sign, two of three intervals touching zero. A compact CNN trained on RAF-DB recovers only
+     weak affect from sign-video crops, and that is now a measured statement rather than an
+     assumption.
+  5. Two train/serve defects found en route, both now asserted by tests: `face_crop` returned
+     float32 while the fitting path handed over uint8, so `equalizeHist` raised **on the
+     inference side only**; and the crop geometry differed between fit and inference.
+  6. **This is the same failure family as the prior ISLR system's 19-point normalization bug** -
+     a model scored on differently-preprocessed input is measuring the preprocessing. Two
+     independent occurrences in one project is now a rule, not an anecdote: rule 15 in
+     `plan.md` §0.
+
+### 2026-09-27 · — · M1 · The confound audit ★ — a null result, with power
+- **Commit:** see `git log -1`
+- **Config:** `scripts/run_confound_audit.py`; T=24 / stride 8 at 12 fps; within-clip matched
+  pairs on (amplitude, speed) at 1.0 pooled sd; cluster bootstrap over clips, 4,000 resamples
+- **Data:** **2,565 WLASL clips**, 189,352 frames, 665 glosses, 67 signers. 4,244 windows,
+  **4,168 scorable (98%)**
+- **Hardware:** RTX 3050 4 GB
+- **Seeds:** 0/1/2 (one per FER model)
+- **Metrics:** per model, per marker - matched shift in negative probability mass, 95% cluster
+  bootstrap CI, minimum detectable effect at 80% power, Cohen's d, bootstrap p. Negative-mass
+  baseline **0.297**. Marker prevalence: brow_raise 16.2%, brow_furrow 14.8%, mouth_morpheme
+  22.4%, head_shake 19.1%, mouth_positive (control) 14.4% of windows.
+- **Claim(s) touched:** **C1**
+- **Verdict:** **refutes C1 on this corpus.** No marker-induced negative bias is detectable.
+- **Notes:**
+  1. **Result, fer_cnn_a / b / c:** brow_raise +0.0024 (p 0.17), **-0.0002 (p 0.92)**;
+     brow_furrow -0.0024 (p 0.021), -0.0012 (p 0.61); mouth_morpheme +0.0011 (p 0.35),
+     **-0.0080 (p 0.0003)**; head_shake -0.0007 (p 0.66), -0.0033 (p 0.25).
+  2. **The two significant effects run the WRONG WAY** - marker-bearing windows are read as
+     *less* negative - and they **do not replicate across models** (mouth_morpheme is +0.0011
+     in b and -0.0080 in c). They are not evidence of a confound; they are noise at the edge of
+     resolution.
+  3. **The controls are clean, so the machinery is sound.** The `mouth_positive` control
+     marker is null in all three models (p 0.85, 0.14, 0.61), and a uniform-random null model on
+     the same matched pairs is null in all six rows (p 0.37-0.73). A planted +0.20 bias is
+     recovered with a CI excluding zero, and a planted null is reported as null - both asserted
+     in `tests/test_audit.py`.
+  4. **Power.** MDE is **0.0030-0.0083**, i.e. **1.0-2.8% of the 0.297 baseline**, over 202-329
+     contributing clips. The null therefore rules out marker-induced negative shifts larger than
+     about 1-3% of baseline. This is a powered null, not an absence of measurement. Every null
+     now carries its MDE; a null without one is not a finding.
+  5. **The substrate is the real limitation, and it is a finding about the design.** WLASL is
+     *isolated dictionary signing* - one gloss per clip, deliberately neutral and posed. The
+     confound the ASL literature describes is a **discourse** phenomenon: a signer raises their
+     brows *because the utterance is a question*. A dictionary video of BOOK has no discourse
+     context, so the marker is not expected to be present and the contrast has nothing to
+     contrast. This audit bounds the effect on isolated signing; it says nothing about continuous
+     signing, where the phenomenon is expected to be strongest.
+  6. **What this does to the plan.** C1 is refuted as stated, on the one corpus available at
+     scale. The testable version of the claim needs *continuous* signing where markers are
+     syntactically determined - ASLLRP utterances, or How2Sign. That is the substrate M3/M4
+     should be pointed at, and it is a **negative result worth publishing**, not a failure: it
+     localises the phenomenon, and localisation is the finding.
+  7. `head_nod` has only 13 pairs over 9 clips and is reported as "too few clips" rather than
+     with a degenerate interval - a one-cluster bootstrap has no variance, which is how a
+     uniform null model came out "significant" at n=3 during development.
+
+---
+
+## M2 — ONNX export, parity, and the measurement instruments
+
+Run ID `m2-onnx-001`. 24 parity batches / 56 real held-out faces per model.
+Execution providers active: `['CUDAExecutionProvider', 'CPUExecutionProvider']`.
+
+### Findings
+
+1. **The torch dynamo ONNX exporter is unusable on this stack.** `torch.onnx.export` defaults to
+   the dynamo path, which imports `onnxscript` and needs an op registry matching the exact torch
+   build. `onnxscript` 0.5.7 has no `torch_2_11` module and this is torch 2.13. The two packages
+   version independently, so this is not resolvable by installing a matching pair. Pinned
+   `dynamo=False` (the TorchScript exporter), which has no such coupling and produces the same
+   graph for the small conv nets exported here.
+
+2. **`onnxruntime-gpu` could not use the GPU, and said so only in a log line.** The CUDA provider
+   failed with `libcublasLt.so.13: cannot open shared object file`, while `get_available_providers()`
+   still advertised `CUDAExecutionProvider`. The library was present the whole time at
+   `site-packages/nvidia/cu13/lib/` — torch had installed it — but the system CUDA is v12, so the
+   dynamic loader never looked in the bundled directory. `seam.export.runtime.ensure_cuda_libraries`
+   pre-loads the bundled `nvidia/*/lib` trees with `RTLD_GLOBAL`; the CUDA provider then activates
+   and TensorRT remains absent (`libnvinfer.so.10` not installed). Without this every latency
+   number in this entry would have been a CPU number wearing a GPU label.
+
+3. **torch cannot see ONNX Runtime's VRAM. Demonstrated, not asserted.** Running a CUDA-EP ONNX
+   session 20 times: `nvidia-smi` shows the allocation, `torch.cuda.max_memory_allocated()`
+   reports **0.0 MB**, because ORT allocates through its own arena and never touches torch's
+   caching allocator. An ONNX model measured with torch would have passed any budget while
+   measuring nothing.
+
+4. **A baseline taken after session creation measures nothing.** The first inference builds the
+   CUDA context, costing a few hundred MB, charged to whichever process created it. Sampling
+   `nvidia-smi` after that first run excludes the context *and* the weights, and returned 0 MB
+   for every model. The baseline must be sampled before the session exists.
+
+5. **Parity must be measured on real faces.** The first harness synthesised random noise, which
+   drove the models to near-uniform probabilities so an argmax was decided by a vanishing margin
+   and flipped on numerical noise alone. On noise, `fer_cnn_a` INT8 showed 95.8% argmax
+   agreement; on 7 real faces it showed 100%. Decoding was lifted into `seam.data.rafdb` so the
+   trainer and the parity harness cannot drift apart — the exact failure mode that produced the
+   invalid M1 v1 models.
+
+6. **The `bbox_xyxy_768` frame was never mapped into image space.** A measured defect, not a
+   guessed one. Stored images are a mix of 100x100 and 512x512; the boxes are in a 768-pixel frame.
+   The old decoder clipped without rescaling. Face detection on the resulting crop, 40 rows per
+   shard, over candidate mappings:
+
+   | mapping | face detected |
+   |---|---|
+   | clip to image bounds (old) | 52% |
+   | scale by `size/1000` | 82% |
+   | scale by `size/768` | **100%** |
+
+   The failure was silent: the crop is a plausible rectangle of plausible size, passes every shape
+   check, and simply is not the face. `tests/test_rafdb_bbox.py` pins the mapping and asserts the
+   ≥90% face-containment property on real rows.
+
+7. **That defect did *not* change the headline number, and that is the useful part.** Re-training
+   `fer_cnn_a` on corrected crops: **0.6136** (n_train 5316, n_test 2720) vs **0.6165** (n_train
+   5164, n_test 2652) before. The difference is inside the noise band (SE ≈ 0.9 pp at p≈0.61,
+   n=2720), so **M1's FER results stand** and the C1 refutation is unaffected. Data yield improved
+   3% because rows with empty boxes are now counted and explained rather than conflated. M1 is not
+   reopened; the correction is recorded here with its measured impact.
+
+### Results
+
+| model | precision | max abs dev | p95 abs dev | argmax | latency med/p95 (ms) | VRAM (MB) | on disk | verdict |
+|---|---|---|---|---|---|---|---|---|
+| fer_cnn_a | fp32 | 2.38e-07 | 5.96e-08 | 100.0% | 6.85 / 7.19 | 102 | 188 KB | PASS |
+| fer_cnn_a | int8 | 3.76e-02 | 1.64e-02 | 95.8% | 18.87 / 19.33 | 102 | 57 KB | **FAIL** |
+| fer_cnn_b | fp32 | 3.91e-04 | 5.82e-05 | 100.0% | 9.12 / 9.55 | 72 | 578 KB | PASS |
+| fer_cnn_b | int8 | 4.58e-02 | 9.40e-03 | 100.0% | 31.96 / 32.89 | 72 | 158 KB | PASS |
+| fer_cnn_c | fp32 | 3.58e-07 | 1.19e-07 | 100.0% | 11.58 / 11.82 | 0 | 191 KB | PASS |
+| fer_cnn_c | int8 | 2.45e-02 | 8.44e-03 | 100.0% | 14.01 / 14.20 | 0 | 64 KB | PASS |
+
+Deviation is on the probability simplex, not logits; the FP32 tolerance is calibrated from the
+observed maximum (worst p95 5.82e-05) rather than carried over from a figure measured on a
+different quantity in the prior ISLR system. All three FP32 graphs agree with PyTorch on the
+argmax for every batch, so the exports are the same computation.
+
+### Verdicts
+
+8. **FP32 export is accepted for all three models.** Max probability deviation 3.91e-04, argmax
+   100%, sizes 188-578 KB.
+9. **INT8 is rejected for `fer_cnn_a`.** One batch of 24 disagrees (95.8%, gate 98%). This is a
+   real quantization effect now that inputs are in distribution, and it is a legitimate early
+   warning rather than a harness artefact. 70% size reduction does not buy a flipped prediction.
+10. **INT8 is not a speed win on this hardware.** `fer_cnn_b` INT8 is *slower* than its own FP32
+    graph (31.96 ms vs 9.12 ms). These models are small enough that dynamic-quantization overhead
+    dominates on this GPU. Any speed claim from INT8 has to be measured per model, not assumed.
+11. **VRAM is not a constraint for the FER baselines.** 102 + 72 + 0 = 174 MB against a 2500 MB
+    ceiling. The first model absorbs the CUDA context; later models add weights only. The 0 MB is
+    correct incremental accounting, not a failure to measure.
+12. **6 models resident is not implied by 174 MB.** Each session holds its own weights; the 0 MB
+    reading reflects allocator reuse in this sequence. A concurrent-6 figure needs a real
+    simultaneous-load measurement before any claim is made, and K6 is still short of its 20 FPS
+    target (17.8 idle), so the binding constraint is perception, not VRAM.

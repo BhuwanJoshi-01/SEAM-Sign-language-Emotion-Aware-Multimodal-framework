@@ -183,6 +183,69 @@ def cmd_landmarks_face_gate(args: argparse.Namespace) -> int:
     return 0 if report.passed else 1
 
 
+def cmd_bench(args: argparse.Namespace) -> int:
+    """Run the M2 latency / VRAM harness over real video.
+
+    Returns non-zero when the harness cannot run, or when a measured stage breaches
+    the VRAM ceiling, so ``make bench`` fails a build rather than printing a red
+    line nobody reads.
+    """
+    from seam.eval import bench
+    from seam.paths import artifacts_root
+
+    if args.videos:
+        videos = [Path(v) for v in args.videos]
+    else:
+        videos = sorted(Path(args.data_root, "emosign", "video").glob("*.mp4"))[: args.limit]
+    if not videos:
+        print("no videos to benchmark; pass --videos or fetch the EmoSign clips first")
+        return 2
+
+    # One mode per invocation. Measuring both from one process would race for the
+    # perception singleton, and the second run would silently reuse the first run's
+    # graph, so the "sequential" row would be the concurrent path under a
+    # sequential label.
+    mode = False if args.sequential else None
+    print(
+        f"benchmarking on {len(videos)} clip(s), {'sequential' if mode is False else 'concurrent'}"
+    )
+    try:
+        report = bench.perception_bench(
+            videos, iterations=args.iterations, runs=args.runs, parallel=mode
+        )
+    except bench.BenchError as exc:
+        print(f"benchmark failed: {exc}")
+        return 2
+
+    print(report.summary())
+    dest = Path(args.out) if args.out else artifacts_root() / "bench" / "perception.json"
+    bench.save(report, dest)
+    print(f"\nwrote {dest}")
+
+    if report.vram is not None and not report.vram.ok:
+        print("VRAM ceiling breached")
+        return 1
+    return 0
+
+
+def cmd_export(args: argparse.Namespace) -> int:
+    """Export the FER baselines to ONNX and check FP32/INT8 parity (M2).
+
+    Delegates to the driver script rather than reimplementing it, so ``make
+    export`` and ``seam export`` cannot diverge.
+    """
+    from seam.paths import project_root
+
+    script = project_root() / "scripts" / "export_onnx.py"
+    if not script.is_file():
+        print(f"export driver not found at {script}")
+        return 2
+    argv = [sys.executable, str(script)]
+    if args.inputs:
+        argv.append(f"--inputs={args.inputs}")
+    return int(subprocess.run(argv).returncode)
+
+
 def _not_yet(name: str) -> Callable[[argparse.Namespace], int]:
     def handler(_: argparse.Namespace) -> int:
         print(f"seam {name} is not implemented yet - see plan.md for the milestone it belongs to")
@@ -240,8 +303,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_fg.add_argument("--sample", type=int, default=24)
     p_fg.set_defaults(func=cmd_landmarks_face_gate)
 
+    p_bench = sub.add_parser("bench", help="latency / VRAM harness on the RTX 3050 (M2)")
+    p_bench.add_argument("--videos", nargs="*", help="explicit video paths")
+    p_bench.add_argument("--limit", type=int, default=5, help="clips to use when none given")
+    p_bench.add_argument("--iterations", type=int, default=40)
+    p_bench.add_argument("--runs", type=int, default=5)
+    p_bench.add_argument(
+        "--sequential", action="store_true", help="measure the sequential baseline"
+    )
+    p_bench.add_argument("--out", help="report path")
+    p_bench.set_defaults(func=cmd_bench)
+
+    p_exp = sub.add_parser("export", help="ONNX export + FP32/INT8 parity (M2)")
+    p_exp.add_argument("--inputs", type=int, help="parity batches to use")
+    p_exp.set_defaults(func=cmd_export)
+
     for name, help_text in (
-        ("bench", "latency / VRAM harness on the RTX 3050 (M2)"),
         ("train", "train from configs/ (M1+)"),
         ("serve", "FastAPI + WebSocket server (M7)"),
     ):
