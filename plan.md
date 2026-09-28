@@ -205,26 +205,68 @@ wiring are not.
   moved `fer_cnn_a` from 0.6165 to 0.6136 — inside the noise band, so **M1 stands and is not
   reopened**, but the defect was real and the measurement is now pinned by
   `tests/test_rafdb_bbox.py`.
-- **Outstanding:** `seam bench` is still a stub and has no Makefile target; the K6 idle sweep
-  (17.8 FPS vs a 20 FPS target) is measured but not yet written up as a verdict; no M2 tests cover
-  export, quantization, the provider probe, or the budget enforcer.
+- **Wired and gated.** `seam bench` and `seam export` are real commands with `make bench`,
+  `make bench-seq`, `make export` and `make parity-report`. The export gate exits non-zero on a
+  failed parity check and the bench gate on a VRAM breach. `make lint` covers `scripts` now, which
+  it did not before. 14 tests cover export, quantization, the provider probe, the budget enforcer
+  and the report; 158 pass overall.
+- **K6 is a miss, recorded as one.** 17.3 FPS median against a ≥20 FPS target, stable across
+  runs. Perception, not VRAM, is the binding constraint for real-time signing, so the plan's
+  remedies (12 fps capture target, keypoint subset) belong to perception rather than the model
+  budget. The target has not been quietly restated.
+- **Blocked, not deferred:** the two measurements M2 still owes — a sustained-capture
+  p95/p99 with a real sample size, and the simultaneous live-stack footprint (3 MediaPipe graphs
+  plus 3 ONNX graphs resident together) — cannot be taken because the NVIDIA driver is not loaded
+  in the current kernel session (`nvidia-smi` cannot reach the driver, `/dev/nvidia*` absent,
+  `torch.cuda.is_available()` False). A machine fault, not a code fault. Both harnesses are
+  written, wired to `seam bench --stack`, and unit-tested; neither has GPU numbers. No CPU number
+  is substituted for a GPU number anywhere.
+- **A latency-measurement defect was found and fixed in the process.** `p95`/`p99` were
+  percentiles of five run-means rather than of frame latencies, so the "p99" tracked machine noise
+  and could not be compared with anything. Quantiles are now taken per call over
+  `iterations x runs` samples with the count printed, and `fps_sustained` (1000/mean) replaces
+  best-case FPS as the number K6 is judged on.
 
 ### M3 — Linguistic-marker supervision (`L` labels)
-**Track A (blocking):** rule-based marker labeller over blendshapes + syntactic analysis of the
-utterance (interrogative / negation / topicalization). Every label carries a provenance flag;
-heuristic labels marked `pseudo` in every downstream table and in the paper.
-**Track B (async, non-blocking):** BU ASLLRP access → real SignStream non-manual XML. Filed in
-M0, chased weekly.
-**Grounding move:** validate the prosody feature set against the **600 free-text Deaf-annotator
-cue strings** in the EmoSign CSV. The annotators named sign size, speed, repetition, emphatic
-fingerspelling, brow, head-shake. Measure whether our features recover the cues they named —
-turning an assumed feature set into a data-grounded one.
 
-**Gate:** marker labels on ≥200 clips with documented provenance and agreement statistics;
-feature↔cue correlation report.
-**Kill switch:** Track B landing triggers re-labelling and an M4 re-run; otherwise ship Track A
-as disclosed pseudo-labels.
-**Survives:** the core claim at reduced evidentiary strength, honestly labeled.
+**Status: gate met on labels, blocked on the visual instrument.**
+
+- **The syntactic track now has a real input.** `asllrp_utterance_map` and
+  `asllrp_gloss_tokens` were declared in `sources.py` but never fetched and marked
+  blocking-M5; they are what M3 actually needs, so they were pulled (3.8 MB).
+  **200/200 EmoSign utterances join to the human-authored ASLLRP gloss map**, so
+  every clip has real linguistic context. `seam.features.syntactic` labels
+  interrogative / negation / reference-establishment from that annotation by lexical
+  rule, and topicalization as an explicitly weak inference (confidence capped at
+  0.5, `pseudo`), because the gloss is a flat token sequence with no constituent
+  structure. Every label carries a provenance string.
+- **`fs-` is compound signs, not facial signal.** Checked rather than assumed; it
+  would have added 98 token types to the non-manual vocabulary for no reason.
+- **Blocking finding: 4 of 6 visual markers are degenerate at clip level.**
+  `mouth_morpheme` 0.95, `brow_raise` 0.86, `mouth_positive` 0.91, `head_shake`
+  0.79 of clips. `mouth_positive` is the *control*, and a control on 91% of clips
+  is not a control. This is a candidate explanation for M1's null that has nothing
+  to do with marker effects being absent, since M1's audit compared near-constant
+  signals.
+- **The threshold rule is not at fault.** On iid noise the `median + 1.5*MAD` rule
+  fires on 0.2% of frames. The real signals are heavy-tailed; raising k to 4.5 does
+  not fix prevalence, and tuning it until agreement looked good would be p-hacking.
+- **Two real head-path bugs fixed:** `_oscillation` thresholded at `head_angle/2`
+  while the field documents `head_angle` (10° effective vs 20° documented, inside
+  the jitter of a 256×256 face), and `min_reversals` counted sign changes anywhere
+  in a clip so one wobble licensed every noisy turning point. `head_shake` 0.98 →
+  0.785, `head_nod` 0.65 → 0.170.
+- **The harness now refuses to print a p-value for a degenerate marker.** A lift of
+  ~1.0 is what a broken instrument and a real null both look like, so the two are not
+  reported as the same thing. Of three expected pairings, two are not interpretable
+  and one — interrogative ↔ brow_furrow, the marker inside the usable band — is a
+  **resolvable null**: lift 1.00, p=0.96, from two independent sources.
+- **Next step is not more thresholds.** A per-frame detector and a per-clip label are
+  different instruments; the fix is a clip-level definition with stated minimum
+  duration and amplitude, calibrated so the control has low prevalence — a criterion
+  fixed *before* looking at any agreement, so neither this null nor a future positive
+  can be a calibration artefact.
+- Artefact `artifacts/audit/marker_labels.json`; 173 tests pass.
 
 ### M4 — Factorized non-manual encoder + EmoSign LOSO ★ CORE CONTRIBUTION
 `z_L = Enc_L(NM)`, `z_A = Enc_A(NM, P)`, each ≤1M params. Losses: `CE(head_L)`, `CE(head_A)`,
@@ -315,8 +357,8 @@ Never fill a cell from an estimate. Every cell cites a run ID.
 | **K2** | Disentanglement cross-prediction AUC | 0.5 = perfect | **≤ 0.60**, no affect loss | — | M4 |
 | **K3** | Positive control: signer probe AUC | — | ≥ 0.80 | — | M4 |
 | **K4** | EmoSign emotion macro-F1, video-only, LOSO | **eJSL EANwH 21.09**; GPT-4o 20.76 | **> 21.09** | — | M4 |
-| **K5** | Peak inference VRAM / p95 latency on the 3050 | 4096 MB hard limit | **< 2500 MB / < 400 ms** | — | M2, M7 |
-| K6 | Sustained capture FPS | — | ≥ 20 | — | M2 |
+| **K5** | Peak inference VRAM / p95 latency on the 3050 | 4096 MB hard limit | **< 2500 MB / < 400 ms** | **174 MB / 10.8-13.7 ms (FER)**, 90 MB perception | M2, M7 |
+| K6 | Sustained capture FPS | — | ≥ 20 | **17.3 med / 18.6 best** | M2 |
 | K7 | How2Sign BLEU-4 at ≤80M params | 10.06 published | ≥ 8.0 | — | M5 |
 | K8 | Conditioned-gen style acc. @ BERTScore ≥0.90 | — | ≥ 80% | — | M6 |
 | K9 | Avatar preference vs neutral | 50% = tie | ≥ 60% | — | M7 |

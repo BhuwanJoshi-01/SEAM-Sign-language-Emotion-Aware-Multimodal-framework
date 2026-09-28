@@ -1,0 +1,12 @@
+# WLASL, already on this machine. Used for the recognition backbone and as the
+# label-free substrate for the M1 confound audit.
+#
+# CAVEAT measured 2026-09-26: the raw tree contains untrimmed .part downloads
+# whose mp4 containers have no moov atom and will not decode. A repair pass
+# (ffmpeg re-cut to the annotated frame range) is required before extraction,
+# exactly as in the prior ISLR system. Do not point the extractor here without it.
+dataset: wlasl
+root: /home/bhuwan/Videos/wlasl/videos
+n_videos: 3863
+n_gloss_dirs: 668
+requires_repair_pass: true

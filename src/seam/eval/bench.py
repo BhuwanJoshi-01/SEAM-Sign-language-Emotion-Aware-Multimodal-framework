@@ -33,6 +33,7 @@ import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -57,17 +58,27 @@ class Timing:
     ms_median: float
     ms_p95: float
     ms_p99: float
-    fps_from_min: float
-    fps_from_median: float
-    #: mean/min. The machine's own noise, reported rather than divided out.
+    #: mean/min over run means. The machine's own noise, reported rather than
+    #: divided out.
     noise_ratio: float
     warmup: int
+    #: Individual timed calls behind the quantiles. A p99 needs a real sample, so
+    #: this is shown next to the numbers it justifies.
+    samples: int = 0
+    #: p95 across run means, kept only to show it is a different quantity.
+    ms_p95_run_mean: float = 0.0
+    fps_from_min: float = 0.0
+    fps_from_median: float = 0.0
+    #: 1000 / mean, i.e. the rate actually sustained when frames arrive back to
+    #: back. The honest number for a capture loop.
+    fps_sustained: float = 0.0
 
     def summary(self) -> str:
         return (
             f"{self.label:<34} min {self.ms_min:7.2f}  med {self.ms_median:7.2f}  "
-            f"p95 {self.ms_p95:7.2f}  p99 {self.ms_p99:7.2f} ms  "
-            f"-> {self.fps_from_median:5.1f} FPS  (noise x{self.noise_ratio:.2f})"
+            f"p95 {self.ms_p95:7.2f}  p99 {self.ms_p99:7.2f} ms "
+            f"(n={self.samples})  ->  {self.fps_sustained:5.1f} FPS sustained "
+            f"(noise x{self.noise_ratio:.2f})"
         )
 
     def as_dict(self) -> dict[str, object]:
@@ -159,34 +170,51 @@ def time_fn(
 ) -> Timing:
     """Measure ``fn`` and return the full distribution.
 
-    ``iterations`` calls per run, ``runs`` runs. The per-run means are the
-    samples; the *minimum* run is the model's own cost and the mean is what a
-    user experiences on a busy machine. Both are reported, because the ratio
-    between them is the machine's noise and pretending it away is how a latency
-    claim gets falsified.
+    Percentiles are over **individual calls**, not over run means. The previous
+    version timed a whole run, took the mean, and then reported percentiles across
+    ``runs`` samples - so a "p99" was the 99th percentile of five numbers, and a
+    "p95" of five. Those are not latency quantiles; they cannot be compared with
+    anyone's else, and a 5-sample p99 is close to the maximum by construction, so
+    it drifted with machine noise rather than with the workload.
+
+    Per-call timing is also the distribution a real-time system actually faces: a
+    signing stream is a sequence of frames, and what matters is how long the worst
+    1% of frames took.
+
+    ``iterations`` calls per run and ``runs`` runs, so the quantile sample is
+    ``iterations * runs`` calls. The per-*run* means are kept as well, and their
+    ratio to the fastest run is reported as the machine's noise, because
+    pretending noise away is how a latency claim gets falsified.
     """
     for _ in range(max(warmup, 0)):
         fn()
 
+    per_call: list[float] = []
     per_run: list[float] = []
     for _ in range(max(runs, 1)):
         t0 = time.perf_counter()
         for _ in range(iterations):
+            call0 = time.perf_counter()
             fn()
+            per_call.append((time.perf_counter() - call0) * 1000)
         per_run.append((time.perf_counter() - t0) * 1000 / iterations)
 
-    arr = np.asarray(per_run)
+    call_arr = np.asarray(per_call)
+    run_arr = np.asarray(per_run)
     return Timing(
         label=label,
         runs=len(per_run),
-        ms_min=float(arr.min()),
-        ms_mean=float(arr.mean()),
-        ms_median=float(np.median(arr)),
-        ms_p95=float(np.percentile(arr, 95)),
-        ms_p99=float(np.percentile(arr, 99)),
-        fps_from_min=float(1000.0 / arr.min()),
-        fps_from_median=float(1000.0 / np.median(arr)),
-        noise_ratio=float(arr.mean() / arr.min()) if arr.min() > 0 else float("nan"),
+        samples=len(call_arr),
+        ms_min=float(call_arr.min()),
+        ms_mean=float(call_arr.mean()),
+        ms_median=float(np.median(call_arr)),
+        ms_p95=float(np.percentile(call_arr, 95)),
+        ms_p99=float(np.percentile(call_arr, 99)),
+        ms_p95_run_mean=float(np.percentile(run_arr, 95)),
+        fps_from_min=float(1000.0 / call_arr.min()),
+        fps_from_median=float(1000.0 / np.median(call_arr)),
+        fps_sustained=float(1000.0 / call_arr.mean()),
+        noise_ratio=float(run_arr.mean() / run_arr.min()) if run_arr.min() > 0 else float("nan"),
         warmup=warmup,
     )
 
@@ -286,6 +314,107 @@ def perception_bench(
     except vram_guard.NoGpuError:
         rep.notes.append("no CUDA device; VRAM not measured")
     return rep
+
+
+def resident_stack_bench(
+    video_paths: list[Path],
+    *,
+    onnx_dir: Path | None = None,
+    iterations: int = 30,
+    warmup: int = 3,
+) -> BenchReport:
+    """Measure the *whole* live stack resident at once, not one stage at a time.
+
+    The stage-by-stage numbers in the export report are cumulative but not
+    simultaneous: each session was created, measured, and the sequence's allocator
+    reuse made the third model report 0 MB. A real-time signing system does not
+    load models one at a time - perception, three FER graphs and the text model
+    are all live while a signer is in front of the camera - so the budget question
+    is what the stack costs *together*, on the same device, at the same instant.
+
+    This builds all of it and then runs frames through it. The VRAM figure is a
+    pre-session baseline to post-run peak from ``nvidia-smi``, because torch's
+    allocator cannot see either ONNX Runtime's or MediaPipe's allocations.
+    """
+    import cv2
+
+    from seam.perception import tasks_api as T
+
+    rep = new_report()
+    frames: list[np.ndarray] = []
+    for v in video_paths:
+        cap = cv2.VideoCapture(str(v))
+        while len(frames) < iterations:
+            ok, bgr = cap.read()
+            if not ok:
+                break
+            frames.append(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
+        cap.release()
+        if len(frames) >= iterations:
+            break
+    if len(frames) < 8:
+        raise BenchError(f"only {len(frames)} frames decoded; cannot benchmark")
+
+    baseline = vram_guard.nvidia_smi_mb()
+
+    task = T.TaskLandmarker(parallel=True)
+    T._ensure(task)
+
+    sessions: list[tuple[str, Any]] = []
+    if onnx_dir is not None and onnx_dir.is_dir():
+        from seam.export.onnx_export import _session
+
+        for path in sorted(onnx_dir.glob("*.onnx")):
+            if ".int8." in path.name:
+                continue
+            sessions.append((path.stem, _session(path)))
+
+    if not sessions:
+        rep.notes.append("no ONNX graphs found; measured perception only")
+
+    def one() -> None:
+        T.process_frame(frames[next(tick) % len(frames)], next(tick), task=task)
+        for _name, sess in sessions:
+            # A zero tensor of the right shape, not the perception output. The
+            # FER graphs consume face crops, which are produced by a separate crop
+            # stage that does not exist yet, so wiring perception straight into
+            # them here would be a fiction. What this measures is the point: that
+            # all of the graphs are resident and being invoked at the same time.
+            sess.run(None, {sess.get_inputs()[0].name: _probe_input(sess)})
+
+    tick = iter(range(10**9, 10**9 + 10**6, 33))
+    rep.add(
+        time_fn(
+            one,
+            label=f"live stack ({len(sessions)} FER + 3 graphs)",
+            iterations=iterations,
+            warmup=warmup,
+            runs=1,
+        )
+    )
+    rep.notes.append(
+        f"resident stack: 3 MediaPipe graphs + {len(sessions)} ONNX graphs, all live at once"
+    )
+    rep.notes.append(
+        "FER inputs are zero tensors of the correct shape, not perception output: "
+        "the crop stage that would feed them does not exist yet, so this measures "
+        "residency and invocation, not an end-to-end inference"
+    )
+    rep.stages["stack_baseline_mb"] = baseline
+    rep.stages["stack_peak_mb"] = max(vram_guard.nvidia_smi_mb(), 0.0)
+    rep.stages["stack_delta_mb"] = max(rep.stages["stack_peak_mb"] - baseline, 0.0)
+
+    try:
+        rep.vram = measure_vram()
+    except vram_guard.NoGpuError:
+        rep.notes.append("no CUDA device; VRAM not measured")
+    return rep
+
+
+def _probe_input(session: Any) -> np.ndarray:
+    """A zero input shaped like the session's input, for a live-stack run."""
+    shape = [d if isinstance(d, int) else 1 for d in session.get_inputs()[0].shape]
+    return np.zeros(shape, dtype=np.float32)
 
 
 def save(report: BenchReport, path: Path) -> None:

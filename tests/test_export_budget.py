@@ -133,7 +133,10 @@ def test_provider_status_distinguishes_available_from_working() -> None:
     """Available is not working, and the status must say which one happened."""
     status = RT.provider_status()
     assert "CPUExecutionProvider" in status["available"]
-    assert status["active_on_probe"], "the probe must report which providers activated"
+    assert status["active_on_probe"], (
+        "the probe must activate something; a CPU provider is always available, "
+        f"so an empty list means the probe itself failed: {status['error']}"
+    )
     if status["fell_back_to_cpu"]:
         assert not status["cuda_working"]
     else:
@@ -193,3 +196,66 @@ def test_save_report_round_trips(tmp_path: Path) -> None:
     assert blob["unit"] is True
     assert "tolerances" in blob
     assert "vram_budget" in blob
+
+
+# --- latency quantiles must be per-call, not per-run-mean ------------------
+
+
+def test_quantiles_are_over_individual_calls() -> None:
+    """A p99 must come from many samples, not from a handful of run means.
+
+    The harness previously timed a whole run, took its mean, and reported
+    percentiles across ``runs`` samples - so a "p99" was the 99th percentile of
+    five numbers. This pins the sample count and the distinction.
+    """
+
+    from seam.eval.bench import time_fn
+
+    t = time_fn(lambda: None, label="unit", iterations=7, warmup=0, runs=3)
+    assert t.samples == 21, "quantiles must be backed by iterations * runs calls"
+    assert t.runs == 3
+    assert t.ms_p95 >= t.ms_median >= t.ms_min
+
+
+def test_slow_tail_is_visible_in_percentiles() -> None:
+    """A workload with a slow minority must show it in p95/p99.
+
+    With per-run means, one slow call in ten is diluted to a 10% shift of every
+    run mean and the tail disappears. This is the whole reason the quantiles are
+    now taken per call.
+    """
+    import time as _t
+
+    from seam.eval.bench import time_fn
+
+    state = {"n": 0}
+
+    def mixed() -> None:
+        state["n"] += 1
+        # Every fourth call is 10x slower.
+        if state["n"] % 4 == 0:
+            _t.sleep(0.004)
+        else:
+            _t.sleep(0.0004)
+
+    t = time_fn(mixed, label="unit", iterations=40, warmup=0, runs=1)
+    assert t.samples == 40
+    assert t.ms_p99 > t.ms_median * 2, (
+        f"p99 {t.ms_p99:.2f} ms should be far above the median {t.ms_median:.2f} ms "
+        "for a workload with a 25% slow tail"
+    )
+
+
+def test_fps_sustained_is_the_mean_rate() -> None:
+    """Sustained FPS must come from the mean, not the best case.
+
+    ``1000 / min`` is a best-case number that no real capture loop will ever see;
+    the plan's K6 has to be judged on the rate actually sustained.
+    """
+    import time as _t
+
+    from seam.eval.bench import time_fn
+
+    t = time_fn(lambda: _t.sleep(0.001), label="unit", iterations=30, warmup=0, runs=1)
+    assert t.fps_sustained == pytest.approx(1000.0 / t.ms_mean, rel=1e-6)
+    assert t.fps_from_min >= t.fps_sustained

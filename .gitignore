@@ -1,6 +1,9 @@
 # Derived data and model weights are reproducible from the fetchers; never commit them.
+# Anchored with a leading slash on purpose. A bare "data/" also matches
+# src/seam/data/, which silently left six source modules untracked - the data
+# acquisition package was invisible to git while existing on disk.
 artifacts/
-data/
+/data/
 *.npz
 *.npy
 *.pt
@@ -12,6 +15,10 @@ data/
 *.jpeg
 *.png
 !paper/figures/*.png
+
+# Python bytecode
+__pycache__/
+*.py[cod]
 
 # Environments
 .venv/

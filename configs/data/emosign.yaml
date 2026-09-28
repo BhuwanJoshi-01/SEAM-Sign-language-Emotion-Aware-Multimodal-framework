@@ -1,0 +1,42 @@
+# The affect benchmark. 200 utterances, 4 signers, 7-point sentiment + 10
+# emotion intensities + 3 free-text Deaf-annotator cue columns.
+#
+# EmoSign is ungated; the 200 clips resolve through the ASLLRP mirror by joining
+# the trailing numeric token of each video_name to an ASLLRP utterance ID.
+# Measured 2026-09-26: 200/200 join. See plan.md sections 1 and 6.
+dataset: emosign
+n_clips: 200
+
+# LOSO folds. Keyed on signer; Rachel's two session years are one fold.
+# Ben's 7-clip fold is reported separately and never pooled into a mean.
+loso:
+  n_folds: 4
+  signers: [Ben, Cory, Jonathan, Rachel]
+  fold_sizes:
+    Ben: 7
+    Cory: 87
+    Jonathan: 54
+    Rachel: 52
+  report_low_power_folds_separately: true
+
+# The "Single Expression Set of 140 clips" cited by prior work is NOT
+# reconstructible from the released CSV; five subset rules were tested and the
+# best match was 106. We use our own definition, name it, and report the full
+# 200 alongside.
+subsets:
+  full: all
+  single_expression:
+    rule: exactly one emotion above baseline, no tie at the maximum
+    n: 44
+
+# Krippendorff alpha from the EmoSign paper. Per-class accuracy on the low-alpha
+# classes is bounded by annotation agreement, not by the model; a suspiciously
+# high score on surprise_neg or disgust is treated as a bug signal.
+inter_annotator:
+  average_alpha: 0.593
+  per_class:
+    sentiment: 0.738
+    joy: 0.699
+    worry: 0.555
+    surprise_neg: 0.119
+    disgust: 0.166

@@ -209,13 +209,23 @@ def _oscillation(signal: np.ndarray, fps: float, thresholds: MarkerThresholds) -
             and np.sign(derivative[i - 1]) != 0
         ):
             turning[i] = True
-    # A reversal is a sign change in the derivative itself, counted separately.
-    sign_changes = int(np.sum(np.diff(np.sign(derivative)) != 0))
-    if sign_changes < thresholds.min_reversals:
-        return np.zeros(len(signal), dtype=np.float64)
 
     magnitude = np.abs(centred)
-    active = turning & (magnitude > thresholds.head_angle / 2.0)
+    # Threshold at ``head_angle`` itself, as the field documents (~20 degrees).
+    # The previous code used ``head_angle / 2.0``, so the effective threshold was
+    # 10 degrees - half the stated one - which is well inside the tracking jitter
+    # of a 256x256 face. Measured consequence: head_shake fired on 98% of
+    # EmoSign clips and head_nod on 65%, so neither carried information.
+    active = turning & (magnitude > thresholds.head_angle)
+
+    # Require ``min_reversals`` *large-amplitude* turning points, not merely
+    # ``min_reversals`` sign changes somewhere in the clip. The old test was
+    # clip-global: one qualifying sign change anywhere licensed every noisy
+    # turning point in the clip, so a single wobble anywhere turned the whole
+    # signal into "a shake". An oscillation is several large deflections, so the
+    # count has to be of the same kind of event the detector fires on.
+    if int(active.sum()) < thresholds.min_reversals:
+        return np.zeros(len(signal), dtype=np.float64)
     return np.where(active, magnitude, 0.0)
 
 

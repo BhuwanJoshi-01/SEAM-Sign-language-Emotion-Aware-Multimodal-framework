@@ -408,3 +408,201 @@ argmax for every batch, so the exports are the same computation.
     reading reflects allocator reuse in this sequence. A concurrent-6 figure needs a real
     simultaneous-load measurement before any claim is made, and K6 is still short of its 20 FPS
     target (17.8 idle), so the binding constraint is perception, not VRAM.
+
+### Wiring and gates (M2)
+
+13. **`seam bench` and `seam export` are wired and they fail the build.**
+    `make export` exits non-zero on a failed parity gate (observed exit 2 on the
+    `fer_cnn_a` INT8 rejection), and `make bench` exits non-zero on a VRAM breach.
+    A gate that only prints red is not a gate. `make lint` now covers `scripts` as
+    well as `src tests` — the trainer was not linted at all before, and a
+    refactor broke it silently during this milestone.
+14. **The perception benchmark had two defects of its own.** It drew the frame index
+    and the MediaPipe timestamp from two independent `next()` calls on one iterator,
+    so they advanced independently and were only accidentally ordered. And
+    `--sequential` asked the process-wide `landmarker()` singleton for a sequential
+    configuration, which it ignores once constructed — the "sequential" row would
+    have been the concurrent path relabelled, a 1.57x error in the ablation table.
+    Both fixed; a fresh `TaskLandmarker` is built for the sequential mode.
+15. **The VRAM gate now enforces the larger of torch's and the driver's figures.**
+    MediaPipe Tasks under the CPU delegate never touches torch, so torch reported
+    0 MB while `nvidia-smi` showed 90 MB in use. A gate taking the smaller number
+    would have passed a stage that was using the device. Perception now reports
+    90 MB (4% of budget) instead of 0 MB.
+16. **158 tests pass**, ruff and mypy clean across `src`, `tests` and `scripts`.
+
+### K6 — sustained capture FPS, measured and not met
+
+Concurrent, real video, RTX 3050: **median 57.9 ms/frame = 17.3 FPS**, p95 68.9 ms,
+p99 69.8 ms. Earlier longer idle run: 17.8 FPS median, 18.6 FPS best. The K6 target
+is **≥20 FPS**, so **K6 is not met**; the shortfall is ~15% and is stable across
+runs, not noise. Sequential is 88.3 ms (11.3 FPS), so concurrency is buying 1.57x
+and is necessary but not sufficient. Perception, not VRAM, is the binding
+constraint for real-time signing, and the plan's own remedies (12 fps capture
+target, keypoint subset) apply to perception rather than to the model budget.
+Recorded as a miss with the number attached rather than a target quietly restated.
+
+---
+
+## M2 addendum — latency quantiles were measured over the wrong quantity
+
+### A measurement defect, found while trying to strengthen the p99 claim
+
+17. **`p95` and `p99` were percentiles of 5 run-means, not of frame latencies.**
+    `time_fn` timed a whole run, divided by the iteration count, and then took
+    percentiles across the `runs` samples. With `runs=5` that is a "p99" over five
+    numbers — statistically it is very close to the maximum by construction, so it
+    tracked machine noise rather than the workload, and it could not be compared
+    with any other system's p99. Now every individual call is timed, and the
+    quantiles are taken over `iterations * runs` samples, with the sample count
+    printed next to them. Per-run means are retained and their p95 reported
+    separately as `ms_p95_run_mean`, to make the difference visible rather than to
+    quietly drop it.
+
+18. **`fps_from_min` was the wrong number for the K6 verdict.** `1000/min` is a
+    best case no capture loop will ever see. `fps_sustained = 1000/mean` is added
+    and is what the timing line prints, because K6 asks what rate a signer
+    actually gets when frames arrive back to back.
+
+19. **Pinned by three tests**: the sample count is `iterations * runs`; a workload
+    with a 25% slow tail must show `p99 > 2x median` (per-run means would dilute
+    it away); and `fps_sustained == 1000/mean`.
+
+### Blocked measurement — recorded, not worked around
+
+20. **The two measurements this milestone still owes cannot be taken right now: the
+    NVIDIA driver is not loaded in this kernel session.** `nvidia-smi` reports it
+    cannot communicate with the driver, `/dev/nvidia*` does not exist, and no nvidia
+    module is present. `torch.cuda.is_available()` is `False`. This is a machine
+    fault, not a code fault, and it is not recoverable from this shell.
+
+    Specifically still owed, and **not** measured:
+    - the sustained-capture p95/p99 with a real sample size (the harness now
+      supports it; it needs the GPU to be a GPU number);
+    - the simultaneous live-stack footprint — 3 MediaPipe graphs plus 3 ONNX graphs
+      all resident at once, which is what the "6 models resident" claim actually
+      requires. `seam.eval.bench.resident_stack_bench` is written and wired to
+      `seam bench --stack`, and is untested against hardware.
+
+21. **A CPU run was attempted and its output is deliberately not used.** The
+    harness reported `device cpu` against a configured target of the RTX 3050 and
+    attached the note *"Latency and VRAM numbers from this run must not enter the
+    paper's efficiency table."* It also declined to report VRAM at all. That refusal
+    is the guard working: a CPU latency number is not a 3050 latency number, and
+    the run refused to become evidence. The numbers it produced (min 25.2 ms,
+    median 43.1 ms, n=600) are recorded here only to show they were not promoted.
+
+22. **K6 is therefore unchanged and still a miss.** The verdict stands on the
+    earlier GPU runs (17.3 FPS median, 18.6 best, against a ≥20 target). The
+    corrected quantile machinery has not yet produced a fresh GPU p99, and no p99
+    claim is made until it does.
+
+23. **Provider probe hardened.** With the GPU gone, `provider_status()` returned an
+    empty active-provider list, which is indistinguishable from a broken probe. It
+    now retries with the CPU provider alone, mirroring how the real code path
+    degrades, so the probe always reports something.
+
+---
+
+## M3 — Linguistic-marker supervision
+
+Run ID `m3-markers-001`. Gate artefact `artifacts/audit/marker_labels.json`.
+
+### What is now real
+
+24. **200/200 EmoSign utterances join to the human-authored ASLLRP gloss map.**
+    `asllrp_utterance_map` and `asllrp_gloss_tokens` (3.8 MB) were defined in
+    `sources.py` but never fetched, and are marked as blocking M5. They are
+    actually required by M3's syntactic track, so they were fetched. The join is
+    by trailing numeric utterance ID and is complete, so every clip this project
+    reasons about has real linguistic context rather than a gloss it invented.
+    The gloss map holds 2,108 utterances, 1,243 token types, 16,784 tokens.
+
+25. **The syntactic track has a genuine input, and keeps its provenance.**
+    `seam.features.syntactic` labels `interrogative`, `negation`,
+    `reference_establishment` from the annotation via lexical rules, and
+    `topicalization` as a weak inference. Provenance is not cosmetic — the three
+    lexically-grounded labels carry `lexical-rule-over-annotated-gloss`, and
+    `topicalization` carries `heuristic (pseudo)` with confidence capped at 0.5,
+    because ASLLRP's gloss is a flat token sequence with no constituent
+    brackets and "this constituent was fronted" is not something the annotation
+    states. Rates on the 200 clips: interrogative 0.230, negation 0.135,
+    reference_establishment 0.465, topicalization 0.420.
+
+26. **A plausible reading of `fs-` would have been wrong, and was checked.** The 98
+    `fs-` token types look like they could encode facial or non-manual behaviour.
+    They are compound sign tokens — `fs-BEACH`, `fs-LATE`, `fs-OF`, 39 occurrences
+    for `fs-OF` alone. Reading the prefix as a facial signal would have put 98
+    token types into the non-manual vocabulary for no reason, so the lexicon was
+    read out of the corpus and `describe()` states the finding.
+
+### The blocking finding: the visual marker set is degenerate at clip level
+
+27. **4 of 6 visual markers fire on a large majority of clips**, which means they
+    cannot discriminate between clips:
+
+    | marker | clip prevalence | state |
+    |---|---|---|
+    | brow_raise | 0.855 | degenerate |
+    | brow_furrow | 0.540 | usable |
+    | mouth_morpheme | 0.950 | degenerate |
+    | head_shake | 0.785 | degenerate |
+    | head_nod | 0.170 | usable |
+    | mouth_positive | 0.905 | degenerate — and this is the *control* |
+
+    `mouth_positive` is designated in `markers.py` as the control that "should not
+    read as negative". A control present on 90% of clips is not a control. It also
+    means M1's confound audit compared signals that were near-constant across
+    clips, which is a candidate explanation for M1's null that has nothing to do
+    with marker effects being absent.
+
+28. **This is not the threshold rule being too loose.** On iid uniform noise
+    (500 x 52 coefficients) the `median + 1.5*MAD` rule fires on **0.2%** of
+    frames, and 0.0% at k=2. The rule is sound; the real signals are simply
+    heavy-tailed, so a k-sigma rule cannot push prevalence down. Raising k from
+    1.5 to 4.5 leaves `brow_raise` at 0.43 and `mouth_positive` at 0.83. No
+    defensible `k` makes these markers usable, and tuning one until the agreement
+    statistic looked good would have been p-hacking, so it was not done.
+
+29. **Two real bugs in the head path, found and fixed.** `_oscillation` thresholded
+    at `head_angle / 2.0` while the field documents `head_angle` as "~20 degrees" —
+    so the effective threshold was 10 degrees, inside the tracking jitter of a
+    256x256 face. And the `min_reversals` test counted sign changes anywhere in the
+    clip, so one qualifying wobble licensed every noisy turning point in the whole
+    signal. Together these made `head_shake` fire on 0.98 of clips and `head_nod`
+    on 0.65. Now thresholded at `head_angle` and requiring `min_reversals`
+    *large-amplitude* turning points: `head_shake` 0.785, `head_nod` 0.170. Pinned
+    by tests, including one asserting tracking jitter does not read as a shake.
+
+### Agreement, and why two of the three pairings are not reported as results
+
+30. The harness now **refuses to print a p-value for a degenerate marker**, and
+    states why. A lift of ~1.0 is what a broken instrument and a genuine null both
+    look like; conflating them is how "no effect" gets concluded when the truth is
+    "no resolution".
+
+    | pairing | observed | chance | lift | verdict |
+    |---|---|---|---|---|
+    | interrogative <-> brow_raise | 0.325 | 0.308 | 1.05 | not interpretable (brow_raise degenerate) |
+    | interrogative <-> brow_furrow | 0.480 | 0.478 | 1.00 | **interpretable: null, p=0.96** |
+    | negation <-> head_shake | 0.330 | 0.292 | 1.13 | not interpretable (head_shake degenerate) |
+
+31. **The one interpretable pairing is a clean null**, on the marker whose
+    prevalence is in the usable band. `interrogative` and `brow_furrow` are
+    independent — one from human annotation, one from blendshapes — and they do not
+    co-occur more than chance (lift 1.00, p=0.96). This is consistent with M1's WLASL
+    null, and it is a *resolvable* null rather than an unmeasurable one.
+
+### Verdict on M3
+
+32. **The M3 gate is met on labels: 200 clips, every label carrying provenance,
+    agreement statistics computed with base rates and a degeneracy check.** What the
+    gate does *not* establish is any linguistic association, and the honest
+    position is that the marker-claim half of the project is blocked on instrument
+    calibration, not on data or on ideas.
+33. **Next step, and it is not more thresholds.** A per-frame marker detector and a
+    per-clip label are different instruments. The right fix is a clip-level marker
+    definition with a stated minimum duration and amplitude, calibrated so that the
+    control `mouth_positive` has low prevalence — a criterion fixed *before* looking
+    at any interrogative/negation agreement, so the null above cannot be an artefact
+    of the calibration and a future positive cannot be either.

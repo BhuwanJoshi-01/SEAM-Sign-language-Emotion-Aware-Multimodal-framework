@@ -140,18 +140,23 @@ def provider_status() -> dict[str, object]:
     path = Path(os.environ.get("TMPDIR", "/tmp")) / "seam_ep_probe.onnx"
     onnx.save(model, str(path))
 
+    requested = [p for p in available if p != "AzureExecutionProvider"]
     active: list[str] = []
     error = ""
-    try:
-        sess = ort.InferenceSession(
-            str(path), providers=[p for p in available if p != "AzureExecutionProvider"]
-        )
-        sess.run(None, {"input": np.zeros((1, 3, 8, 8), dtype=np.float32)})
-        active = list(sess.get_providers())
-    except Exception as exc:  # pragma: no cover - depends on the machine
-        error = f"{type(exc).__name__}: {exc}"
-    finally:
-        path.unlink(missing_ok=True)
+    # Try the full list, then CPU alone. Without the second attempt a machine
+    # whose GPU provider cannot initialise returns an *empty* active list, which
+    # is indistinguishable from a broken probe - and the real code path degrades
+    # to CPU rather than failing, so the probe must degrade the same way.
+    for attempt in (requested, ["CPUExecutionProvider"]):
+        try:
+            sess = ort.InferenceSession(str(path), providers=attempt)
+            sess.run(None, {"input": np.zeros((1, 3, 8, 8), dtype=np.float32)})
+            active = list(sess.get_providers())
+            error = ""
+            break
+        except Exception as exc:  # pragma: no cover - depends on the machine
+            error = f"{type(exc).__name__}: {exc}"
+    path.unlink(missing_ok=True)
 
     cuda_working = "CUDAExecutionProvider" in active
     return {

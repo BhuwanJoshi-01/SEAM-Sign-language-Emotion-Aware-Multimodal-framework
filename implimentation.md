@@ -1,3 +1,4 @@
+
 # SEAM — Implementation Breakdown
 
 **This file is the execution expansion of `plan.md`.** `plan.md` is canonical for scope, evidence
@@ -208,26 +209,26 @@ the 20 FPS target, deferred to M2 with the load confound named.
 
 ## M1 — The confound audit ★ · **GATE CLOSED 2026-09-27 — C1 refuted on WLASL**
 
-- [x] `preprocess/normalize.py` — interpolate (part-slice aware), shoulder-center + scale
-      normalize, One Euro, 12 fps resample, windowing. Translation/scale invariance and One-Euro
-      causality asserted as properties.
-- [x] `features/prosody.py` — speed, peak speed, amplitude, signing-space volume, repetition
-      (autocorrelation peaks), pause fraction/mean, jerk, sign count, active fraction
-- [x] `features/markers.py` — brow-raise / brow-furrow / mouth-morpheme / head-shake / head-nod,
-      plus a `mouth_positive` **control** marker. Clip-relative `median + k·MAD` thresholds,
-      every constant stated in the module docstring
-- [x] `data/wlasl.py` — annotation join, decodability probe, failure classification, repair
-- [x] `eval/fer.py` + `eval/fer_audit.py` — non-signer FER baselines, face cropping, matched-pair
-      design, cluster bootstrap, uniform null model, MDE
-- [x] `scripts/extract_wlasl.py`, `fetch_rafdb*.py`, `train_fer.py`, `run_confound_audit.py`,
-      `diagnose_fer_sensitivity.py`, `diagnose_fer_affect.py`
-- [x] Run the audit on ≥500 clips — **2,565 clips, 189,352 frames, 4,168 scorable windows**
-- [x] **MDE added to every result** and asserted by test
-- [x] FER front end fixed — grayscale + histogram equalisation + per-image z-score, **one
-      function on both the fitting and inference paths**
-- [x] Positive control for the instrument (`diagnose_fer_affect.py`): does the FER read-out track
-      true affect on sign video at all
-- [x] Full suite **140 passing**; ruff + mypy clean
+- [X] `preprocess/normalize.py` — interpolate (part-slice aware), shoulder-center + scale
+  normalize, One Euro, 12 fps resample, windowing. Translation/scale invariance and One-Euro
+  causality asserted as properties.
+- [X] `features/prosody.py` — speed, peak speed, amplitude, signing-space volume, repetition
+  (autocorrelation peaks), pause fraction/mean, jerk, sign count, active fraction
+- [X] `features/markers.py` — brow-raise / brow-furrow / mouth-morpheme / head-shake / head-nod,
+  plus a `mouth_positive` **control** marker. Clip-relative `median + k·MAD` thresholds,
+  every constant stated in the module docstring
+- [X] `data/wlasl.py` — annotation join, decodability probe, failure classification, repair
+- [X] `eval/fer.py` + `eval/fer_audit.py` — non-signer FER baselines, face cropping, matched-pair
+  design, cluster bootstrap, uniform null model, MDE
+- [X] `scripts/extract_wlasl.py`, `fetch_rafdb*.py`, `train_fer.py`, `run_confound_audit.py`,
+  `diagnose_fer_sensitivity.py`, `diagnose_fer_affect.py`
+- [X] Run the audit on ≥500 clips — **2,565 clips, 189,352 frames, 4,168 scorable windows**
+- [X] **MDE added to every result** and asserted by test
+- [X] FER front end fixed — grayscale + histogram equalisation + per-image z-score, **one
+  function on both the fitting and inference paths**
+- [X] Positive control for the instrument (`diagnose_fer_affect.py`): does the FER read-out track
+  true affect on sign video at all
+- [X] Full suite **140 passing**; ruff + mypy clean
 
 **Result.** No marker-induced negative bias is detectable. The two effects that reach
 significance run the *wrong way* and do not replicate across models. MDE 0.0030–0.0083 = 1.0–2.8%
@@ -236,11 +237,12 @@ uniform null model null in all six rows; a planted +0.20 bias is recovered by th
 
 **The plan change M1 forces:** the confound is a **discourse** phenomenon, and WLASL is isolated
 dictionary signing with no discourse context. →
-- [ ] **Move the marker labeller and M4's LOSO evaluation to continuous signing** (ASLLRP 200
-      utterances, local; or How2Sign keypoints). This is the testable version of C1.
 
+- [ ] **Move the marker labeller and M4's LOSO evaluation to continuous signing** (ASLLRP 200
+  utterances, local; or How2Sign keypoints). This is the testable version of C1.
 
 ### Deviations from the original M1 sketch, and why
+
 1. **WLASL is 2,657 clips, not 3,863.** The on-disk filename is `<gloss>/<instance_id>.mp4`, and
    1,206 of the 3,863 files are `_yt.mp4.part.mp4` *duplicates* of instances that also have a
    good copy. `plan.md` §1 is corrected.
@@ -280,24 +282,38 @@ dictionary signing with no discourse context. →
 - [ ] `eval/bench.py` — p50/p95/p99, peak VRAM, FPS on the 3050
 - [ ] add `onnxruntime-gpu` for the CUDA EP
 - [ ] **Re-measure K6 (≥20 FPS) on an idle machine.** The M0 figure of 14.9 FPS was taken under
-      external load (load avg 6–9); sequential measured 82 ms unloaded and 110 ms loaded. If it
-      still misses, relax the target and publish the miss.
+  external load (load avg 6–9); sequential measured 82 ms unloaded and 110 ms loaded. If it
+  still misses, relax the target and publish the miss.
 - [ ] Resolve the M1 instrument lesson in code: one front end, asserted equal by test (rule 16)
 
 ---
 
 ## M3 — Linguistic-marker supervision
-- [ ] Track A: heuristic `L` labeller with a provenance flag on every label
+
+- [X] Track A: `L` labeller with a provenance flag on every label — `features/syntactic.py`
+  (syntactic half, from real ASLLRP gloss annotation) + `features/markers.py` (visual half)
+- [X] fetched the ASLLRP gloss resources; **200/200 EmoSign utterances join** to the
+  human-authored gloss map, so the syntactic track has a real input
+- [X] agreement statistics for the heuristic labels, with base rates and a degeneracy
+  check — `artifacts/audit/marker_labels.json`, 200 clips, gate met
+- [X] established that `fs-` is compound-sign notation, not facial signal
+- [X] fixed two head-path bugs in `markers._oscillation` (`head_angle/2` vs documented
+  `head_angle`; clip-global `min_reversals`); head_shake 0.98 → 0.785, head_nod 0.65 → 0.170
+- [ ] **re-point at continuous signing** (M1's finding): ASLLRP 200 utterances, where the
+  interrogative / negation / topicalisation syntax of the English caption gives an
+  independent handle on the marker that isolated signs do not
+- [ ] **clip-level marker calibration.** 4 of 6 visual markers are degenerate (fire on
+  79-95% of clips), including the `mouth_positive` control at 0.91. The threshold rule is
+  sound (0.2% firing on iid noise); the signals are heavy-tailed. Define a clip-level
+  marker with stated minimum duration/amplitude and calibrate on *control prevalence*,
+  fixed before looking at any agreement. This blocks the marker-claim half.
 - [ ] Track B (async): BU access request for the real SignStream non-manual XML
 - [ ] cue-grounding report: our prosody features vs the 600 Deaf-annotator cue strings
-- [ ] agreement statistics for the heuristic labels
-- [ ] **re-point at continuous signing** (M1's finding): ASLLRP 200 utterances, where the
-      interrogative / negation / topicalisation syntax of the English caption gives an
-      independent handle on the marker that isolated signs do not
 
 ---
 
 ## M4 — Factorized encoder ★ core contribution
+
 - [ ] `affect/grl.py`, `affect/vclub.py`, `affect/orthogonality.py`
 - [ ] `affect/encoder.py` — `z_L`, `z_A`, heads, ≤1M params each, asserted by a test
 - [ ] `eval/loso.py` — 4 folds, signer-disjoint, zero-overlap assertion
@@ -309,6 +325,7 @@ dictionary signing with no discourse context. →
 ---
 
 ## M5 — Recognition + translation
+
 - [ ] M5a: continuous recognition on the 17,522 frame-aligned ASLLRP gloss tokens
 - [ ] M5b: 255-dim pose → linear → T5-small on How2Sign keypoints, 24 fps and 12 fps
 - [ ] FLOPs table; 3 seeds; signer-disjoint
@@ -316,6 +333,7 @@ dictionary signing with no discourse context. →
 ---
 
 ## M6 — Emotion-conditioned generation
+
 - [ ] paraphrase corpus build + semantic-equivalence filter + disclosure
 - [ ] emotion control tokens in T5-small
 - [ ] style accuracy / BERTScore-F1 / degeneracy guard / controllability test
@@ -323,6 +341,7 @@ dictionary signing with no discourse context. →
 ---
 
 ## M7 — Avatar + live demo
+
 - [ ] retargeting with joint clamping + quaternion continuity (gimbal-flip test)
 - [ ] 52 blendshapes → VRM/ARKit expression map
 - [ ] emotion modulation of gain, amplitude, timing
@@ -332,12 +351,14 @@ dictionary signing with no discourse context. →
 ---
 
 ## M8 — Cross-lingual ablation
+
 - [ ] NSL/INCLUDE integrity re-audit (v1's `.part` finding is stale)
 - [ ] zero-shot then few-shot transfer; Top-1 vs chance
 
 ---
 
 ## M9 — Paper, repro, release
+
 - [ ] `scripts/repro_all.sh`; CI test that fails on any unlogged number
 - [ ] model cards; ethics, limitations, Deaf-community statement
 - [ ] close the §6 provenance item

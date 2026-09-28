@@ -312,6 +312,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--sequential", action="store_true", help="measure the sequential baseline"
     )
     p_bench.add_argument("--out", help="report path")
+    p_bench.add_argument(
+        "--stack", action="store_true", help="also measure the full live stack (3 graphs + FER)"
+    )
     p_bench.set_defaults(func=cmd_bench)
 
     p_exp = sub.add_parser("export", help="ONNX export + FP32/INT8 parity (M2)")
