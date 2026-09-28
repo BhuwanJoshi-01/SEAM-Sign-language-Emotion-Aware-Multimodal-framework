@@ -173,59 +173,53 @@ occurrence in this project of the same failure family, so `plan.md` §0 rule 16 
 fit and inference front ends to be asserted equal by test.
 
 ### M2 — Efficiency harness & the 4 GB budget, proven early
-Benchmark MediaPipe-Tasks throughput and VRAM on the 3050 now, so M3+ are designed against real
-numbers. ONNX export + FP32↔INT8 parity harness + a peak-VRAM enforcer that **fails loudly
-rather than degrading silently**. Add `onnxruntime-gpu` for the CUDA EP.
+
+**Status: GATE MET.** Every element of the gate is now measured on the 3050 with an
+instrument that records the conditions it was measured under.
 
 **Gate:** measured p50/p95/p99 + peak VRAM on the 3050 for the perception stage; CI test that
 fails above the ceiling.
-**Kill switch:** never cut — headline claim.
-**Survives:** the efficiency section.
 
-**Status: in progress.** Export and parity are done; the perception latency sweep and the CLI
-wiring are not.
+| element | result |
+|---|---|
+| p50 / p95 / p99, perception, on the 3050 | **41.8 / 73.2 / 78.1 ms** over 900 individually-timed calls |
+| sustained rate | **20.4 FPS** (repeats: 19.7, 20.0, 20.3) |
+| sequential baseline, same instrument | 73.0 ms p50, 12.8 FPS — **concurrency worth 1.75x** |
+| peak VRAM, perception | 90 MB |
+| peak VRAM, **6 models live at once** | **186 MB against the 2500 MB ceiling (7%)**, 20.3 FPS |
+| CI gate that fails above the ceiling | `make bench` exits non-zero; 185 tests, 24 on the guards |
+| FP32↔INT8 parity harness | met, and it rejected `fer_cnn_a` INT8 |
+| `onnxruntime-gpu` CUDA EP | met, after preloading the bundled CUDA 13 libraries |
 
-- **Export/parity complete** (run `m2-onnx-001`, 24 batches / 56 real held-out faces per model).
-  FP32 accepted for all three FER models, max probability deviation 3.91e-04, argmax 100%.
-  INT8 accepted for `fer_cnn_b`/`fer_cnn_c`, **rejected for `fer_cnn_a`** at 95.8% argmax
-  agreement against a 98% gate. INT8 is also *slower* than FP32 on this GPU for `fer_cnn_b`
-  (31.96 ms vs 9.12 ms), so no blanket INT8 speed claim is available.
-- **VRAM is not the binding constraint.** 102 + 72 + 0 MB resident for the three FER graphs
-  against the 2500 MB ceiling. The 0 MB is correct incremental accounting — the first model absorbs
-  the CUDA context — not a failed measurement. What this does *not* license is a "6 models
-  resident" claim; that needs a simultaneous-load measurement.
-- **Three measurement instruments were wrong and are now fixed**, each of which had been
-  producing numbers that looked fine: the CUDA execution provider silently failed while
-  `get_available_providers()` advertised it; torch's allocator reports `0.0 MB` for a live ONNX
-  Runtime session; and a VRAM baseline taken after session creation measures neither the CUDA
-  context nor the weights. Details in `paper/EXPERIMENT_LOG.md`.
-- **A silent data defect was found and fixed while building the parity harness.** The
-  `bbox_xyxy_768` boxes were never mapped from their 768-pixel frame into image space; measured
-  face containment in the crop was 52%, and is 100% after the fix. Re-training on corrected crops
-  moved `fer_cnn_a` from 0.6165 to 0.6136 — inside the noise band, so **M1 stands and is not
-  reopened**, but the defect was real and the measurement is now pinned by
-  `tests/test_rafdb_bbox.py`.
-- **Wired and gated.** `seam bench` and `seam export` are real commands with `make bench`,
-  `make bench-seq`, `make export` and `make parity-report`. The export gate exits non-zero on a
-  failed parity check and the bench gate on a VRAM breach. `make lint` covers `scripts` now, which
-  it did not before. 14 tests cover export, quantization, the provider probe, the budget enforcer
-  and the report; 158 pass overall.
-- **K6 is a miss, recorded as one.** 17.3 FPS median against a ≥20 FPS target, stable across
-  runs. Perception, not VRAM, is the binding constraint for real-time signing, so the plan's
-  remedies (12 fps capture target, keypoint subset) belong to perception rather than the model
-  budget. The target has not been quietly restated.
-- **Blocked, not deferred:** the two measurements M2 still owes — a sustained-capture
-  p95/p99 with a real sample size, and the simultaneous live-stack footprint (3 MediaPipe graphs
-  plus 3 ONNX graphs resident together) — cannot be taken because the NVIDIA driver is not loaded
-  in the current kernel session (`nvidia-smi` cannot reach the driver, `/dev/nvidia*` absent,
-  `torch.cuda.is_available()` False). A machine fault, not a code fault. Both harnesses are
-  written, wired to `seam bench --stack`, and unit-tested; neither has GPU numbers. No CPU number
-  is substituted for a GPU number anywhere.
-- **A latency-measurement defect was found and fixed in the process.** `p95`/`p99` were
-  percentiles of five run-means rather than of frame latencies, so the "p99" tracked machine noise
-  and could not be compared with anything. Quantiles are now taken per call over
-  `iterations x runs` samples with the count printed, and `fps_sustained` (1000/mean) replaces
-  best-case FPS as the number K6 is judged on.
+- **K6 is met marginally, and is reported that way.** Four reportable runs give
+  19.7–20.4 FPS against a ≥20 target: it meets the target at the median and does not
+  clear it at the low end. A single 20.4 FPS run would have been the dishonest way to
+  report it.
+- **K5 is comfortably met**: 186 MB for the whole live stack (3 MediaPipe graphs + 3
+  ONNX FER graphs resident simultaneously) against a 2500 MB ceiling.
+- **VRAM is not the binding constraint; the CPU is.** MediaPipe runs on the CPU
+  delegate, so perception is bound by the core clock. This was not visible until
+  recently: the host came up in `powersave` at 1.14 GHz of 4.5 GHz and the same
+  benchmark read 118 ms against 41.8 ms. Two frame-mix and hand-detection
+  explanations were measured and rejected first, so the attribution is not a guess.
+- **The instruments had to be fixed before the numbers could mean anything.** Each of
+  these produced a plausible, wrong reading: quantiles taken over 5 run-means rather
+  than over frames; `noise_ratio`, which compares runs within one session and so is
+  blind to a uniformly busy machine; a post-run clock sample that reports 16% of peak
+  for a run at 87% and rejected a *passing* measurement; an 80%-of-single-core-turbo
+  gate that flagged a healthy full-turbo run; and a governor check that only ran in
+  one branch, so a `powersave` run that happened to catch a full clock was accepted.
+  The benchmark now records governor, during-run clock, load and memory, and refuses
+  to call a run reportable without them.
+- **Reports are non-destructive and run-stamped.** `bench.save`/`save_report` write a
+  run-scoped file plus a `latest.json` and never overwrite — an earlier in-place save
+  let a CPU run destroy the only stored GPU perception measurement, while the
+  experiment log cited figures with no artefact left to check them against. Run IDs
+  hash the measured numbers, so a cited ID cannot drift from its artefact.
+- **K6's honest caveat:** the FER graphs in the live-stack figure are fed zero tensors
+  of the correct shape, not perception output, because the crop stage that would feed
+  them does not exist yet. That measurement is about residency and invocation, not
+  end-to-end inference.
 
 ### M3 — Linguistic-marker supervision (`L` labels)
 
@@ -261,28 +255,122 @@ wiring are not.
   reported as the same thing. Of three expected pairings, two are not interpretable
   and one — interrogative ↔ brow_furrow, the marker inside the usable band — is a
   **resolvable null**: lift 1.00, p=0.96, from two independent sources.
-- **Next step is not more thresholds.** A per-frame detector and a per-clip label are
-  different instruments; the fix is a clip-level definition with stated minimum
-  duration and amplitude, calibrated so the control has low prevalence — a criterion
-  fixed *before* looking at any agreement, so neither this null nor a future positive
-  can be a calibration artefact.
-- Artefact `artifacts/audit/marker_labels.json`; 173 tests pass.
+- **Calibration resolved, and the first strong result was mostly clip length.** A
+  pre-registered criterion (control ≤25% prevalence, all markers in [5%, 60%])
+  could not be met by any of 64 settings, because `mouth_positive` is genuinely
+  active in ~every clip and is not a control. Two scale bugs followed: MAD is the
+  wrong scale for heavy-tailed blendshape signals (27:0 spread in peak evidence), and
+  `clip_presence` compared the new clip-range evidence against the MAD-scale constant
+  `k=1.5`, so all four blendshape markers silently read zero coverage.
+- **The first association result was a duration artefact.** On the *integral* of the
+  excursion, all three pairings looked strong and correctly directed (r up to +0.71).
+  Every syntactic label tracks clip length (interrogative 5.77s vs 4.48s, r_pb=+0.68)
+  because questions and negated statements are longer utterances, and an integral
+  inherits that mechanically. On a per-frame mean, interrogative/brow_raise went
+  **+0.414 → −0.045** — the whole association was clip length, and reporting it would
+  have been a false positive.
+- **Result (partial correlation on log-duration, permutation, Bonferroni ×3):**
+  **negation ↔ head_shake r=0.554, p=0.011, p×3=0.033, MDE 0.411** — the canonical ASL
+  negation marker, and the one effect that survives. Interrogative ↔ brow_raise
+  −0.084 (p=0.62) and ↔ brow_furrow 0.199 (p=0.24) are **powered nulls** against an
+  MDE of ~0.34, not "no effect".
+- **Does not reopen M1**: different substrate (continuous utterances, marker–syntax
+  co-occurrence, duration-controlled) versus M1 (isolated signs, marker effect on a FER
+  prediction). The two are compatible.
+- **Grounding move done, and it returns a negative result.** The feature set was tested
+  against the 600 free-text Deaf-annotator cue strings. The annotators write two kinds
+  of thing — motor cues ("bared teeth", "head shake") and affective *interpretations*
+  ("conveys surprise", "signifies worry") — and only the first is evidence about a
+  feature, since affect is FER's target. 482/600 strings carry a motor cue; 118 are
+  affective-only and are excluded by construction rather than counted as misses.
+  **None of 15 cue/feature tests survives Bonferroni** (duration-controlled,
+  permutation, MDE reported). The assumed feature set is not validated, which is the
+  point of running the check.
+- **One channel is corroborated by two independent ground truths.** `head_shake` gives
+  r=+0.275 (p=0.077) against annotator text and r=+0.554 (p=0.011) against lexical
+  negation from the ASLLRP gloss. The brow and mouth channels return nulls *and* are
+  the channels measured as firing on 79-95% of clips, so those nulls are statements
+  about saturated instruments.
+- **`head_nod` is reported BLIND, not null** — zero on 83% of clips, so it cannot
+  discriminate. Reporting its non-separation as evidence would be indistinguishable from
+  saying the annotators were wrong.
+- **M4's feature set is now specified by the corpus rather than by taste**: six cue
+  categories the annotators actually used have no feature behind them —
+  `head_tilt`, `eye_widen`, `blink_close`, `gaze_shift`, `fingerspelling`,
+  `body_posture`. The first two of the eye cues are recoverable from blendshape
+  coefficients already being computed and simply not read.
+- **Track B (BU access for real SignStream non-manual XML) remains outstanding** and is
+  the only M3 item not closed; it is external.
+- Artefact `artifacts/audit/marker_labels.json`; 177 tests pass.
 
 ### M4 — Factorized non-manual encoder + EmoSign LOSO ★ CORE CONTRIBUTION
-`z_L = Enc_L(NM)`, `z_A = Enc_A(NM, P)`, each ≤1M params. Losses: `CE(head_L)`, `CE(head_A)`,
-`MSE(head_VA)`, **GRL both directions**, `‖z_Lᵀ z_A‖²_F`, **vCLUB** MI upper bound. 4-fold LOSO
-on the 200 clips; entangled single-branch baseline; per-λ ablation harness; frozen cross-probes →
-cross-prediction AUC (0.5 = perfect separation).
-**Positive control (rule 13):** a signer-embedding probe must score high, proving the metric
-detects entanglement when it exists.
-**Qualitative set:** neutral-affect wh-question and negation clips where the entangled baseline
-calls it anger — the documented hearing-non-signer error — and the factorized model does not.
 
-**Gate:** cross-prediction AUC ≤ 0.60 **with no drop** in affect wF1, under LOSO, positive control
-passing.
-**Kill switch:** if AUC improves but wF1 drops, rewrite the claim to "separation without loss" and
-publish the trade-off curve.
-**Survives:** the paper.
+**Status: GATE NOT MET.** All the instruments exist and are falsifiable; the model does
+not separate the factors and does not learn either task.
+
+**Gate:** cross-prediction AUC ≤ 0.60 **with no drop** in affect wF1, under LOSO, positive control passing.
+**Kill switch:** if AUC improves but wF1 drops, rewrite the claim to "separation without loss" and publish the trade-off curve.
+
+**Rerun with multi-label affect** (run `m4-factorizer-002`) — the framing was the bug:
+
+| | single-expr | **multi-label** | target |
+|---|---|---|---|
+| trainable windows | 314 | **1,765** | — |
+| cross A→L (linguistic from z_A) | 0.695 | **0.505** (chance) | — |
+| cross L→A (affect from z_L), weighted | 0.879 | **0.691** | ≤ 0.60 |
+| worst fold | — | **0.884** (Ben) | ≤ 0.60 |
+| affect micro-F1 | n/a | **0.359** | no drop |
+| balanced acc, linguistic | 0.547 | 0.529 | — |
+| balanced acc, affect | 0.173 | 0.497 (ref 0.5) | — |
+| signer positive control | 0.971 | **0.973** (passes) | ≥ 0.80 |
+
+- **The gate still fails**, on the worst fold: 0.884 (Ben) against ≤ 0.60. The control
+  passes, so the failure is the model's, not the instrument's.
+- **What the fix bought.** EmoSign's affect annotation is multi-label by construction, so
+  requiring one committed emotion per clip discarded 1,451 of 1,765 windows. Multi-hot
+  targets with BCE over eight independent binaries keeps all of them, and **cross A→L
+  reached chance (0.505)** — the affect factor no longer carries linguistic information,
+  which is a real result and the affect-side GRL is demonstrably doing its job.
+- **The full model is best on all three target metrics at once** — worst cross AUC *and*
+  micro-F1 — so separation no longer costs task performance. That clears the plan's
+  kill-switch condition: removing any separation term lowers micro-F1 by 0.024–0.060.
+- **The remaining obstacles are not separation terms.** (a) The Ben fold has 7 clips and
+  only 3 of 8 affect labels reach support: it needs an explicit "insufficient support"
+  verdict instead of a number, or merged small-signer folds. (b) Residual affect in
+  `z_L` at 0.691 may be genuine — M3 measured a real head-shake/negation association, and
+  the brow and mouth channels remain saturated.
+
+- **The control passes, so the failure is real and not a blind instrument.** That was the
+  point of rule 13: a metric that cannot detect entanglement when it exists would pass
+  a completely entangled model.
+- **The separation terms work, monotonically, and are not enough.** Removing the
+  orthogonality penalty moves cross L→A from 0.879 to 0.903; removing all separation
+  pressure gives 0.898 with the adversarial head rising 0.143 → 0.162. Correctly signed,
+  far short of the target.
+- **The binding constraint is the data, not the architecture.** Requiring one committed
+  emotion per clip leaves **314 trainable windows from 200 clips** — 1,451 of 1,765 are
+  dropped because EmoSign's affect labels are multi-label by construction. M4's
+  single-expression 8-class framing discards 82% of the windows and the remainder does
+  not learn. **The next step is a multi-label affect objective over the discarded
+  windows, not more separation terms.**
+- **Plain accuracy would have hidden this.** The majority-class predictor scores 0.863
+  (linguistic) and 0.334 (affect) and beats both the factorized model and the entangled
+  baseline. A majority reference is now printed with every accuracy, and the gate uses
+  weighted F1 as the plan specifies.
+- **Five instruments were wrong before the model was, each caught by refusing to believe
+  a number:** the plan's vCLUB returns an *inverted* ordering and was replaced by a
+  JSD bound; a dependence detector scores **0.94 on training pairs and 0.4996 held out**,
+  so all probes are cross-fitted; `auc()` silently returned **3.996** on 8-class labels
+  and now raises; the probe's hand-rolled optimiser diverged; and **neither adversarial
+  term was in the loss at all**, so the GRL heads were untrained — which dissolved an
+  apparent "adversarial defeat" finding that was really an unfitted head. Two advertised
+  ablation levers were config fields the loss never read, so one variant reproduced
+  `full` byte for byte.
+- **What survives this milestone:** the loss primitives (GRL both directions,
+  scale-normalised orthogonality, a calibrated JSD MI bound), LOSO with the
+  signer-disjointness assertion as a constructor invariant, and a cross-probe metric with
+  a positive control that gates its own interpretation. That is the reusable part, and
+  it is what the M4 rerun needs.
 
 ### M5 — Recognition + translation
 **M5a continuous recognition:** train on the 17,522 frame-aligned ASLLRP gloss tokens with
@@ -357,8 +445,8 @@ Never fill a cell from an estimate. Every cell cites a run ID.
 | **K2** | Disentanglement cross-prediction AUC | 0.5 = perfect | **≤ 0.60**, no affect loss | — | M4 |
 | **K3** | Positive control: signer probe AUC | — | ≥ 0.80 | — | M4 |
 | **K4** | EmoSign emotion macro-F1, video-only, LOSO | **eJSL EANwH 21.09**; GPT-4o 20.76 | **> 21.09** | — | M4 |
-| **K5** | Peak inference VRAM / p95 latency on the 3050 | 4096 MB hard limit | **< 2500 MB / < 400 ms** | **174 MB / 10.8-13.7 ms (FER)**, 90 MB perception | M2, M7 |
-| K6 | Sustained capture FPS | — | ≥ 20 | **17.3 med / 18.6 best** | M2 |
+| **K5** | Peak inference VRAM / p95 latency on the 3050 | 4096 MB hard limit | **< 2500 MB / < 400 ms** | **186 MB, 6 models live / 73.2 ms p95 perception** | M2, M7 |
+| K6 | Sustained capture FPS | — | ≥ 20 | **20.4 (repeats 19.7-20.4)** | M2 |
 | K7 | How2Sign BLEU-4 at ≤80M params | 10.06 published | ≥ 8.0 | — | M5 |
 | K8 | Conditioned-gen style acc. @ BERTScore ≥0.90 | — | ≥ 80% | — | M6 |
 | K9 | Avatar preference vs neutral | 50% = tie | ≥ 60% | — | M7 |

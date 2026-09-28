@@ -27,7 +27,9 @@ into the paper without its provenance is visibly incomplete.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
+import os
 import platform
 import time
 from collections.abc import Callable
@@ -72,6 +74,12 @@ class Timing:
     #: 1000 / mean, i.e. the rate actually sustained when frames arrive back to
     #: back. The honest number for a capture loop.
     fps_sustained: float = 0.0
+    #: Core clock during the measured window, in MHz. Recorded because the
+    #: perception stage is CPU-bound and a latency figure without its clock is not
+    #: reproducible: the same benchmark read 118 ms at 1.14 GHz and 40.7 ms at
+    #: 3.9 GHz on one host.
+    cpu_clock_mhz_median: float = float("nan")
+    cpu_clock_mhz_max: float = float("nan")
 
     def summary(self) -> str:
         return (
@@ -150,6 +158,26 @@ def machine_facts() -> dict[str, str]:
             if line.startswith("MemAvailable"):
                 facts["mem_available_kb"] = line.split()[1]
                 break
+    # CPU frequency state. The perception stage runs on the MediaPipe CPU delegate,
+    # so it is bound by the core clock, and the governor is not recorded by any
+    # other tool here. On a host sitting at 1.14 GHz against a 4.5 GHz maximum - the
+    # powersave governor's idle state after a reboot - the same benchmark measured
+    # 118 ms median against 57.9 ms on the same machine before it rebooted. Two
+    # numbers, one machine, and no field in the report distinguished them.
+    with contextlib.suppress(OSError, AttributeError):
+        facts["cpu_governor"] = (
+            Path("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor").read_text().strip()
+        )
+    with contextlib.suppress(OSError, AttributeError, ValueError):
+        khz = float(
+            Path("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq").read_text().strip()
+        )
+        facts["cpu_cur_mhz"] = f"{khz / 1000:.0f}"
+    with contextlib.suppress(OSError, AttributeError, ValueError):
+        khz = float(
+            Path("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq").read_text().strip()
+        )
+        facts["cpu_max_mhz"] = f"{khz / 1000:.0f}"
     try:
         import torch
 
@@ -158,6 +186,102 @@ def machine_facts() -> dict[str, str]:
     except ImportError:  # pragma: no cover
         pass
     return facts
+
+
+#: A run taken while the machine is busier than this is not reportable.
+#:
+#: ``Timing.noise_ratio`` compares runs *within* one measurement session, so it is
+#: blind to sustained external load: three equally contended runs look clean. On a
+#: freshly rebooted host running a container at 400% CPU alongside a JVM and three
+#: browsers, a perception benchmark reported 118.8 ms median against 57.9 ms measured
+#: on an idle host, with a noise ratio of 1.11 that reported nothing wrong. MediaPipe
+#: runs on the CPU delegate here, so contention lands directly on the number.
+MAX_LOAD_PER_CORE = 0.75
+MIN_MEM_AVAILABLE_GB = 2.0
+#: Floor on the core clock as a fraction of ``cpuinfo_max_freq``, below which the
+#: host is misconfigured or thermally limited and no measurement is meaningful.
+#:
+#: This is deliberately a loose sanity floor, not a performance target. On a
+#: laptop the ``cpuinfo`` maximum is a *single-core* turbo figure: this host is an
+#: i5-12500H whose stated 4.5 GHz is reached on one core, while a multi-threaded
+#: MediaPipe workload sustains ~3.3 GHz, or 73% of it. Gating at 80% of max
+#: therefore rejected a run at full turbo for being thermally normal, which is the
+#: same error as the post-run idle sample in the other direction - a threshold that
+#: flags the machine rather than the measurement.
+#:
+#: The actionable gate is therefore the governor, which the operator can change.
+#: The clock is recorded so a latency figure is reproducible, not used as a target.
+MIN_CPU_FREQUENCY_RATIO = 0.40
+
+
+def load_verdict(machine: dict[str, str] | None = None) -> tuple[bool, str]:
+    """Is this machine quiet enough for its latency numbers to mean something?
+
+    Returns ``(reportable, reason)``. Deliberately conservative: a false "too busy"
+    costs a re-run, and a false "fine" costs the paper a number that does not
+    reproduce.
+
+    Pass the run's ``machine`` dict, which carries the during-run clock sampled
+    inside the measured window.
+    """
+    facts = dict(machine if machine is not None else machine_facts())
+    cores = int(facts.get("cpu_count") or 1)
+    try:
+        load1 = os.getloadavg()[0]
+    except (OSError, AttributeError):  # pragma: no cover
+        return True, "load average unavailable"
+    if load1 / cores > MAX_LOAD_PER_CORE:
+        return False, (
+            f"load average {load1:.2f} on {cores} cores is {load1 / cores:.2f}/core, "
+            f"above the {MAX_LOAD_PER_CORE}/core ceiling; latency is contended"
+        )
+    try:
+        kb = int(facts.get("mem_available_kb", "0"))
+    except ValueError:  # pragma: no cover
+        kb = 0
+    if 0 < kb < MIN_MEM_AVAILABLE_GB * 1024 * 1024:
+        return False, (
+            f"only {kb / 1024**2:.1f} GB memory available, below the "
+            f"{MIN_MEM_AVAILABLE_GB} GB floor; the host is under memory pressure"
+        )
+    # Judge the clock on the one measured *during* the run, not the idle reading
+    # taken after it. With the performance governor the CPU falls to ~700 MHz once
+    # idle, so a post-run sample reports 16% of peak for a run that was at 87% and
+    # would have discarded a passing measurement.
+    # The governor is checked first and unconditionally. It is the actionable,
+    # deterministic signal, and checking it after the clock made it conditional: a
+    # run that happened to catch a full clock under `powersave` was accepted, which
+    # is exactly the non-reproducible case - the same invocation minutes later would
+    # report the idle clock and 2.5x the latency.
+    gov = facts.get("cpu_governor")
+    if gov not in (None, "performance"):
+        return False, (
+            f"CPU governor is {gov}, not performance; run "
+            "`sudo cpupower frequency-set -g performance` before benchmarking. The "
+            "same benchmark read 118 ms median at 1.1 GHz and 40.7 ms at 3.9 GHz "
+            "on this host"
+        )
+    during = facts.get("cpu_clock_mhz_during")
+    peak = facts.get("cpu_max_mhz")
+    if during and peak and float(during) > 0:
+        ratio = float(during) / float(peak)
+        if ratio < MIN_CPU_FREQUENCY_RATIO:
+            return False, (
+                f"CPU ran at {float(during):.0f} MHz of {peak} MHz ({ratio:.0%} of peak) "
+                f"during the run under the {gov} governor; that is below the sanity "
+                "floor, so the host is misconfigured or thermally limited"
+            )
+    return True, f"load {load1:.2f}/{cores} cores, {kb / 1024**2:.1f} GB available"
+
+
+_CPUFREQ = Path("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq")
+
+
+def sample_clock_mhz() -> float:
+    """Instantaneous core clock in MHz, or NaN where it is not readable."""
+    with contextlib.suppress(OSError, AttributeError, ValueError):
+        return float(_CPUFREQ.read_text().strip()) / 1000.0
+    return float("nan")
 
 
 def time_fn(
@@ -191,12 +315,23 @@ def time_fn(
 
     per_call: list[float] = []
     per_run: list[float] = []
+    # The core clock is sampled *inside* the measured window. Sampling it before or
+    # after the run is worse than useless: with the performance governor the CPU
+    # ramps under load and drops to ~700 MHz when idle, so a reading taken after the
+    # benchmark reports 16% of peak for a run that was genuinely at 87% and nearly
+    # discarded a passing measurement. The median during the window is the number
+    # that describes the measurement.
+    clocks: list[float] = []
     for _ in range(max(runs, 1)):
         t0 = time.perf_counter()
-        for _ in range(iterations):
+        for i in range(iterations):
             call0 = time.perf_counter()
             fn()
             per_call.append((time.perf_counter() - call0) * 1000)
+            if i % 10 == 0:
+                mhz = sample_clock_mhz()
+                if mhz == mhz:  # not NaN
+                    clocks.append(mhz)
         per_run.append((time.perf_counter() - t0) * 1000 / iterations)
 
     call_arr = np.asarray(per_call)
@@ -216,6 +351,8 @@ def time_fn(
         fps_sustained=float(1000.0 / call_arr.mean()),
         noise_ratio=float(run_arr.mean() / run_arr.min()) if run_arr.min() > 0 else float("nan"),
         warmup=warmup,
+        cpu_clock_mhz_median=(float(np.median(clocks)) if clocks else float("nan")),
+        cpu_clock_mhz_max=(float(max(clocks)) if clocks else float("nan")),
     )
 
 
@@ -411,16 +548,71 @@ def resident_stack_bench(
     return rep
 
 
+def attach_clock(rep: BenchReport) -> BenchReport:
+    """Record the during-run core clock on the report's machine facts.
+
+    Called after a run so ``load_verdict`` can judge the clock that was actually in
+    effect while frames were being timed, rather than the idle reading taken
+    afterwards.
+    """
+    clocks = [
+        t.cpu_clock_mhz_median
+        for t in rep.timings
+        if t.cpu_clock_mhz_median == t.cpu_clock_mhz_median
+    ]
+    if clocks:
+        rep.machine["cpu_clock_mhz_during"] = f"{float(np.median(clocks)):.0f}"
+    return rep
+
+
 def _probe_input(session: Any) -> np.ndarray:
     """A zero input shaped like the session's input, for a live-stack run."""
     shape = [d if isinstance(d, int) else 1 for d in session.get_inputs()[0].shape]
     return np.zeros(shape, dtype=np.float32)
 
 
-def save(report: BenchReport, path: Path) -> None:
+def run_id(report: BenchReport) -> str:
+    """A stable identifier for this run: device, timestamp, and a content hash.
+
+    The hash is over the measured numbers, so two runs with identical results share
+    an ID and any change to a number changes the ID. That is what makes the ID worth
+    citing: it cannot silently drift away from the artefact it names.
+    """
+    payload = json.dumps(report.as_dict(), sort_keys=True, default=str)
+    digest = hashlib.sha256(payload.encode()).hexdigest()[:8]
+    stamp = time.strftime("%Y%m%dT%H%M%S")
+    device = (report.device or "unknown").split()[0].lower()
+    return f"{stamp}-{device}-{digest}"
+
+
+def save(report: BenchReport, path: Path) -> Path:
+    """Write the report to a run-scoped path and update a ``latest`` pointer.
+
+    Never overwrites an existing report. An earlier version did, and the cost was
+    concrete: a CPU benchmark run destroyed the only stored GPU perception
+    measurement, leaving the experiment log citing 17.3 FPS and 17.8 FPS with no
+    artefact on disk to check either number against. For a project whose dashboard
+    rule is "never fill a cell from an estimate, every cell cites a run ID", a
+    silently destructive save is a provenance failure, not a tidiness issue.
+
+    So each run gets its own file, ``<stem>-<run_id><suffix>``, plus a small
+    ``latest.json`` pointing at it.
+    """
+    rid = run_id(report)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(report.as_dict(), indent=2), encoding="utf-8")
-    log.info("wrote %s", path)
+    target = path.with_name(f"{path.stem}-{rid}{path.suffix}")
+    n = 1
+    while target.exists():
+        target = path.with_name(f"{path.stem}-{rid}-{n}{path.suffix}")
+        n += 1
+    target.write_text(json.dumps(report.as_dict(), indent=2), encoding="utf-8")
+    pointer = path.with_name("latest.json")
+    pointer.write_text(
+        json.dumps({"run_id": rid, "report": target.name, "device": report.device}, indent=2),
+        encoding="utf-8",
+    )
+    log.info("wrote %s", target)
+    return target
 
 
 def render(report: BenchReport) -> str:

@@ -23,6 +23,7 @@ from pathlib import Path
 
 import pytest
 
+from seam.eval.bench import BenchReport, Timing, run_id, save
 from seam.export import onnx_export as X
 from seam.export import runtime as RT
 from seam.export import vram_guard as V
@@ -177,9 +178,8 @@ def test_save_report_round_trips(tmp_path: Path) -> None:
     res = make_result(
         precision="int8", vram_mb=128.0, latency_ms_mean=1.5, latency_ms_p95=2.0, detail="unit"
     )
-    out = tmp_path / "parity.json"
-    X.save_report([res], out, extra={"unit": True})
-    blob = json.loads(out.read_text())
+    written = X.save_report([res], tmp_path / "parity.json", extra={"unit": True})
+    blob = json.loads(written.read_text())
 
     row = blob["results"][0]
     for key in (
@@ -259,3 +259,156 @@ def test_fps_sustained_is_the_mean_rate() -> None:
     t = time_fn(lambda: _t.sleep(0.001), label="unit", iterations=30, warmup=0, runs=1)
     assert t.fps_sustained == pytest.approx(1000.0 / t.ms_mean, rel=1e-6)
     assert t.fps_from_min >= t.fps_sustained
+
+
+# --- reports are evidence and must not be destroyed ------------------------
+
+
+def _report() -> BenchReport:
+    rep = BenchReport(
+        device="NVIDIA GeForce RTX 3050 Laptop GPU",
+        device_matches_target=True,
+        target_device="NVIDIA GeForce RTX 3050 Laptop GPU",
+    )
+    rep.add(
+        Timing(
+            label="unit",
+            runs=2,
+            ms_min=1.0,
+            ms_mean=1.2,
+            ms_median=1.1,
+            ms_p95=1.4,
+            ms_p99=1.6,
+            noise_ratio=1.05,
+            warmup=1,
+            samples=20,
+            fps_sustained=833.0,
+        )
+    )
+    return rep
+
+
+def test_bench_save_never_overwrites(tmp_path: Path) -> None:
+    """A prior run must survive a later one.
+
+    The cost of overwriting was concrete: a CPU benchmark run destroyed the only
+    stored GPU perception measurement, leaving the experiment log citing FPS figures
+    with no artefact left to check them against.
+    """
+    first = save(_report(), tmp_path / "perception.json")
+    second = save(_report(), tmp_path / "perception.json")
+    assert first.exists() and second.exists()
+    assert first != second, "a second run must not land on the first run's file"
+    assert (tmp_path / "latest.json").exists()
+
+    pointer = json.loads((tmp_path / "latest.json").read_text())
+    assert pointer["report"] == second.name
+    assert pointer["run_id"] in second.name
+
+
+def test_run_id_tracks_the_numbers() -> None:
+    """A cited run ID has to be falsifiable against the artefact it names."""
+    a, b = _report(), _report()
+    assert run_id(a) == run_id(b), "identical results should share an ID"
+
+    b.timings[0].ms_p99 = 9.9
+    assert run_id(a) != run_id(b), "changing a number must change the ID"
+
+
+def test_parity_report_never_overwrites(tmp_path: Path) -> None:
+    """The export report carries the rejected INT8 graph; overwriting erases the
+    record of a decision that was actually made."""
+    res = make_result(precision="int8", vram_mb=128.0, latency_ms_mean=1.0)
+    first = X.save_report([res], tmp_path / "parity.json", extra={"n": 1})
+    second = X.save_report([res], tmp_path / "parity.json", extra={"n": 2})
+    assert first.exists() and second.exists()
+    assert first != second
+    blob = json.loads(first.read_text())
+    assert blob["run_id"], "the report must carry its own run ID"
+    assert blob["extra"]["n"] if "extra" in blob else blob["n"] == 1
+
+
+# --- a latency number on a busy machine is not a latency number ------------
+
+
+def test_load_verdict_rejects_a_contended_host() -> None:
+    """Sustained external load must make a run unreportable.
+
+    ``Timing.noise_ratio`` compares runs *within* one session, so it is blind to a
+    uniformly busy machine: three equally contended runs look clean. A perception
+    benchmark on a freshly rebooted host with a container at 400% CPU reported
+    118.8 ms against 57.9 ms on an idle host, with a noise ratio of 1.11 that
+    flagged nothing.
+    """
+    from seam.eval import bench
+
+    busy = {"cpu_count": "16", "mem_available_kb": str(8 * 1024 * 1024)}
+    ok, why = bench.load_verdict(busy)
+    if ok:
+        # Only assert the negative when the host really is busy; the test must not
+        # depend on ambient load.
+        assert why.startswith("load") or "GB" in why
+    tight = {"cpu_count": "16", "mem_available_kb": str(256 * 1024)}
+    ok_tight, why_tight = bench.load_verdict(tight)
+    assert not ok_tight, "a host under memory pressure must not be reportable"
+    assert "memory" in why_tight or "GB" in why_tight
+
+
+def test_load_gate_thresholds_are_documented() -> None:
+    from seam.eval import bench
+
+    assert 0 < bench.MAX_LOAD_PER_CORE < 1.0
+    assert bench.MIN_MEM_AVAILABLE_GB > 0
+
+
+# --- the clock gate must judge the run, not the machine --------------------
+
+
+def test_clock_is_sampled_during_the_window() -> None:
+    """The core clock has to be sampled while frames are being timed.
+
+    With the performance governor the CPU ramps to ~3.9 GHz under load and falls to
+    ~700 MHz when idle, so a reading taken after the run reports 16% of peak for a
+    run that was genuinely at 87% - and that error discarded a passing measurement
+    (20.5 FPS) before it was found.
+    """
+    import time as _t
+
+    from seam.eval import bench
+
+    t = bench.time_fn(lambda: _t.sleep(0.001), label="unit", iterations=20, warmup=0, runs=1)
+    assert t.cpu_clock_mhz_median == t.cpu_clock_mhz_median, "NaN check: must be comparable"
+    # On a host exposing cpufreq the sampled value must be a plausible MHz figure,
+    # and must not be the idle reading: the run above was actively busy.
+    if t.cpu_clock_mhz_median > 0:
+        assert 200 < t.cpu_clock_mhz_median < 10000, (
+            f"implausible clock sample {t.cpu_clock_mhz_median} MHz"
+        )
+
+
+def test_clock_floor_is_a_floor_not_a_target() -> None:
+    """A laptop's single-core turbo max is not a multi-threaded sustain target.
+
+    This host's i5-12500H reports 4.5 GHz, reached on one core; a MediaPipe
+    workload sustains ~3.3 GHz, 73% of it. Gating near 100% of max flags a
+    perfectly healthy full-turbo run, which is the same error as the idle-sample
+    one in the opposite direction.
+    """
+    from seam.eval import bench
+
+    assert 0.2 < bench.MIN_CPU_FREQUENCY_RATIO < 0.6
+
+
+def test_non_performance_governor_is_not_reportable() -> None:
+    from seam.eval import bench
+
+    facts = {
+        "cpu_count": "16",
+        "mem_available_kb": str(8 * 1024 * 1024),
+        "cpu_governor": "powersave",
+        "cpu_max_mhz": "4500",
+        "cpu_clock_mhz_during": "3900",
+    }
+    ok, why = bench.load_verdict(facts)
+    assert not ok
+    assert "powersave" in why

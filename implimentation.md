@@ -277,13 +277,29 @@ dictionary signing with no discourse context. →
 
 ## M2 — Efficiency harness
 
-- [ ] `export/onnx_export.py` + `export/parity.py` (FP32↔INT8 tolerance test)
-- [ ] `export/vram_guard.py` — hard ceiling, fails loudly
-- [ ] `eval/bench.py` — p50/p95/p99, peak VRAM, FPS on the 3050
-- [ ] add `onnxruntime-gpu` for the CUDA EP
-- [ ] **Re-measure K6 (≥20 FPS) on an idle machine.** The M0 figure of 14.9 FPS was taken under
-  external load (load avg 6–9); sequential measured 82 ms unloaded and 110 ms loaded. If it
-  still misses, relax the target and publish the miss.
+- [X] `export/onnx_export.py` — FP32 export, INT8 quantisation, parity with a calibrated
+  tolerance and an independent argmax gate
+- [X] `export/vram_guard.py` — hard ceiling, fails loudly; enforces the larger of torch's
+  and the driver's figure
+- [X] `export/runtime.py` — preloads the bundled CUDA 13 libraries so the CUDA EP actually
+  activates, and provides the nvidia-smi VRAM instrument torch cannot supply
+- [X] `eval/bench.py` — p50/p95/p99 over per-call timings, peak VRAM, sustained FPS
+- [X] `eval/bench.py::resident_stack_bench` — 6 models resident simultaneously
+- [X] `onnxruntime-gpu` CUDA EP active (TensorRT absent, `libnvinfer.so.10` not installed)
+- [X] **K6 re-measured on an idle, performance-governor machine: 20.4 FPS**
+  (repeats 19.7–20.4; p50 41.8 / p95 73.2 / p99 78.1 ms over 900 timed calls). Reported
+  as straddling the ≥20 target rather than as a pass.
+- [X] Sequential baseline re-measured with the same instrument: 73.0 ms p50, 12.8 FPS,
+  so concurrency is worth 1.75x
+- [X] K5: 186 MB for 3 MediaPipe graphs + 3 ONNX graphs live at once, 7% of the 2500 MB
+  ceiling
+- [X] Benchmark now records governor, during-run core clock, load and memory, and refuses
+  to call a run reportable without them. Six instrument defects fixed along the way
+  (percentiles over run-means, `noise_ratio` blindness to sustained load, post-run clock
+  sampling, an 80%-of-single-core-turbo gate, a conditionally-checked governor, and
+  in-place report overwriting)
+- [X] M1 instrument lesson resolved in code: one decoder, `seam.data.rafdb`, shared by the
+  trainer and the parity harness, with the 768-space box mapping pinned by test
 - [ ] Resolve the M1 instrument lesson in code: one front end, asserted equal by test (rule 16)
 
 ---
@@ -302,11 +318,31 @@ dictionary signing with no discourse context. →
 - [ ] **re-point at continuous signing** (M1's finding): ASLLRP 200 utterances, where the
   interrogative / negation / topicalisation syntax of the English caption gives an
   independent handle on the marker that isolated signs do not
-- [ ] **clip-level marker calibration.** 4 of 6 visual markers are degenerate (fire on
-  79-95% of clips), including the `mouth_positive` control at 0.91. The threshold rule is
-  sound (0.2% firing on iid noise); the signals are heavy-tailed. Define a clip-level
-  marker with stated minimum duration/amplitude and calibrate on *control prevalence*,
-  fixed before looking at any agreement. This blocks the marker-claim half.
+- [X] **clip-level marker calibration** — `markers.ClipCriteria` (run duration + peak +
+  coverage) and `markers.clip_magnitude` (per-frame mean, duration-free)
+- [X] fixed two scale bugs: MAD is the wrong scale for heavy-tailed blendshapes
+  (normalise by `p95 - p50` instead), and `clip_presence` compared clip-range evidence
+  against the MAD constant `k=1.5` so every blendshape marker read zero coverage
+- [X] **caught a duration confound that would have been a false positive**: every
+  syntactic label tracks clip length (interrogative r_pb=+0.68), and an integral
+  statistic inherits it — interrogative/brow_raise went +0.414 (p=0.015) -> **-0.045**
+  on a per-frame mean
+- [X] **negation <-> head_shake: r=0.554, perm p=0.011, Bonferroni 0.033, MDE 0.411** —
+  survives duration control; interrogative pairings are powered nulls
+- [X] **cue-grounding report** — `scripts/cue_grounding.py`, `features/cues.py`;
+  artefact `artifacts/audit/cue_grounding.json`
+- [X] separated **motor cues** from **affective interpretations** in the annotator
+  text (482/600 motor, 118 affective-only); the affective ones are FER ground truth,
+  not marker-feature evidence, and counting them would have manufactured agreement
+- [X] 15 cue/feature tests, duration-controlled, permutation + MDE + Bonferroni:
+  **nothing survives** — the assumed feature set is *not* validated
+- [X] the head channel is the one with independent corroboration: `head_shake` r=+0.275
+  vs annotator text, and r=+0.554 (p=0.011) vs lexical negation in the previous run
+- [X] `head_nod` reported BLIND (zero on 83% of clips) rather than as a null
+- [X] **6 annotator-named cues have no feature at all** — `head_tilt`, `eye_widen`,
+  `blink_close`, `gaze_shift`, `fingerspelling`, `body_posture` — a data-derived spec
+  for M4's feature set
+- [X] permutation null calibration asserted in the suite (median p near 0.5 on noise)
 - [ ] Track B (async): BU access request for the real SignStream non-manual XML
 - [ ] cue-grounding report: our prosody features vs the 600 Deaf-annotator cue strings
 

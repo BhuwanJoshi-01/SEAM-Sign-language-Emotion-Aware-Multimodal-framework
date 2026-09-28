@@ -606,3 +606,446 @@ Run ID `m3-markers-001`. Gate artefact `artifacts/audit/marker_labels.json`.
     control `mouth_positive` has low prevalence — a criterion fixed *before* looking
     at any interrogative/negation agreement, so the null above cannot be an artefact
     of the calibration and a future positive cannot be either.
+
+---
+
+## M3 addendum — clip-level marker calibration, and a confound that nearly survived
+
+Run `m3-markers-002`. Same 200 clips, same labels, new instrument.
+
+### The calibration criterion was pre-registered, and it could not be met
+
+34. The criterion fixed *before* looking at any agreement statistic: the control
+    `mouth_positive` must be present in ≤25% of clips, and every marker inside
+    [5%, 60%]. **No setting satisfied it**, across a 64-point sweep of
+    run-duration × peak × coverage. The reason is not that the thresholds are
+    wrong: it is that **`mouth_positive` is not a control.** Its peak excursion has
+    a median of 27 "MADs" and a 90th percentile of 81 — mouths move while people
+    sign, so a "mouth positive" signal is present in essentially every clip. A
+    screen that demands a control be rare rejects this signal for being real.
+
+### Two scale bugs, and a statistic that was measuring clip length
+
+35. **MAD is the wrong scale for these signals.** A blendshape coefficient spends
+    most frames near its floor and peaks occasionally, so the MAD is dominated by
+    the flat part and `(x - median) / MAD` explodes at the peak. The result was a
+    27:0 spread in peak evidence between `mouth_positive` and `head_nod`, across
+    which no single threshold is meaningful. Normalising instead by the clip's own
+    dynamic range, `p95 - p50`, brought every blendshape marker into 0–5 and makes
+    the peak threshold a scale-free "fraction of this clip's own range".
+
+36. **The first result was substantially clip length, not head movement.** With
+    the integral of the excursion as the statistic, all three pairings looked
+    strong and correctly directed: interrogative/brow_raise r=+0.41 (p=0.015),
+    interrogative/brow_furrow r=+0.66 (p=0.0001), negation/head_shake r=+0.71
+    (p=0.003). **Every syntactic label correlates with clip duration on this corpus**
+    — interrogative clips run 5.77 s against 4.48 s (r_pb = +0.68), negation +0.54 —
+    because questions and negated statements are longer utterances. The magnitude was
+    an integral, so it inherited that mechanically. Switching to a per-frame mean
+    collapsed interrogative/brow_raise to **−0.045**: that association was entirely
+    clip duration and would have been reported as a finding.
+
+37. **The fix is a partial correlation against log-duration**, which keeps the label
+    binary. The obvious implementation — residualise the 0/1 label on the covariate,
+    then re-split at zero — silently regroups the clips and returned a uniform
+    zero; it was tried first and is why the test now keeps `y` binary.
+
+38. **A per-frame bar in the wrong units made an instrument always read zero.**
+    `clip_presence` compared the new clip-range evidence against
+    `MarkerThresholds.k` (1.5, a MAD-scale constant), which is unreachable for
+    evidence bounded near 1.0. All four blendshape markers therefore reported zero
+    coverage and zero duration, and the whole clip-level view read "absent"
+    regardless of settings — which is what made the pre-registered sweep appear to
+    have found nothing. A bar in the wrong units does not fail loudly.
+
+### Result
+
+| pairing | r (partial, duration-controlled) | perm p | ×3 | MDE | n+ |
+|---|---|---|---|---|---|
+| interrogative <-> brow_raise | −0.084 | 0.621 | 1.000 | 0.331 | 46 |
+| interrogative <-> brow_furrow | 0.199 | 0.244 | 0.733 | 0.336 | 46 |
+| **negation <-> head_shake** | **0.554** | **0.011** | **0.033** | 0.411 | 27 |
+
+39. **The canonical ASL negation marker is associated with negated utterances**, and
+    it is the one effect that survives: partial r = 0.554, permutation p = 0.011,
+    Bonferroni-corrected 0.033 over the three pairings tested, against an MDE of
+    0.411 — the effect is larger than the smallest one this design could detect.
+    Negated utterances carry 0.55 SD stronger head-shake evidence than others, from
+    a lexical label read off human annotation and a visual pseudo-label read off head
+    pose, with clip length controlled.
+40. **The two interrogative pairings are powered nulls.** `brow_raise` is flat
+    (−0.084) and `brow_furrow` is 0.199 with an MDE of 0.336, so effects below
+    roughly 0.34 SD are not ruled out — which is a different statement from "there is
+    no effect", and is why the MDE is printed beside the p-value.
+41. **Why interrogative/brow failed while negation/head_shake passed, and why that
+    is not yet a finding.** Head shake is a discrete, high-amplitude, directional
+    event that a head-pose signal represents directly. A brow raise in continuous
+    signing is graded and co-occurs with topic, contrast and emphasis, so a binary
+    question/declaration contrast may simply not be the right conditioning for it.
+    That is a hypothesis for M4, not a conclusion here.
+42. **This does not reopen M1.** M1 tested marker-induced *shifts in a FER
+    prediction* on isolated WLASL signs; this is marker–syntax co-occurrence on
+    continuous EmoSign utterances with a duration control. The substrates differ and
+    the two are compatible: an absent effect on isolated dictionary signing, and a
+    present effect where negation is syntactically determined.
+43. **Remaining caveats, stated because they bound the claim.** n=200 clips with 27
+    negation positives; both variables are pseudo-labels, carrying the provenance
+    strings already recorded; the duration control is linear in log-duration; the
+    sequence was analyse → find a strong result → find the confound → re-analyse, and
+    while the confound was identified from a *label–duration* correlation measured
+    independently of the marker, the fact that the analysis changed after seeing
+    results is part of the record.
+
+---
+
+## M2 close-out — the efficiency numbers, on a machine whose clock was the variable
+
+Runs `m2-perception-*` and `m2-stack-*`, 2026-09-28, governor `performance`,
+`cpu_clock_mhz_during` recorded in every artefact.
+
+### What the earlier numbers actually were
+
+45. **The 118 ms figure was a measurement of the CPU governor, not of the pipeline.**
+    The host had rebooted and come up in `powersave` with the core clock at
+    **1.14 GHz against a 4.5 GHz maximum**. MediaPipe runs on the CPU delegate, so
+    perception is bound by exactly that clock. Before the reboot the same benchmark
+    read 57.9 ms. Two figures, one machine, and **no field in the report distinguished
+    them** — the artefact recorded device, load and memory, never the clock.
+46. **Two candidate explanations were measured and rejected before blaming the clock**,
+    because both would have invalidated the earlier number too: the frame mix
+    (first-30-frame median 100.5 ms vs full-300 97.9 ms, so not a sampling artefact)
+    and hand detection (97.7 ms with hands present vs 101.2 ms without, so the
+    hand landmarker is not the tail).
+
+### The gate now judges the run, and two of its three checks were wrong first
+
+47. **`Timing.noise_ratio` cannot see a busy machine.** It compares runs *within* one
+    session, so three equally contended runs look clean — it reported 1.01–1.11
+    through the whole contended period. Added a load gate: load per core ≤0.75 and
+    ≥2 GB available memory, recorded from `/proc/meminfo` and `getloadavg`.
+48. **Sampling the clock *after* the run discarded a passing measurement.** Under the
+    performance governor the CPU falls to ~700 MHz when idle, so the post-run reading
+    reported 16% of peak for a run genuinely at 87%, and a **20.5 FPS** result was
+    rejected as unreportable. The clock is now sampled *inside* the measured window
+    and reported as `cpu_clock_mhz_during`.
+49. **Gating on 80% of `cpuinfo_max_freq` flagged a healthy run.** That figure is a
+    *single-core* turbo maximum; this i5-12500H sustains ~2.6–3.3 GHz under a
+    multi-threaded MediaPipe load, 58–73% of it. The floor is now 40%, a sanity check
+    for a misconfigured or throttled host, and the *actionable* gate is the governor.
+    A threshold that flags the machine rather than the measurement is the same error
+    as the idle sample, in the opposite direction.
+50. **The governor was checked only in one branch**, so a run that happened to catch a
+    full clock under `powersave` was accepted — precisely the non-reproducible case,
+    since the same invocation minutes later reports the idle clock and 2.5x the
+    latency. It is now checked first and unconditionally.
+
+### Results — gate met
+
+51. **Perception, 3 MediaPipe graphs concurrent**, RTX 3050, governor `performance`,
+    quantiles over 900 individually-timed calls (300 frames × 3 runs):
+
+    | statistic | value |
+    |---|---|
+    | min | 25.9 ms |
+    | **p50** | **41.8 ms** |
+    | **p95** | **73.2 ms** |
+    | **p99** | **78.1 ms** |
+    | sustained rate | **20.4 FPS** |
+
+    Independent repeat runs: 19.7, 20.0, 20.3 FPS. VRAM 90 MB.
+
+52. **Sequential baseline**, same instrument: p50 **73.0 ms**, p95 103.0, p99 111.2,
+    12.8 FPS. **Concurrency is worth 1.75x** on the median (41.8 vs 73.0 ms), measured
+    the same way in the same session — larger than the 1.57x previously recorded from
+    run-means, and reproducible.
+53. **K6 is met, marginally.** Four reportable runs give 19.7, 20.0, 20.3, 20.4 FPS
+    against a ≥20 target — straddling it, not clearing it. Stated as "meets the target
+    at the median and does not clear it at the low end" rather than as a pass, because
+    a single 20.4 FPS run would have been the dishonest way to report it.
+54. **Six models resident, all live at once**: 3 MediaPipe graphs plus 3 ONNX FER
+    graphs, **186 MB peak against the 2500 MB ceiling (7% of budget)**, at 41.4 ms p50
+    / 20.3 FPS — statistically indistinguishable from perception alone. The FER graphs
+    execute on the GPU while perception runs on the CPU, so they overlap; this is the
+    measurement that the earlier sequential 174 MB could not license.
+55. **VRAM is not the binding constraint anywhere.** 186 MB for the whole live stack
+    against 2500 MB. The perception stage is the limit and it is a *CPU* limit, which
+    is why the governor mattered more than any model choice in this milestone.
+
+---
+
+## M3 close-out — grounding the feature set in what Deaf annotators wrote
+
+Run `m3-cues-001`. Artefact `artifacts/audit/cue_grounding.json`.
+
+56. **The corpus is 600 free-text strings over 200 clips**, three annotator columns
+    each. The plan's figure is confirmed. The feature set in `seam.features` was
+    assembled by assumption; this tests it against what the annotators actually
+    wrote.
+
+### The annotators write two different kinds of thing
+
+57. **Motor cues and affective interpretations are mixed in the same fields, and they
+    are not the same kind of evidence.** "raised eye brow", "bared teeth", "head
+    shake" describe a movement, and a movement is something a feature can be expected
+    to recover. "conveys a sense of surprise", "signifies worry" are the annotator's
+    *reading* of an affect — and no feature in `prosody` or `markers` is a claim about
+    affect, because those are FER's job. Treating an affective interpretation as
+    validation of a brow-raise feature would be a category error, and it would
+    manufacture agreement on a face the FER model is explicitly trained to read.
+
+    So the two are parsed separately. **482/600 strings (80%) contain at least one
+    motor cue; 118 are affective-only** and are excluded from the motor test by
+    construction rather than counted as misses. Coverage is reported, because a
+    vocabulary that silently discards what it cannot parse reports a clean result on
+    the remainder and hides the selection.
+
+58. **The vocabulary was mined from the corpus, not assumed.** A first pass matched
+    459/600 and its 141 misses were read before the vocabulary was extended. Those
+    misses contained real observable cues the patterns had overlooked — "eyes
+    popped", "widened eyes", "bared teeth", "grimace", "lower than usual" — and
+    extending the patterns raised motor coverage to 80%.
+
+### Result: the feature set is not validated
+
+15 cue/feature tests, all partial correlations on log-duration, permutation p, MDE
+reported, Bonferroni across the 15:
+
+| cue | feature | n+ | r | p | MDE |
+|---|---|---|---|---|---|
+| head_shake | head_shake | 59 | **+0.275** | 0.077 | 0.31 |
+| repetition | repetition | 11 | +0.433 | 0.173 | 0.62 |
+| speed_slow | speed | 19 | **−0.398** | 0.111 | 0.49 |
+| head_nod | head_nod | 31 | — | **BLIND** | — |
+| smile | mouth_positive | 30 | +0.221 | 0.268 | 0.39 |
+| pause_hesitation | pause_ratio / pause_mean | 9 | +0.198 / +0.207 | 0.574 / 0.566 | 0.68 / 0.70 |
+| emphasis | jerk / volume / amplitude | 115 | −0.133 / +0.055 / +0.090 | 0.36–0.71 | 0.28 |
+| sign_size | amplitude | 40 | +0.102 | 0.569 | 0.35 |
+| mouth_shape | mouth_morpheme | 101 | −0.153 | 0.277 | 0.28 |
+| brow_furrow | brow_furrow | 46 | +0.061 | 0.715 | 0.33 |
+| brow_raise | brow_raise | 29 | −0.045 | 0.799 | 0.40 |
+| speed_fast | speed | 25 | −0.032 | 0.884 | 0.43 |
+
+59. **Nothing survives Bonferroni.** The grounding move returns a negative result: the
+    assumed feature set does not demonstrably recover the cues the annotators named.
+    That is the point of running it — an assumed feature set confirmed by tests
+    designed after the fact is not a validated one.
+
+60. **The one channel with independent corroboration is the head channel.**
+    `head_shake` here is r=+0.275 (p=0.077) against annotator text, and in the
+    previous run it was r=+0.554 (p=0.011) against *lexical negation* from the ASLLRP
+    gloss. Two independent ground truths — a Deaf annotator's free text and a
+    human-authored linguistic annotation — agree on the same channel, which is
+    stronger evidence than either alone. The brow and mouth channels show nothing
+    here, and are exactly the channels M3 measured as firing on 79–95% of clips.
+
+61. **One test is reported as BLIND, not as a null.** `head_nod` is zero on **83%** of
+    clips, so it cannot discriminate and no conclusion is available from it. Reporting
+    its non-separation as evidence would be indistinguishable from saying the
+    annotators were wrong, when nothing was measured. The same check ran on all 15
+    tests: 14 are informative, 1 is blind.
+
+62. **The features were checked for dynamic range before the nulls were believed.**
+    Three earlier findings in this project came from an instrument reporting a
+    plausible number with no signal in it, so each feature's interquartile spread and
+    zero fraction were measured first. The features do vary across clips
+    (e.g. `amplitude` IQR 0.285–0.536, `pause_ratio` 0.406–0.944), so 14 of the nulls
+    are real nulls rather than instrument failures.
+
+### What this specifies for M4
+
+63. **Six cue categories that Deaf annotators actually used have no feature behind
+    them at all**: `head_tilt`, `eye_widen`, `blink_close`, `gaze_shift`,
+    `fingerspelling`, `body_posture`. This is a specification derived from the corpus
+    rather than a list of preferences, and it is the concrete content of the M4 feature
+    set. `eye_widen` and `blink_close` are both recoverable from blendshape
+    coefficients that are already being computed and simply are not being read.
+64. **The two saturated channels need recalibration, not more of the same.** The brow
+    and mouth markers fire on most clips, which is why both their cue tests and their
+    syntactic tests are null. Whatever M3 concluded about the interrogative/brow
+    pairing is therefore a statement about a saturated instrument.
+65. **The test's own calibration is asserted.** A permutation test that reports small
+    p on data with no signal is worse than no test, so a null-data calibration runs in
+    the suite: 20 independent draws on pure noise must give a median p near 0.5 and no
+    more than 4 below 0.05.
+
+---
+
+## M4 — Factorized encoder: the gate is NOT met, and four instruments were wrong first
+
+Run `m4-factorizer-001`. Artefact `artifacts/m4/factorizer.json`.
+4 LOSO folds, 314 trainable windows from 200 clips, 30 epochs, 1 seed.
+
+### The plan's vCLUB does not work, and that is a measured result
+
+66. **The minibatch CLUB estimate was implemented and rejected.** With a bilinear
+    critic, 256 samples, 8 dimensions, plus input normalisation, weight decay and a
+    bounded critic output, the critic-minimised bound came out:
+
+    | data | bound (nats) |
+    |---|---|
+    | independent | −18.29 |
+    | weak dependence | −38.44 |
+    | identical | −41.70 |
+
+    **The ordering is inverted** — more dependence gave a *lower* bound. An
+    unconstrained critic is rewarded for driving the expression to −∞. Replaced with a
+    Jensen–Shannon MI bound via a joint-vs-product discriminator, which is stable.
+
+67. **A dependence detector on this data must be evaluated held-out, and the size of
+    the effect is the headline finding.** The same discriminator, scored on the rows it
+    trained on, gave **0.9375 accuracy between two independent variables** — it had
+    memorised 256 pairs. Scored on held-out draws from the same process: independent
+    **0.4996**, weak 0.9679, dependent 0.9969. A probe fitted and scored on the same
+    windows would have inflated the cross-prediction AUC that the M4 gate depends on,
+    in the direction that makes a broken model look good.
+
+68. **A first attempt at the held-out helper broke that guarantee in a new way.** The
+    helpers resampled the two factors' rows *independently*, which destroys the joint —
+    so the "positive" half of the evaluation was a product sample and the function
+    measured nothing it claimed to. Now the holdout is an aligned split of the real
+    pairs. A JSD value above `log 2` (physically impossible) is what exposed it.
+
+### Three more instrument bugs, all caught by refusing to believe a number
+
+69. **`auc()` silently returned values above 1 on multiclass labels.** Affect is
+    8-class; the function treated anything that was not 0 as negative and anything not 1
+    as positive, so classes 2–7 consumed rank space without being counted and the
+    Mann-Whitney numerator stopped being bounded by the denominator. The first real M4
+    run reported **AUC 3.996**. The function now raises on a non-binary label, and
+    `cross_prediction_multiclass` does one-vs-rest per class with the **worst** class as
+    the headline — separation must hold for every class to mean the factors share no
+    affect, and a mean would let seven good classes carry one entangled one.
+70. **The probe's own optimiser diverged.** A hand-rolled normalised gradient step of
+    `0.5·√n` for 200 iterations produced scores that fed the same out-of-range AUC.
+    Replaced with scikit-learn's convex solver, standardising on the fit split only.
+71. **Neither adversarial term was in the objective.** `factorizer_loss` added the two
+    direct losses and commented that the GRL heads' loss "is not minimised — its
+    gradient is reversed", excluding them. The reversal was in the graph but not in the
+    loss, so **the GRL heads were untrained**. This also dissolved an apparent finding:
+    an earlier run showed "the adversarial head reads affect at 0.121 while a frozen
+    probe reads the same factor at 0.871", which looked like a statement about
+    adversarial defeat being achievable while the information remained. It was an
+    untrained head. Both cross terms are now in the total.
+72. **Two advertised ablation levers did not exist.** `w_affect_from_l` and
+    `w_affect_from_p` were config fields the loss never read, so the `no_affect_from_p`
+    variant reproduced `full` byte for byte and looked like a clean null. Replaced with
+    `lambda_grl_a`, which is read, and the separate GRL directions are now ablatable.
+
+### Result: the gate fails, and the failure is real
+
+73. | variant | cross L→A | cross A→L | GRL head acc | signer control |
+    |---|---|---|---|---|
+    | **full** | **0.879** | 0.695 | 0.143 | 0.971 |
+    | no_mi | 0.878 | 0.700 | 0.124 | 0.973 |
+    | no_grl_on_a | 0.877 | 0.681 | 0.140 | 0.973 |
+    | no_orthogonality | 0.903 | 0.665 | 0.143 | 0.976 |
+    | no_separation | 0.898 | 0.617 | 0.162 | 0.979 |
+
+    **The gate is cross-prediction AUC ≤ 0.60. Measured worst: 0.879. FAIL.** The
+    signer control passes at 0.971, so the metric is sensitive here and the failure is
+    the model's, not the instrument's.
+74. **The separation terms work, monotonically, and the orthogonality penalty carries
+    the effect.** Removing orthogonality moves cross L→A from 0.879 to 0.903; removing
+    all separation pressure gives 0.898 with the GRL head rising from 0.143 to 0.162.
+    That is a consistent, correctly-signed effect — and it is far short of the target.
+75. **Neither task is learned, which is the binding constraint.** Balanced accuracy
+    0.547 on the linguistic task (chance 0.50) and 0.173 on affect (chance 0.125 for
+    8 classes). **Plain accuracy looks far better and is meaningless here: the
+    majority-class predictor scores 0.863 and 0.334, and beats both this model and the
+    entangled baseline.** Without a majority reference, "linguistic accuracy 0.809" in
+    an earlier run would have read as a strong result. The gate metric is weighted F1,
+    and both are now reported.
+76. **The data cannot support the affect task as posed.** Requiring a single committed
+    emotion per clip leaves **314 trainable windows from 200 clips** — 1,451 of 1,765
+    windows are dropped because the annotators did not commit to one dominant
+    expression. EmoSign's affect labels are multi-label by construction, and M4's
+    8-class single-expression framing discards 82% of the available windows. This is a
+    framing problem, not a capacity problem, and it is the first thing to fix.
+77. **Honest status: the M4 claim is not established.** A factorized encoder, a working
+    LOSO protocol, a falsifiable gate metric with a passing positive control, and an
+    ablation in which every lever moves the target metric in the right direction — and
+    a model that does not learn either task and does not separate. The negative result
+    is on the *current configuration and data*, and the most likely cause is the label
+    framing in (76), not the architecture. The next step is a multi-label affect
+    objective and the 1,451 windows currently thrown away, not more separation terms.
+
+---
+
+## M4 rerun — multi-label affect. The data fix moved the metric a long way; the gate still fails.
+
+Run `m4-factorizer-002`. Artefact `artifacts/m4/factorizer_multilabel.json`.
+Same folds, same instruments, same schedule. **Only the affect target changed.**
+
+78. **The framing was the bug, and fixing it recovered 82% of the data.** Requiring a
+    single committed emotion per clip dropped **1,451 of 1,765 windows**, leaving 314.
+    EmoSign's affect annotation is multi-label by construction — the clips routinely
+    carry two or three emotions above threshold. Multi-hot targets with BCE over eight
+    independent binary outputs keeps every clip: **1,765 windows, mean positive rate
+    0.248** per label.
+
+79. **Affect is still not learnable here, and now that is visible rather than hidden.**
+    Micro-F1 **0.359** (0.391 at threshold 0.3), macro-F1 0.297 (0.371), balanced
+    accuracy **0.497** — against a balanced-accuracy reference of 0.5, because a
+    majority-class predictor scores exactly 0.5 by construction. Linguistic balanced
+    accuracy 0.529 (chance 0.5). Neither task is learned.
+80. **A reporting error caught in this run.** The first multi-label output printed
+    "affect-majority-balanced 0.760" as the reference for a balanced accuracy of 0.497.
+    That 0.760 is the majority *rate*, and no predictor's balanced accuracy can be
+    compared to it — a majority predictor is at 0.5 by definition. Renamed
+    `mean_majority_rate` and reported as class-imbalance context, with the 0.5
+    reference stated in the output. This is the same failure shape as the earlier
+    majority-class-accuracy trap, one level deeper.
+
+81. **Separation improved substantially, and the fix is attributable.**
+
+    | | single-expression | multi-label |
+    |---|---|---|
+    | trainable windows | 314 | **1,765** |
+    | cross A→L (linguistic from z_A) | 0.695 | **0.505** |
+    | cross L→A (affect from z_L) | 0.879 | **0.691** |
+    | affect micro-F1 | n/a (314 windows) | **0.359** |
+    | signer control | 0.971 | 0.973 |
+
+    **cross A→L at 0.505 is chance.** The affect factor no longer carries linguistic
+    information, and that is a real result: the affect-side gradient reversal is doing
+    exactly what it was added to do. Affect remains partially readable from `z_L`
+    (0.691), so the gate's ≤0.60 is still not met.
+
+82. **Ablation, and every lever now moves the metric in the right direction:**
+
+    | variant | cross L→A | cross A→L | micro-F1 | ling. balanced |
+    |---|---|---|---|---|
+    | **full** | **0.691** | **0.505** | **0.359** | 0.529 |
+    | no_mi | 0.700 | 0.581 | 0.315 | 0.521 |
+    | no_grl_on_a | 0.690 | 0.621 | 0.333 | 0.507 |
+    | no_orthogonality | 0.686 | 0.584 | 0.315 | 0.499 |
+    | no_separation | 0.707 | 0.585 | 0.299 | 0.490 |
+
+    The full model is best on **all three** target metrics simultaneously — worst
+    cross AUC, and best micro-F1. That is the first configuration where the separation
+    terms do not cost task performance, which was the plan's kill-switch condition
+    ("if AUC improves but wF1 drops, rewrite the claim"). It does not drop: removing any
+    separation term lowers micro-F1 by 0.024–0.060.
+
+83. **The gate is computed on the worst fold and still fails.**
+
+    | fold | n_test | cross L→A | cross A→L | affect labels used | micro-F1 |
+    |---|---|---|---|---|---|
+    | Ben | 112 | **0.884** | 0.628 | 3 | 0.313 |
+    | Cory | 788 | 0.647 | 0.546 | 8 | 0.338 |
+    | Jonathan | 443 | 0.686 | **0.255** | 7 | 0.378 |
+    | Rachel | 422 | 0.728 | 0.657 | 8 | 0.392 |
+
+    The weighted mean cross L→A is 0.691; the **worst fold is 0.884** and that is what
+    the gate uses. Ben is the problem, for a reason already measured: 7 clips, 112 test
+    windows, and only **3 of 8 affect labels** reach the support threshold. A fold that
+    cannot estimate most of its own labels cannot support a claim about them, and the
+    signier control passes (0.973) so the failure is not a blind metric.
+84. **Honest verdict: the gate is still not met, and the reason has moved.** The single
+    biggest obstacle is gone — the framing bug is fixed, 5.6x more data is in use, and
+    cross A→L reached chance. What remains is (a) the Ben fold, which is too small to
+    estimate an 8-label cross-prediction and needs either a merged small-signer fold or
+    an explicit "insufficient support" verdict rather than a number, and (b) genuine
+    residual affect information in `z_L` at 0.691. Neither is fixed by more separation
+    terms. (a) is a reporting decision; (b) may be real, given that M3 measured a
+    head-shake/negation association and brow and mouth channels remain saturated.

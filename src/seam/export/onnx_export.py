@@ -25,6 +25,7 @@ unfalsifiable.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -315,7 +316,14 @@ def enforce_budget(res: ParityResult, *, ceiling_mb: float = vram_guard.VRAM_CEI
         )
 
 
-def save_report(results: list[ParityResult], path: Path, extra: dict | None = None) -> None:
+def save_report(results: list[ParityResult], path: Path, extra: dict | None = None) -> Path:
+    """Write the parity report to a run-scoped path; never overwrite a prior one.
+
+    Same reason as ``seam.eval.bench.save``: a run ID has to be citable and the
+    artefact it names has to still exist. The export report carries the *rejected*
+    INT8 graph alongside the accepted ones, so overwriting a run would erase the
+    record of a decision that was actually made.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "tolerances": {
@@ -329,5 +337,22 @@ def save_report(results: list[ParityResult], path: Path, extra: dict | None = No
     }
     if extra:
         payload.update(extra)
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    log.info("wrote %s", path)
+    rid = run_id(payload)
+    payload["run_id"] = rid
+    target = path.with_name(f"{path.stem}-{rid}{path.suffix}")
+    n = 1
+    while target.exists():
+        target = path.with_name(f"{path.stem}-{rid}-{n}{path.suffix}")
+        n += 1
+    target.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    log.info("wrote %s", target)
+    return target
+
+
+def run_id(payload: dict) -> str:
+    """Timestamp plus a hash of the payload, so the ID tracks the numbers."""
+    import time
+
+    body = {k: v for k, v in payload.items() if k != "run_id"}
+    digest = hashlib.sha256(json.dumps(body, sort_keys=True, default=str).encode()).hexdigest()[:8]
+    return f"{time.strftime('%Y%m%dT%H%M%S')}-{digest}"

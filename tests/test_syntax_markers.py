@@ -165,3 +165,92 @@ def test_head_angle_is_used_as_documented_not_halved() -> None:
     mid = 0.3 * np.sin(2 * np.pi * 2.5 * t)
     assert not VM._oscillation(mid, fps, VM.MarkerThresholds()).any()
     assert VM._oscillation(mid, fps, VM.MarkerThresholds(head_angle=0.175)).any()
+
+
+# --- the duration confound -------------------------------------------------
+
+
+def test_magnitude_mean_is_duration_free() -> None:
+    """A marker's magnitude must not grow just because the clip is longer.
+
+    Every syntactic label tracks clip length on this corpus, because questions and
+    negated statements are longer utterances. An integral statistic therefore
+    inherits that confound: the first version of this analysis reported
+    interrogative/brow_raise at r_pb = +0.414 on the integral and -0.045 on the
+    mean - the whole association was clip length.
+    """
+    from seam.features import markers as VM
+
+    fps = 25.0
+    cols = [VM.BLENDSHAPE_INDEX[name] for name in VM.MOUTH_MORPHEME]
+    # The same *per-frame rate* in clips of two different lengths: the marker is up
+    # for 20 of 60 frames and for 40 of 120. The mean must be identical, and only
+    # the integral may differ. The marker stays a minority of each clip, because the
+    # evidence normalises by (p95 - median) of the clip itself and a marker
+    # occupying over half the clip drags the baseline up with it - documented on
+    # clip_evidence.
+    short = np.zeros((60, 52))
+    short[10:30, cols] = 1.0
+    long = np.zeros((120, 52))
+    long[10:50, cols] = 1.0
+
+    def sig_for(arr: np.ndarray) -> VM.MarkerSignals:
+        return VM.signals(arr, rotation=np.zeros((len(arr), 4, 4)), fps=fps)
+
+    m_short = VM.clip_magnitude(sig_for(short), fps, reduce="mean")["mouth_morpheme"]
+    m_long = VM.clip_magnitude(sig_for(long), fps, reduce="mean")["mouth_morpheme"]
+    assert m_short > 0.0, "fixture must produce a real signal"
+    assert m_short == pytest.approx(m_long, rel=1e-6), (
+        "a per-frame mean must not depend on clip length"
+    )
+
+    t_short = VM.clip_magnitude(sig_for(short), fps, reduce="total")["mouth_morpheme"]
+    t_long = VM.clip_magnitude(sig_for(long), fps, reduce="total")["mouth_morpheme"]
+    assert t_long > t_short * 1.5, "the integral is expected to grow with duration"
+
+
+def test_clip_magnitude_rejects_unknown_reduction() -> None:
+    from seam.features import markers as VM
+
+    sig = VM.signals(np.zeros((10, 52)), rotation=np.zeros((10, 4, 4)), fps=25.0)
+    with pytest.raises(ValueError, match="reduce"):
+        VM.clip_magnitude(sig, 25.0, reduce="median")
+
+
+def test_clip_presence_requires_duration_and_peak() -> None:
+    """A single-frame spike must not make a clip marker-bearing.
+
+    ASL non-manual markers are held; tracker noise is a blip. The clip-level rule
+    is a different instrument from the per-frame one for exactly this reason.
+    """
+    from seam.features import markers as VM
+
+    fps = 25.0
+    n = 100
+    cols = [VM.BLENDSHAPE_INDEX[name] for name in VM.MOUTH_MORPHEME]
+    blip = np.zeros((n, 52))
+    blip[50, cols] = 1.0  # one frame only
+    held = np.zeros((n, 52))
+    held[40:70, cols] = 1.0  # 1.2 s of sustained signal
+
+    def pres(arr: np.ndarray) -> dict[str, object]:
+        sig = VM.signals(arr, rotation=np.zeros((len(arr), 4, 4)), fps=fps)
+        return VM.clip_presence(sig, fps)["mouth_morpheme"]
+
+    assert not pres(blip)["present"], "a one-frame spike is not a marker"
+    assert pres(held)["present"], "a held marker must be detected"
+
+
+def test_flat_clip_has_no_exaggerated_evidence() -> None:
+    """A clip with no dynamic range cannot be expressive on any channel.
+
+    Dividing by a floored spread would manufacture evidence out of numerical
+    noise, so a constant signal yields zero evidence instead.
+    """
+    from seam.features import markers as VM
+
+    flat = np.zeros((60, 52))
+    sig = VM.signals(flat, rotation=np.zeros((60, 4, 4)), fps=25.0)
+    ev = VM.clip_evidence(sig)["mouth_positive"]
+    assert np.all(ev == 0.0)
+    assert VM.clip_magnitude(sig, 25.0)["mouth_positive"] == 0.0

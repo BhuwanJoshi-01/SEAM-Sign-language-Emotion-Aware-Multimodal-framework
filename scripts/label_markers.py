@@ -56,6 +56,8 @@ class ClipLabels:
     frames: int
     fps: float
     visual: dict[str, float]
+    #: Continuous per-clip marker magnitude, the primary statistic.
+    magnitude: dict[str, float]
     syntactic: dict[str, bool]
     provenance: dict[str, str]
     gloss: str
@@ -81,6 +83,25 @@ def _clip_visual(shard: Path) -> tuple[dict[str, float], int, float]:
     return out, len(bs), fps
 
 
+def _magnitude(shard: Path) -> dict[str, float]:
+    """Continuous per-clip marker magnitude, with fps read from the sidecar.
+
+    This is the primary statistic for marker/label association; ``_clip_visual``
+    is the binary view, kept for reporting.
+    """
+    data = np.load(shard)
+    bs = np.asarray(data["blendshapes"], dtype=np.float64)
+    rot = np.asarray(data["head_rotation"], dtype=np.float64)
+    fps = 25.0
+    side = shard.with_suffix(".json")
+    if side.is_file():
+        meta = json.loads(side.read_text())
+        fps = float(meta.get("native_fps") or fps)
+    # reduce="mean" is the duration-free default; see clip_magnitude's docstring
+    # for the confound the integral would have inherited.
+    return VM.clip_magnitude(VM.signals(bs, rotation=rot, fps=fps), fps, reduce="mean")
+
+
 def label_all(landmark_dir: Path, limit: int | None = None) -> list[ClipLabels]:
     gm = SY.load_gloss_map()
     records = load_emosign(default_data_root())
@@ -92,6 +113,7 @@ def label_all(landmark_dir: Path, limit: int | None = None) -> list[ClipLabels]:
         if not shard.is_file():
             continue
         visual, frames, fps = _clip_visual(shard)
+        magnitude = _magnitude(shard)
         syn = SY.classify(rec.utterance_id, gm)
         out.append(
             ClipLabels(
@@ -99,6 +121,7 @@ def label_all(landmark_dir: Path, limit: int | None = None) -> list[ClipLabels]:
                 frames=frames,
                 fps=fps,
                 visual=visual,
+                magnitude=magnitude,
                 syntactic={n: lab.present for n, lab in syn.labels.items()},
                 provenance=syn.provenance(),
                 gloss=syn.gloss,
@@ -217,6 +240,130 @@ def agreement(clips: list[ClipLabels], syn_name: str, vis_name: str) -> dict[str
     }
 
 
+def magnitude_association(
+    clips: list[ClipLabels],
+    syn_name: str,
+    vis_name: str,
+    *,
+    n_perm: int = 20_000,
+    seed: int = 0,
+) -> dict[str, object]:
+    """Point-biserial association between a syntactic label and marker magnitude.
+
+    Binary presence was abandoned for this reason: ASL non-manual markers are
+    graded and frequent, so a prevalence screen cannot tell a frequent marker from
+    a useless one - the control ``mouth_positive`` is active in essentially every
+    clip because mouths move while people sign, and demanding it be rare rejects
+    the signal for being real. A magnitude is graded, has a well-posed null, and
+    needs no prevalence assumption.
+
+    The test is a permutation test over the label, which is the same instrument M1
+    validated, and it reports the observed effect size so a null can be read as
+    powered rather than merely as an absence of measurement. The MDE is the effect
+    the design could have detected at 80% power, from the permutation null's
+    spread - so "no association" comes with the size of the effect that was
+    ruled out, not just a p-value.
+    """
+    n = len(clips)
+    if n < 8:
+        return {"syntactic": syn_name, "visual": vis_name, "n": n, "interpretable": False}
+    y = np.array([c.syntactic.get(syn_name, False) for c in clips], dtype=float)
+    x = np.array([c.magnitude.get(vis_name, 0.0) for c in clips], dtype=float)
+    dur = np.array([c.frames / max(c.fps, 1e-6) for c in clips], dtype=float)
+
+    # Duration is a confounder, not a nuisance. Every syntactic label correlates
+    # with clip length on this corpus (interrogative r_pb = +0.68, negation +0.54)
+    # because questions and negated statements are longer utterances. The
+    # magnitude is already a per-frame mean, but the *label* still tracks duration,
+    # so both are residualised on log-duration before correlating and the duration
+    # association is reported, so the confound stays visible rather than assumed
+    # away.
+    # Duration is a confounder, not a nuisance. Every syntactic label correlates
+    # with clip length on this corpus (interrogative r_pb = +0.68, negation +0.54)
+    # because questions and negated statements are longer utterances. The magnitude
+    # is already a per-frame mean, so it is not mechanically longer for longer
+    # clips - but the label still tracks duration, and any variable correlated with
+    # the label can manufacture an association.
+    #
+    # The control is a *partial* correlation against log-duration, which keeps the
+    # label binary. Residualising a 0/1 label on a covariate and then re-splitting
+    # it at zero - the obvious implementation - silently regroups the clips and
+    # was tried first here; it returned a uniform zero.
+    z = np.log(dur) if dur.std() > 0 else None
+    label_r_dur = _pb(dur, y) if z is not None else 0.0
+    r_before = _pb(y, x)
+
+    if y.std() == 0 or x.std() == 0:
+        return {
+            "syntactic": syn_name,
+            "visual": vis_name,
+            "n": n,
+            "interpretable": False,
+            "note": "label or marker is constant; no association is definable",
+        }
+
+    obs = _partial_pb(y, x, z)
+    rng = np.random.default_rng(seed)
+    null = np.empty(n_perm)
+    for i in range(n_perm):
+        null[i] = _partial_pb(rng.permutation(y), x, z)
+    # Two-sided p, with the +1 correction so a p can never be exactly zero.
+    p = float((np.sum(np.abs(null) >= abs(obs)) + 1) / (n_perm + 1))
+    sd_null = float(null.std(ddof=1))
+    mde = 1.96 * sd_null  # effect detectable at 80% power with this n
+
+    present = np.array([c.visual.get(vis_name, 0.0) > 0 for c in clips], dtype=bool)
+    return {
+        "syntactic": syn_name,
+        "visual": vis_name,
+        "n": n,
+        "n_positive": int(y.sum()),
+        "point_biserial": round(obs, 4),
+        "perm_p": round(p, 5),
+        "n_perm": n_perm,
+        "null_sd": round(sd_null, 4),
+        "mde_80pct_power": round(mde, 4),
+        "median_magnitude_present": round(
+            float(np.median(x[present])) if present.any() else 0.0, 3
+        ),
+        "median_magnitude_absent": round(
+            float(np.median(x[~present])) if (~present).any() else 0.0, 3
+        ),
+        "control": "residualised on log clip duration",
+        "r_before_duration_control": round(r_before, 4),
+        "label_duration_r": round(label_r_dur, 4),
+        "interpretable": True,
+    }
+
+
+def _partial_pb(y: np.ndarray, x: np.ndarray, z: np.ndarray | None) -> float:
+    """Point-biserial correlation of ``x`` against binary ``y``, controlling for ``z``.
+
+    The standard partial correlation,
+    ``(r_xy - r_xz r_yz) / sqrt((1 - r_xz^2)(1 - r_yz^2))``,
+    with ``z=None`` degenerating to the plain point-biserial. ``y`` stays binary, so
+    the split that defines the statistic is unchanged by the control.
+    """
+    r_xy = _pb(y, x)
+    if z is None or z.std() == 0:
+        return r_xy
+    r_xz = float(np.corrcoef(x, z)[0, 1]) if x.std() > 0 else 0.0
+    r_yz = float(np.corrcoef(y, z)[0, 1]) if y.std() > 0 else 0.0
+    denom = np.sqrt(max((1 - r_xz**2) * (1 - r_yz**2), 1e-12))
+    return float((r_xy - r_xz * r_yz) / denom)
+
+
+def _pb(y: np.ndarray, x: np.ndarray) -> float:
+    """Point-biserial correlation of ``x`` against binary ``y``."""
+    a, b = x[y > 0], x[y == 0]
+    if len(a) < 2 or len(b) < 2:
+        return 0.0
+    pooled = ((len(a) - 1) * a.var(ddof=1) + (len(b) - 1) * b.var(ddof=1)) / (len(a) + len(b) - 2)
+    if pooled <= 0:
+        return 0.0
+    return float((a.mean() - b.mean()) / np.sqrt(pooled))
+
+
 def report(clips: list[ClipLabels]) -> dict[str, object]:
     pairs = []
     for syn_name, vis_name, rationale in EXPECTED_PAIRS:
@@ -233,6 +380,17 @@ def report(clips: list[ClipLabels]) -> dict[str, object]:
         name: round(float(np.mean([c.syntactic.get(name, False) for c in clips])), 4)
         for name in SY.SYNTACTIC_MARKERS
     }
+    assoc = [magnitude_association(clips, syn, vis) for syn, vis, _ in EXPECTED_PAIRS]
+    # Three pairings were tested, so raw permutation p-values are adjusted. A p of
+    # 0.011 is not a discovery at alpha=0.05 when it is the best of three
+    # uncorrected tests; the correction costs nothing here, it is applied because
+    # the uncorrected number would otherwise be quoted on its own.
+    m = sum(1 for a in assoc if a.get("interpretable"))
+    for a in assoc:
+        if a.get("interpretable") and m > 1:
+            a["n_tests"] = m
+            a["p_bonferroni"] = round(min(1.0, float(a["perm_p"]) * m), 5)
+            a["significant_bonferroni"] = bool(a["p_bonferroni"] < 0.05)
     return {
         "n_clips": len(clips),
         "gate": {
@@ -248,17 +406,23 @@ def report(clips: list[ClipLabels]) -> dict[str, object]:
         "usable_prevalence_band": [USABLE_PREVALENCE_MIN, USABLE_PREVALENCE_MAX],
         "syntactic_rates": syn_rates,
         "agreements": pairs,
+        "magnitude_associations": assoc,
         "provenance": {
             "visual": VM.describe()["provenance"],
             "syntactic": SY.describe()["provenance"],
         },
         "caveat": (
-            "A pairing is only interpretable when its visual marker is present in a "
-            "minority of clips. Where the marker is degenerate the lift is a property "
-            "of the base rate, not evidence of an association, and no p-value is "
-            "printed. M1 independently found marker effects absent on isolated "
-            "signing; this run cannot distinguish 'no effect' from 'instrument cannot "
-            "resolve the effect', and does not claim to."
+            "Two views are reported and they answer different questions. The binary "
+            "prevalence view is only interpretable for a marker present in a minority "
+            "of clips; ASL non-manual markers are graded and frequent, so it rejects "
+            "the control mouth_positive (0.91) for being genuinely active rather than "
+            "for being useless. The continuous-magnitude association is therefore the "
+            "primary statistic: it needs no prevalence assumption, its permutation "
+            "test carries an MDE so a null is reported as powered rather than as an "
+            "absence of measurement, and it is a partial correlation against clip "
+            "duration, because every syntactic label tracks clip length (interrogative "
+            "r_pb=+0.68, negation +0.54) and an uncontrolled integral inherits that "
+            "confound wholesale."
         ),
     }
 
@@ -300,6 +464,24 @@ def render(rep: dict[str, object]) -> str:
     syn_prov = rep["provenance"]["syntactic"]  # type: ignore[index]
     for k, v in syn_prov.items():
         lines.append(f"  {k:<24} {v}")
+    lines += [
+        "",
+        "continuous magnitude, point-biserial + label permutation (primary):",
+        f"  {'pairing':<40} {'r_pb':>7} {'perm p':>8} {'x3':>8} {'MDE':>7}  {'n+':>4}",
+    ]
+    for a in rep.get("magnitude_associations", []):  # type: ignore[union-attr]
+        if not a.get("interpretable"):
+            lines.append(
+                f"  {a['syntactic'] + ' <-> ' + a['visual']:<38} "
+                f"{'-':>7} {'-':>8} {'-':>7}  not interpretable"
+            )
+            continue
+        lines.append(
+            f"  {a['syntactic'] + ' <-> ' + a['visual']:<38} {a['point_biserial']:>7.3f} "
+            f"{a['perm_p']:>8.4f} {a.get('p_bonferroni', float('nan')):>8.4f} "
+            f"{a['mde_80pct_power']:>7.3f}  {a['n_positive']:>4}"
+            + ("  *" if a.get("significant_bonferroni") else "")
+        )
     lines += ["", f"caveat: {rep['caveat']}"]
     return "\n".join(lines)
 

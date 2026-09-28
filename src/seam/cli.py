@@ -213,14 +213,36 @@ def cmd_bench(args: argparse.Namespace) -> int:
         report = bench.perception_bench(
             videos, iterations=args.iterations, runs=args.runs, parallel=mode
         )
+        if args.stack:
+            onnx_dir = artifacts_root() / "export"
+            graphs = sorted(onnx_dir.glob("*.onnx")) if onnx_dir.is_dir() else []
+            graphs = [g for g in graphs if ".int8." not in g.name]
+            print(f"\nadding the live ONNX stack: {len(graphs)} graph(s) from {onnx_dir}")
+            if not graphs:
+                print("  ! no FP32 graphs found; run `make export` first")
+            report = bench.resident_stack_bench(
+                videos, onnx_dir=onnx_dir, iterations=args.iterations
+            )
     except bench.BenchError as exc:
         print(f"benchmark failed: {exc}")
         return 2
 
+    bench.attach_clock(report)
     print(report.summary())
     dest = Path(args.out) if args.out else artifacts_root() / "bench" / "perception.json"
-    bench.save(report, dest)
-    print(f"\nwrote {dest}")
+    written = bench.save(report, dest)
+    print(f"\nrun id: {bench.run_id(report)}")
+    print(f"wrote {written}")
+
+    clean, why = bench.load_verdict(report.machine)
+    reportable = report.device_matches_target and clean
+    if not report.device_matches_target:
+        print("  ! device does not match the configured target; not reportable")
+    if not clean:
+        print(f"  ! {why}; not reportable")
+    if not reportable:
+        print("  -> this run is evidence that the harness works, not a number for the paper")
+        return 3
 
     if report.vram is not None and not report.vram.ok:
         print("VRAM ceiling breached")
