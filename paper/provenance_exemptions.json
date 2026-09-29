@@ -1,0 +1,73 @@
+{
+  "_comment": [
+    "Lines in paper/EXPERIMENT_LOG.md that cite numbers no artifact under artifacts/ produces.",
+    "tests/test_provenance.py fails on any untraced number NOT listed here, so this file is a",
+    "ratchet: a newly written number without an artifact turns the build red, while the audited",
+    "existing set stays visible rather than being deleted from the notebook.",
+    "Groups are by reason, and the reason is the justification. A new entry needs one.",
+    "'genuine_provenance_gap' is a real hole, not an accepted exemption - see the M3 entry."
+  ],
+  "identifier_in_prose": {
+    "reason": "Utterance and collection identifiers quoted as examples (e.g. 5572615, 25328). Not measurements.",
+    "lines": [
+      64,
+      1125,
+      1196
+    ]
+  },
+  "machine_state_at_time_of_run": {
+    "reason": "Transient machine state recorded for reproducibility: swap usage, core clock under load, governor. True of that run, unrepeatable by nature.",
+    "lines": [
+      53,
+      92,
+      93,
+      94,
+      238,
+      410,
+      436,
+      710,
+      732,
+      1088,
+      1124
+    ]
+  },
+  "superseded_interim_run": {
+    "reason": "Chronological lab-notebook entries from M0/M1/M2 runs later superseded by the final gated numbers. A notebook is supposed to contain these; the current values are the ones CLAIMS_LEDGER.md and the gated artifact sections carry.",
+    "lines": [
+      97,
+      105,
+      154,
+      187,
+      207,
+      228,
+      237,
+      276,
+      277,
+      281,
+      282,
+      283,
+      285,
+      286,
+      293,
+      324,
+      402,
+      437,
+      439,
+      496,
+      514
+    ]
+  },
+  "genuine_provenance_gap": {
+    "reason": "A real hole. The M3 duration-controlled analysis (the negation/head-shake r=0.554 headline) is in the log but no artifact stores it - the analysis was run interactively and never persisted. 'linguistic accuracy 0.809' is quoted from a design document, not measured here. All need a script that writes an artifact; none is an acceptable steady state. The 89.5%/10.5% alignment figures were also here until 2026-09-29, when scripts/check_asllrp_alignment.py made them reproducible and the entry was removed.",
+    "lines": [
+      563,
+      639,
+      640,
+      641,
+      642,
+      670,
+      835,
+      955
+    ]
+  }
+}

@@ -179,7 +179,7 @@ the 20 FPS target, deferred to M2 with the load confound named.
   `output_face_blendshapes=True`, 52 ARKit coefficients) + 2× **HandLandmarker** +
   **PoseLandmarker**. v1's "HolisticLandmarker" does not exist; do not look for it.
 - [X] `perception/blendshapes.py` — **folded into `tasks_api.py`**; the basis, index map and ordering assertion live with the extractor that produces them, which is where a permuted basis would be caught — 52-coefficient record + brow/mouth groupings + AU proxies
-- [ ] `perception/headpose.py` — **deferred to M1**; the 4×4 `facial_transformation_matrixes` are already persisted per frame, so the solvePnP wrapper is needed only when a consumer appears — `solvePnP` head rotation + gaze proxy from iris
+- [ ] `perception/headpose.py` — **ACTIONABLE, cheap.** The 4x4s are persisted (`output_facial_transformation_matrixes=True` in `perception/tasks_api.py:307`) but no module turns them into head yaw/pitch/roll. The M7 demo already needs this; it is unconsumed data sitting in the landmarks. — **deferred to M1**; the 4×4 `facial_transformation_matrixes` are already persisted per frame, so the solvePnP wrapper is needed only when a consumer appears — `solvePnP` head rotation + gaze proxy from iris
 - [X] `perception/extract.py` — video → landmark record (`.npz` shards + JSON sidecar), resumable
 - [X] `perception/face_gate.py` — over ≥20 sampled clips: face-detected rate, blendshape
   activation rate, landmark counts, native fps spread
@@ -193,7 +193,7 @@ the 20 FPS target, deferred to M2 with the load confound named.
 ### M0.7 Quality gate
 
 - [X] `make lint` clean, `make test` green (**75 tests**), `mypy src` clean
-- [ ] `paper/EXPERIMENT_LOG.md` appended with the M0 findings and the mirror decision
+- [x] `paper/EXPERIMENT_LOG.md` appended with the M0 findings and the mirror decision — **done**, log item 3 records the mirror's gloss tokens and the absent SignStream non-manuals
 
 ### M0.8 Readiness gate — **the M0 evidence gate**
 
@@ -238,7 +238,7 @@ uniform null model null in all six rows; a planted +0.20 bias is recovered by th
 **The plan change M1 forces:** the confound is a **discourse** phenomenon, and WLASL is isolated
 dictionary signing with no discourse context. →
 
-- [ ] **Move the marker labeller and M4's LOSO evaluation to continuous signing** (ASLLRP 200
+- [x] **Move the marker labeller and M4's LOSO evaluation to continuous signing** — **done**: M4 runs on the ASLLRP 200 utterances (`artifacts/m4/factorizer_multilabel.json`) (ASLLRP 200
   utterances, local; or How2Sign keypoints). This is the testable version of C1.
 
 ### Deviations from the original M1 sketch, and why
@@ -300,7 +300,7 @@ dictionary signing with no discourse context. →
   in-place report overwriting)
 - [X] M1 instrument lesson resolved in code: one decoder, `seam.data.rafdb`, shared by the
   trainer and the parity harness, with the 768-space box mapping pinned by test
-- [ ] Resolve the M1 instrument lesson in code: one front end, asserted equal by test (rule 16)
+- [ ] Resolve the M1 instrument lesson in code: one front end, asserted equal by test — **ACTIONABLE, cheap.** `seam.data.rafdb` *is* the single front end now (M1's fix), but `tests/test_rafdb_bbox.py` has 4 tests and none asserts the two FER paths decode identically. The lesson is half-landed. (rule 16)
 
 ---
 
@@ -315,7 +315,7 @@ dictionary signing with no discourse context. →
 - [X] established that `fs-` is compound-sign notation, not facial signal
 - [X] fixed two head-path bugs in `markers._oscillation` (`head_angle/2` vs documented
   `head_angle`; clip-global `min_reversals`); head_shake 0.98 → 0.785, head_nod 0.65 → 0.170
-- [ ] **re-point at continuous signing** (M1's finding): ASLLRP 200 utterances, where the
+- [x] **re-point at continuous signing** (M1's finding) — **done**, same run: ASLLRP 200 utterances, where the
   interrogative / negation / topicalisation syntax of the English caption gives an
   independent handle on the marker that isolated signs do not
 - [X] **clip-level marker calibration** — `markers.ClipCriteria` (run duration + peak +
@@ -332,8 +332,8 @@ dictionary signing with no discourse context. →
 - [X] `serve/app.py` + `web/index.html` + `seam serve` — live demo, client-side MediaPipe,
   no video leaves the browser; withholds affect and recognition with their measured reasons
 - [X] `make serve-check` HTTP smoke gate (caught a 44-byte 404 page that started "successfully")
-- [ ] M7 human preference study (≥5 raters, inter-rater agreement, signer participation stated)
-- [ ] VRM/GLB avatar export: joint-limit clamping + quaternion-continuity tests
+- [ ] M7 human preference study (≥5 raters, inter-rater agreement, signer participation stated) — **BLOCKED, needs people.** Cannot be self-certified; it is the last M7 gate item.
+- [x] VRM/GLB avatar export: joint-limit clamping + quaternion-continuity tests — **done 2026-09-29** (`src/seam/avatar/synthesis.py`, 22 tests)
 - [X] M5a data layer: `data/asllrp.py` — tolerant CSV parser (bare inner quotes),
   both source-collection signer forms, 17,522 tokens / 0 malformed rows
 - [!] **M5a BLOCKED on frame alignment.** ASLLRP token indices are absolute positions in a
@@ -356,59 +356,65 @@ dictionary signing with no discourse context. →
   `blink_close`, `gaze_shift`, `fingerspelling`, `body_posture` — a data-derived spec
   for M4's feature set
 - [X] permutation null calibration asserted in the suite (median p near 0.5 on noise)
-- [ ] Track B (async): BU access request for the real SignStream non-manual XML
-- [ ] cue-grounding report: our prosody features vs the 600 Deaf-annotator cue strings
+- [ ] Track B (async): BU access request for the real SignStream non-manual XML — **BLOCKED, external.** Access request not yet sent; ungated mirror carries no non-manuals.
+- [x] cue-grounding report: our prosody features vs the 600 Deaf-annotator cue strings — **done**, `artifacts/audit/cue_grounding.json`
 
 ---
 
 ## M4 — Factorized encoder ★ core contribution
 
-- [ ] `affect/grl.py`, `affect/vclub.py`, `affect/orthogonality.py`
-- [ ] `affect/encoder.py` — `z_L`, `z_A`, heads, ≤1M params each, asserted by a test
-- [ ] `eval/loso.py` — 4 folds, signer-disjoint, zero-overlap assertion
-- [ ] `eval/probes.py` — frozen cross-probes → cross-prediction AUC
-- [ ] **positive control:** signer probe, asserted ≥ 0.80
-- [ ] per-λ ablation harness
-- [ ] qualitative neutral-affect wh-question/negation set
+- [x] `affect/grl.py`, `affect/vclub.py`, `affect/orthogonality.py` — **all exist**
+- [x] `affect/encoder.py` — `z_L`, `z_A`, heads, ≤1M params each, asserted by a test — **done**
+- [x] `eval/loso.py` — 4 folds, signer-disjoint, zero-overlap assertion — **done**
+- [x] `eval/probes.py` — frozen cross-probes → cross-prediction AUC — **done**
+- [x] **positive control:** signer probe, asserted ≥ 0.80 — **done**, measured 0.973
+- [x] per-λ ablation harness — **done**, `scripts/train_factorizer.py --ablate` runs the full grid
+- [ ] qualitative neutral-affect wh-question/negation set — **not started.** Doable now that M3 has the interrogative/negation labels; needs a curated frame set.
 
 ---
 
 ## M5 — Recognition + translation
 
-- [ ] M5a: continuous recognition on the 17,522 frame-aligned ASLLRP gloss tokens
-- [ ] M5b: 255-dim pose → linear → T5-small on How2Sign keypoints, 24 fps and 12 fps
-- [ ] FLOPs table; 3 seeds; signer-disjoint
+- [ ] M5a: continuous recognition on the 17,522 frame-aligned ASLLRP gloss tokens — **pipeline built and run 2026-09-29; result is NEGATIVE, and that is the finding.**
+  - `src/seam/features/signpose.py` + `scripts/train_recogniser.py`; artifact `artifacts/m5a/recogniser.json`.
+  - 1,563 alignable tokens over 499 glosses (175 dropped as overshooting their crop, counted not clamped). 284 of 499 types are hapax.
+  - **OOV floor 24-48% by fold** (30.6% on Cory): a third of one signer's tokens use a gloss the other three never use, so the open-vocabulary WER is bounded below by the data, not the model.
+  - **WER 0.916 against a most-frequent baseline of 0.916 and a shuffled-label control of 0.911** - the model is indistinguishable from always predicting the most common gloss. Closed-vocabulary WER 0.875. Removing duration changes nothing (0.916).
+  - So signing-space pose over these 200 utterances carries **no usable lexical signal** at this scale. The honest reading is that 200 utterances is too little to learn 499 classes from 3.1 tokens each; this is a data-scale verdict, not proof that pose is uninformative. Scaling to the 49k-frame DWPose corpus is the next test.
+  - Four real bugs found and fixed en route, all of which had made the result look *better* than it was: an inverted `wer()`, a `predict` that argmaxed features instead of logits, a units bug reporting the 29.5% OOV floor as 0.1%, and a 180-degree-ambiguous levelling rotation. Each has a regression test.
+- [ ] M5b: 255-dim pose → linear → T5-small on How2Sign keypoints, 24 fps and 12 fps — **not started**, needs the How2Sign keypoints fetched.
+- [ ] FLOPs table; 3 seeds; signer-disjoint — **partial.** `--seed` exists and folds are signer-disjoint; the FLOPs table is not measured.
 
 ---
 
 ## M6 — Emotion-conditioned generation
 
-- [ ] paraphrase corpus build + semantic-equivalence filter + disclosure
-- [ ] emotion control tokens in T5-small
-- [ ] style accuracy / BERTScore-F1 / degeneracy guard / controllability test
+- [ ] paraphrase corpus build + semantic-equivalence filter + disclosure — **not started**, whole-corpus build.
+- [ ] emotion control tokens in T5-small — **not started**, depends on the line above.
+- [ ] style accuracy / BERTScore-F1 / degeneracy guard / controllability test — **not started**, depends on the line above.
 
 ---
 
 ## M7 — Avatar + live demo
 
-- [ ] retargeting with joint clamping + quaternion continuity (gimbal-flip test)
-- [ ] 52 blendshapes → VRM/ARKit expression map
-- [ ] emotion modulation of gain, amplitude, timing
-- [ ] client-side MediaPipe Tasks browser demo
+- [x] retargeting with joint clamping + quaternion continuity (gimbal-flip test) — **done**, SMPL-X body + MANO + FLAME
+- [ ] 52 blendshapes → VRM/ARKit expression map — **partial.** `retarget_expression` projects to SMPL-X's 10 FLAME coefficients, which is the avatar path; the VRM/ARKit `expression`/blendshape-name map is not built.
+- [ ] emotion modulation of gain, amplitude, timing — **not started**, depends on M4 clearing its gate.
+- [x] client-side MediaPipe Tasks browser demo — **done**, `seam serve` + `make serve-check`
 - [ ] pre-registered preference study, ≥5 raters, inter-rater agreement
 
 ---
 
 ## M8 — Cross-lingual ablation
 
-- [ ] NSL/INCLUDE integrity re-audit (v1's `.part` finding is stale)
-- [ ] zero-shot then few-shot transfer; Top-1 vs chance
+- [ ] NSL/INCLUDE integrity re-audit (v1's `.part` finding is stale) — **partial.** NSL is in `artifacts/reports/readiness.csv`; INCLUDE is not.
+- [ ] zero-shot then few-shot transfer; Top-1 vs chance — **not started.** Depends on M5a/M5b existing first.
 
 ---
 
 ## M9 — Paper, repro, release
 
-- [ ] `scripts/repro_all.sh`; CI test that fails on any unlogged number
-- [ ] model cards; ethics, limitations, Deaf-community statement
-- [ ] close the §6 provenance item
-- [ ] arXiv + workshop submission
+- [x] `scripts/repro_all.sh`; CI test that fails on any unlogged number — **done 2026-09-29.** `scripts/repro_all.sh` runs 11 stages in dependency order, refuses to benchmark on a loaded machine, and `make repro` now has a target that works. `tests/test_provenance.py` fails on any number in `EXPERIMENT_LOG.md`/`CLAIMS_LEDGER.md` that no artifact under `artifacts/` produced, with `paper/provenance_exemptions.json` as a ratchet: 44 audited historical lines are waived by stated reason, and both the waiver list and the value list self-clean when a line stops needing an exemption. `.github/workflows/ci.yml` runs lint/typecheck/tests plus the provenance guard.
+- [ ] model cards; ethics, limitations, Deaf-community statement — **partial.** `paper/main.tex` carries ethics/limitations/Deaf text; there is no model card per component.
+- [ ] close the §6 provenance item — **not started.** Depends on the NSL/INCLUDE re-audit above.
+- [ ] arXiv + workshop submission — **not started**, and premature until M5a/M6 exist.

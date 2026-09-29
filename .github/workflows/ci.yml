@@ -1,0 +1,85 @@
+name: ci
+
+# Two jobs, and the split is deliberate.
+#
+# `check` runs on every push and needs no GPU, no network and no data. It is the job
+# that has to be fast and reliable, because a gate people route around is not a gate.
+#
+# `provenance` is separate because it is the interesting one: it fails when the paper
+# cites a number that no artifact produced. It needs `artifacts/`, which is gitignored
+# and far too large for a repository, so the artifacts are restored from cache. A cache
+# miss degrades to a skip rather than a false green - a skipped test that looks like a
+# pass is the failure mode this project keeps hitting.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Lint
+        run: make lint
+
+      - name: Typecheck
+        run: make typecheck
+
+      - name: Tests
+        run: |
+          # Network and slow markers are excluded: CI has neither the datasets nor the
+          # patience for the 2,565-clip FER audit.
+          python -m pytest -m "not slow and not network" -q --tb=short
+
+      - name: Scripts parse
+        run: bash -n scripts/repro_all.sh
+
+  provenance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Restore artifacts
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: artifacts
+          key: artifacts-${{ github.run_id }}
+          restore-keys: artifacts-
+
+      - name: Provenance guard
+        if: steps.cache.outputs.cache-hit == 'true'
+        run: python -m pytest tests/test_provenance.py -v
+
+      - name: Provenance guard (no artifacts)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          echo "::warning::No artifacts cache hit; the provenance guard was SKIPPED,"
+          echo "::warning::not passed. Populate the cache from a full 'make repro' run."
+          python -m pytest tests/test_provenance.py -q --tb=line || true

@@ -4,7 +4,7 @@ PY ?= /home/bhuwan/miniconda3/envs/slr/bin/python
 PIP ?= /home/bhuwan/miniconda3/envs/slr/bin/pip
 
 .PHONY: help setup lint fmt typecheck test test-fast data readiness emosign landmarks facegate \
-        doctor bench train repro paper clean distclean
+        doctor bench train repro provenance alignment paper clean distclean
 
 help: ## List targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -74,8 +74,14 @@ parity-report: ## Print the last parity verdict  [M2]
 train: ## Train from configs/
 	$(PY) -m seam.cli train
 
-repro: ## Regenerate every table and figure  [M9]
+repro: ## Regenerate every artifact the paper cites, in dependency order  [M9]
 	bash scripts/repro_all.sh
+
+provenance: ## Fail on any number in the paper with no artifact behind it
+	$(PY) -m pytest tests/test_provenance.py -v
+
+alignment: ## ASLLRP token-to-crop-frame alignment report (M5a gate)
+	$(PY) scripts/check_asllrp_alignment.py
 
 paper: ## Build the paper PDF
 	cd paper && latexmk -pdf -interaction=nonstopmode main.tex

@@ -110,18 +110,51 @@ def test_vocab_is_frequency_ordered() -> None:
     assert v.encode("NOT_A_GLOSS") == -1
 
 
-def test_alignment_with_emosign_clips_is_reported_as_broken() -> None:
-    """The token frame indices do NOT index the EmoSign excerpts.
+def test_utterance_start_offset_maps_session_frames_onto_crop_frames() -> None:
+    """The alignment IS recoverable, and the first version of this test was wrong.
 
-    Measured: 1,725 of 1,738 overlapping tokens fall entirely outside the extracted
-    video, because the ASLLRP indices are absolute positions in a long session
-    recording (median utterance span 5,123 frames, ~2.8 min) while the clips are
-    4.6-second excerpts (median 109 frames). The ratio is not a constant rescale, so it
-    cannot be recovered arithmetically.
+    It asserted the labels were unusable because absolute token frame indices
+    exceeded the extracted clip length. That compared two different frame spaces:
+    the indices are absolute session positions, and ``utterance_start`` - in the same
+    file - gives the offset, so ``crop index = session frame - utterance_start + 1``.
 
-    This test exists so that a future recogniser cannot quietly train on misaligned
-    labels and report a CER that looks like a model result.
+    Checked against real published frame counts: the mapping lands in range for the
+    large majority of tokens, with the rest overshooting the crop end by a frame or
+    two. A test that asserted a wrong conclusion is worse than no test, so this one
+    now pins the mapping and the residual.
     """
+    import collections
+    import json
+    import urllib.request
+
+    pytest.importorskip("pandas")
+
+    # Published DWPose frame counts per utterance.
+    try:
+        url = "https://huggingface.co/api/datasets/FangSen9000/ASLLRP_utterances_results"
+        sib = json.loads(urllib.request.urlopen(url, timeout=60).read())["siblings"]
+    except Exception:  # pragma: no cover - offline
+        pytest.skip("Hugging Face listing unavailable")
+    counts = collections.Counter(
+        p.split("/")[1] for p in (s["rfilename"] for s in sib) if "/results_dwpose/npz/" in p
+    )
+    if not counts:
+        pytest.skip("no published frame counts in the listing")
+
+    tokens, _ = asllrp.load()
+    rep = asllrp.check_alignment(tokens, counts)
+    d = rep.as_dict()
+    assert rep.aligned, f"the offset mapping should hold: {d}"
+    frac = d["aligned_fraction"]
+    assert frac >= 0.80, f"offset mapping covers only {frac:.1%} of tokens: {d}"
+    assert d["n_tokens_overshoot"] > 0, (
+        "tokens that overshoot the crop end are a real case and must be reported, "
+        "not silently clamped"
+    )
+
+
+def test_tokens_aligned_to_emosign_clips_via_the_offset() -> None:
+    """The same mapping against the landmarks we already extracted locally."""
     import glob
     import json
 
@@ -136,18 +169,29 @@ def test_alignment_with_emosign_clips_is_reported_as_broken() -> None:
         counts[str(meta["utterance_id"])] = int(meta["frame_count"])
     if not counts:
         pytest.skip("no EmoSign landmarks on disk")
-
     tokens, _ = asllrp.load()
     rep = asllrp.check_alignment(tokens, counts)
-    d = rep.as_dict()
-    assert not rep.aligned, (
-        "if this now passes, the indices DO align and M5a can use these labels - "
-        "update the AlignmentReport docstring and the plan"
+    assert rep.aligned, f"offset mapping failed against local clips: {rep.as_dict()}"
+    assert rep.n_tokens_aligned > 0
+
+
+def test_crop_frame_index_returns_none_outside_the_utterance() -> None:
+    """Positions past the utterance start are not clamped - clamping mislabels."""
+    tok = asllrp.SignToken(
+        video_id="1",
+        gloss="A",
+        start_frame=100,
+        end_frame=110,
+        utterance_start=100,
+        utterance_end=200,
+        utterance_video="7.mp4",
+        signer="Cory",
+        source_collection="Cory_x",
+        sign_type="Signs",
     )
-    assert d["outside_fraction"] > 0.9, f"expected near-total misalignment, got {d}"
-    # Not recoverable by rescaling: the ratio varies by two orders of magnitude.
-    assert rep.ratio_cv > 0.5, f"ratio looks constant ({rep.ratio_cv}); rescaling might work"
-    assert "Sign video filename" in asllrp.AlignmentReport.__doc__
+    assert asllrp.crop_frame_index(tok, 100) == 1
+    assert asllrp.crop_frame_index(tok, 110) == 11
+    assert asllrp.crop_frame_index(tok, 99) is None
 
 
 def test_alignment_passes_when_indices_do_index_the_clips() -> None:
@@ -168,4 +212,5 @@ def test_alignment_passes_when_indices_do_index_the_clips() -> None:
     ]
     rep = asllrp.check_alignment(fake, {"42": 20})
     assert rep.aligned
-    assert rep.n_tokens_outside == 0
+    assert rep.n_tokens_aligned == 1
+    assert rep.n_tokens_overshoot == 0

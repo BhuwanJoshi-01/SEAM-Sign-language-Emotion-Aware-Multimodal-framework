@@ -1100,6 +1100,49 @@ Same folds, same instruments, same schedule. **Only the affect target changed.**
     labels are used for training, with two tests: one asserting the current mismatch (and
     documenting that a pass would mean the data changed and the plan should be updated),
     and one asserting the check can say *yes*, so it is a check and not a constant.
+### CORRECTION to items 81-84 (2026-09-29): the alignment IS recoverable
+
+**Items 81, 82, 83 and 84 above are wrong in their conclusion. The measurements were
+right; the inference from them was not.** They are left in place above rather than
+rewritten, because a quietly edited log is worse than a visible correction.
+
+**What I got wrong.** Items 81-83 compared the token's absolute frame indices against
+the length of the *extracted EmoSign clip*, and concluded no mapping existed. Those are
+two different frame spaces. The indices are absolute positions in a long session
+recording — which is what item 81 established correctly — but **the same table records
+where each utterance begins in that session**, in the `containing utterance` columns I
+was already reading. The offset was in the data the whole time. So item 82, "not a
+recoverable rescale", is right about a *global constant* and wrong about the question
+being asked: the mapping is per-utterance, not global.
+
+**The correct mapping**, now implemented as `asllrp.crop_frame_index`:
+
+    crop frame index = session frame - utterance_start + 1
+
+**Measured against the published DWPose frame counts** (410 utterances visible in the
+mirror listing, 3,464 tokens): the mapping lands in range for **89.5%** of tokens. The
+remaining 10.5% overshoot the end of their crop by one to two frames — visible, for
+instance, at utterance 25328 where a token maps to frames 39-51 of a 50-frame crop.
+
+**What this changes.** M5a is **unblocked, not blocked.** Item 83's "a recogniser would
+learn the wrong frames" remains a real hazard for the ~10% that overshoot, and those
+tokens must be **truncated or dropped, with the rate reported per split** — not clamped,
+since clamping silently labels the wrong frame. `crop_frame_index` returns `None` rather
+than a clamped value for exactly that reason.
+
+**What this does not change.** Items 85 and the M7 withholding are still the better
+route: the isolated sign clips align by construction with no boundary problem at all.
+The offset mapping is what makes the *bulk* 49k-frame DWPose corpus usable, and those
+pose keypoints are frame-aligned to the crops by construction — which also makes them
+the better SMPL-X retargeting input than MediaPipe's 33 points. Both routes are now open.
+
+**Process note.** The wrong conclusion was not a coding slip; it was a measurement
+compared against the wrong reference, then written into a docstring, a plan entry, a
+product affordance, and a test that asserted the wrong thing. Four artifacts agreed with
+each other because one of them was wrong. The test that should have caught it asked
+"does the absolute index exceed the clip length" when the data question was "can a
+documented offset map it".
+
 85. **The route forward is the other column.** The table carries
     `Sign video filename`: **17,522 isolated sign clips, each with a single gloss and its
     own frame bounds**. Those are downloadable and alignable by construction — no session
