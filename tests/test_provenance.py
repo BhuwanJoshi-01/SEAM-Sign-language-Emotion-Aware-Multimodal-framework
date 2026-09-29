@@ -34,6 +34,25 @@ PAPER = REPO / "paper"
 ARTIFACTS = REPO / "artifacts"
 CLAIMED_DOCS = ("EXPERIMENT_LOG.md", "CLAIMS_LEDGER.md")
 
+#: `report.md` quotes measurements back to the people verifying them, so a number in it
+#: that no artifact produced is a verification instruction that cannot be carried out.
+#: The file is excluded from the *line-level* ratchet because it also quotes external
+#: facts - a remote file size, a byte count - which are not measurements of this project.
+#: What it must not do is quote a project measurement wrongly, so it gets a targeted
+#: check against the specific values it asserts instead.
+REPORT_QUOTED = {
+    "worst_cross_auc": 0.7276,
+    "signer_control_max": 0.9729,
+    "cross_a_to_l": 0.5048,
+    "n_tokens": 1563,
+    "n_glosses": 499,
+    "hapax_types": 284,
+    "wer_mean": 0.916,
+    "wer_baseline": 0.916,
+    "wer_shuffled": 0.911,
+    "tar_bytes": 1169520640,
+}
+
 #: Numbers that legitimately have no artifact behind them, each with the reason.
 #: A new entry is a claim that the number is not evidence, and should be argued for in
 #: review rather than added to make a red test go green.
@@ -210,4 +229,63 @@ def test_allowed_numbers_are_still_needed() -> None:
     assert not dead, (
         f"ALLOWED entries no longer appear in the claim documents: {dead}. "
         "Remove them so the exemption list stays honest."
+    )
+
+
+def test_report_md_quotes_the_current_measurements() -> None:
+    """Every project measurement in report.md must match the artifact, exactly.
+
+    This is the one document a second person reads while deciding whether to trust
+    someone else's work, so a stale number here is worse than a stale number in the
+    paper: it propagates into a verification decision rather than a citation. The
+    values are re-derived from the artifacts rather than hard-coded on both sides.
+    """
+    import json
+    import statistics as st
+
+    path = PAPER.parent / "report.md"
+    assert path.exists(), "report.md is missing"
+    text = path.read_text()
+
+    repo = PAPER.parent
+    m4_path = repo / "artifacts" / "m4" / "factorizer_multilabel.json"
+    m5_path = repo / "artifacts" / "m5a" / "recogniser.json"
+    if not (m4_path.exists() and m5_path.exists()):
+        pytest.skip("M4/M5 artifacts not present")
+
+    m4 = json.loads(m4_path.read_text())["runs"]["full"]
+    m5 = json.loads(m5_path.read_text())
+    live = {
+        "worst_cross_auc": round(m4["gate"]["worst_cross_auc"], 4),
+        "signer_control_max": round(m4["gate"]["signer_control_max"], 4),
+        "cross_a_to_l": round(m4["n_test_weighted"]["cross_a_to_l"], 4),
+        "n_tokens": m5["design"]["n_tokens"],
+        "n_glosses": m5["design"]["n_glosses"],
+        "hapax_types": m5["design"]["hapax_types"],
+        "wer_mean": round(st.mean(f["wer"] for f in m5["real"]["folds"]), 3),
+        "wer_baseline": round(
+            st.mean(f["wer_most_frequent_baseline"] for f in m5["real"]["folds"]), 3
+        ),
+        "wer_shuffled": round(st.mean(f["wer"] for f in m5["shuffled_label_control"]["folds"]), 3),
+    }
+    # 1. What the form asserts must equal what the artifacts say.
+    stale = {k: (v, live[k]) for k, v in REPORT_QUOTED.items() if k in live and v != live[k]}
+    assert not stale, (
+        f"report.md quotes measurements that no longer match the artifacts: {stale}. "
+        "A verifier reading a stale number is worse off than one reading nothing."
+    )
+
+    # 2. And the values it actually printed must be the ones asserted here, so editing
+    #    the form to a different number is caught rather than merely discouraged.
+    # Thousands separators are stripped first: a report is read by people, so "1,563" is
+    # the right way to write the token count and should not be reported as a mismatch.
+    flat = text.replace(",", "")
+    absent = [
+        k
+        for k, v in live.items()
+        if re.search(rf"(?<![\w.]){re.escape(str(v))}(?![\w])", flat) is None
+    ]
+    assert not absent, (
+        f"report.md no longer contains these measured values: {absent}. If a number was "
+        "changed, change REPORT_QUOTED in this test too, and say why in the commit."
     )

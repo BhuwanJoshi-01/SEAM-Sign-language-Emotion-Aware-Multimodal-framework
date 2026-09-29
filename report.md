@@ -61,7 +61,9 @@ whether a number has moved:
 - Test suite: **306 passing**, lint and typecheck clean, `make serve-check` green.
 - Gates closed: M0, M1, M2. M4 **not met** (worst-fold cross-AUC 0.7276 against a
   target of 0.60, with the signer control passing at 0.9729).
-- M5a: **negative result** — WER 0.916 against a most-frequent baseline of 0.916.
+- M5a: **negative result** — WER 0.916, against a most-frequent baseline of 0.916 and a
+  shuffled-label control of 0.911. The model is indistinguishable from always predicting
+  the most common gloss.
 - Known open defect: `export_glb()` writes a JSON parameter file, not a GLB mesh,
   despite its docstring. Not a valid mesh export.
 
