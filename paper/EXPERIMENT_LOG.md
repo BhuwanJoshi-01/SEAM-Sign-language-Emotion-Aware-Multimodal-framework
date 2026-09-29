@@ -1049,3 +1049,114 @@ Same folds, same instruments, same schedule. **Only the affect target changed.**
     residual affect information in `z_L` at 0.691. Neither is fixed by more separation
     terms. (a) is a reporting decision; (b) may be real, given that M3 measured a
     head-shake/negation association and brow and mouth channels remain saturated.
+
+---
+
+## M5a — the ASLLRP token table parses cleanly and its frame indices do not fit our clips
+
+### The data layer
+
+78. **The file is not valid CSV, and the fix was a parser rather than a skip.** Gloss
+    labels contain bare inner double quotes — `"5"ok, hey""` — which RFC 4180 requires to
+    be doubled. Every standard reader fails on ~2 rows in 6,000. Skipping them would
+    remove the most unusual glosses, which are exactly what a recognition model finds
+    hardest, and the token count would still look plausible. `_split_row` opens a
+    quoted region at a `"` after a delimiter and closes it at a `"` before one, treating
+    any other `"` as data. Result: **17,522 tokens, 2,127 utterances, 1,956 gloss
+    types, 0 malformed rows**, with all 761 quoted glosses preserved.
+
+79. **One signer appears only in a `1-Name-topic` form.** Deriving the signer name set
+    from the `Cory_2013-6-27_sc115` form left **all 4,389 of Ben's tokens unassigned**,
+    which would have pooled them into a single anonymous leave-one-out group — the exact
+    leak signer-disjoint splits exist to prevent, arriving through a parse that looked
+    clean. Both collection forms are now resolved, giving **Ben 4,389, Cory 5,313,
+    Jonathan 3,236, Rachel 4,584** tokens, 0 unmapped collections.
+
+80. **A documented limitation of the dashed form.** The rule reads the token after the
+    collection index, so in isolation `1-Introduction-x` yields `Introduction`; a name and
+    a topic word are indistinguishable in one string. The guard therefore sits on the
+    *derived set* — a leaked topic word would appear as an extra signer, splitting one
+    person into two groups. Reported as `signer_set_plausible` and asserted to be exactly
+    the four people.
+
+### The blocker: token frame indices do not index the EmoSign clips
+
+81. **Measured, and it would have produced a plausible CER about the wrong frames.** The
+    ASLLRP token table's frame indices are **absolute positions in a long session
+    recording**: the `containing utterance` start values run monotonically upward (5000,
+    287, 1372, 1491, 1599, 1710, 3287, …) and the median utterance span is **5,123
+    frames, about 2.8 minutes at 30 fps**. The EmoSign clips are **4.6-second excerpts**
+    with a median of 109 frames.
+82. **It is not a recoverable rescale.** The ratio of ASLLRP index to extracted frame
+    count runs from **1.00 to 222.33** across 200 utterances with a coefficient of
+    variation above 0.9, so no constant factor maps one to the other, and the excerpt's
+    offset into its session is recorded nowhere in the data available.
+83. **Consequence: 1,725 of 1,738 EmoSign-overlapping tokens have a frame range entirely
+    outside the extracted video** — 99.3%. Only 1,738 of 17,522 tokens overlap at all,
+    and those 1,738 are misaligned. A recogniser trained on them would learn the wrong
+    frames and its error rate would describe the misalignment rather than the model.
+84. **This is now a checked property, not a caveat in prose.** `asllrp.check_alignment`
+    returns an `AlignmentReport` whose `aligned` flag must be consulted before these
+    labels are used for training, with two tests: one asserting the current mismatch (and
+    documenting that a pass would mean the data changed and the plan should be updated),
+    and one asserting the check can say *yes*, so it is a check and not a constant.
+85. **The route forward is the other column.** The table carries
+    `Sign video filename`: **17,522 isolated sign clips, each with a single gloss and its
+    own frame bounds**. Those are downloadable and alignable by construction — no session
+    offset to recover — and are the correct substrate for M5a. Cost is a download of the
+    sign-clip set plus MediaPipe extraction over short single-sign videos, which is hours
+    of work and not minutes, so it is scheduled rather than started silently.
+
+---
+
+## M7 — a runnable demo, and two things it deliberately refuses to do
+
+`seam serve` / `make serve`. 21 tests in `tests/test_serve.py` plus `make serve-check`,
+which boots the server and asserts the HTTP contract.
+
+86. **Video never leaves the browser tab.** MediaPipe Tasks runs client-side in WASM and
+    the page posts the 52 blendshape coefficients and the head transform. The server
+    receives numbers, so there is nothing to store or leak. The cost of that choice is
+    stated rather than hidden: **this process cannot verify what the client measured**,
+    so every response carries the provenance of its inputs and the UI displays it.
+87. **Marker magnitudes come from the same code the experiments use**
+    (`seam.features.markers`), so a demo figure and a paper figure cannot come from
+    different implementations. Measured server latency **9 ms** per window.
+88. **The demo refuses to show predictions this build cannot support, and says why.** The
+    panel reads "affect — withheld: M4's factorized encoder was measured at 0.497
+    balanced accuracy against a 0.5 reference, so it does not learn" and "gloss
+    recognition — withheld: M5a's labels are misaligned". An empty panel is honest; a
+    confident wrong number is not, and a demo that displayed 0.497-derived affect labels
+    would be presenting a measurement that carries no information.
+89. **A blind feature is shown as blind, not as absent.** The response carries each
+    marker's zero fraction, so `head_nod` (zero on 83% of clips) renders as "blind —
+    cannot discriminate" rather than as a low magnitude, keeping "no marker" and "this
+    instrument cannot tell" distinct on screen.
+90. **Malformed windows are rejected with an actionable message, not repaired.** A
+    51-coefficient window is a specific trap: MediaPipe emits 52 starting with
+    `_neutral`, and an implementation that dropped it would shift every marker threshold
+    by one while looking healthy. All four bad cases return **400** with a message
+    (`51 coeffs`, `3 frames`, `fps=0`, unknown utterance) rather than 500 or a
+    confidently wrong result.
+91. **A missing head pose stays missing.** Zero-filling it is not a neutral default, it
+    is a *plausible* head pose, and it makes "no tracking" indistinguishable from
+    "perfectly still" — which silently pins head_shake and head_nod to zero.
+92. **One bug found by the smoke test, which is why it exists.** The web asset path
+    resolved to `src/` instead of the package, so the app started cleanly, logged
+    "app built", and served a **44-byte 404 page**. A demo that starts and shows
+    nothing is worse than one that refuses to start, so `make serve-check` now boots
+    the server and asserts the page is real HTML carrying both halves of the client
+    contract (`tasks-vision` and `api/analyse`), plus the health endpoint's declared
+    coefficient count.
+93. **Verified end to end over HTTP:** `GET /` 9,126 bytes of real HTML;
+    `POST /api/analyse` → 6 markers in 9 ms; linguistic annotation resolved for
+    utterance 24363254 (`GROW TALK of GROW SIGN DCL:B"pathway of sign language"`, 9
+    tokens) from the real ASLLRP annotation; every malformed case 400.
+
+### What the demo is, precisely
+
+A live monitor of non-manual signal with its linguistic context attached: real
+MediaPipe perception in the browser, real marker magnitudes from the research code,
+real ASLLRP annotation for a supplied utterance id, and explicit refusals with measured
+reasons for the two things this build cannot yet do. It is not a claim about affect
+recognition or sign recognition, because neither is established.

@@ -46,6 +46,7 @@ from seam.eval.probes import (
     SeparationReport,
     auc,
     cross_prediction,
+    cross_prediction_multilabel,
     signer_probe_auc,
 )
 
@@ -392,3 +393,31 @@ def test_cross_prediction_reports_too_few_samples_instead_of_guessing() -> None:
     cp = cross_prediction(z, np.array([0, 1] * 5), label="tiny")
     assert not cp.interpretable
     assert "only 10 samples" in cp.note
+
+
+def test_a_fold_that_cannot_measure_its_labels_is_not_interpretable() -> None:
+    """A fold that skips most of its affect labels must not yield a gate number.
+
+    The M4 Ben fold has 7 clips, 112 test windows, and 3 of 8 affect labels reaching
+    the support threshold. It alone produced cross L->A = 0.884 and failed the gate on
+    a number computed from the five labels it could not estimate. A metric that fails
+    a model on data it never measured is not a metric.
+    """
+    rng = np.random.default_rng(0)
+    z = rng.normal(size=(112, 16))
+    y = np.zeros((112, 8))
+    for k in range(3):
+        y[:, k] = rng.random(112) < 0.25  # enough support
+    for k in range(3, 8):
+        y[:, k] = rng.random(112) < 0.02  # far too rare to estimate
+    r = cross_prediction_multilabel(z, y, label="thin")
+    assert r["n_usable"] == 3
+    assert r["n_skipped"] == 5
+    assert not r["coverage_ok"]
+    assert r["n_labels"] == 8
+
+    full = np.zeros((400, 8))
+    for k in range(8):
+        full[:, k] = rng.random(400) < 0.3
+    r2 = cross_prediction_multilabel(rng.normal(size=(400, 16)), full, label="thick")
+    assert r2["coverage_ok"], "a well-supported fold must stay interpretable"

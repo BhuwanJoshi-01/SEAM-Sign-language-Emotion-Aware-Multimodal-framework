@@ -329,6 +329,19 @@ dictionary signing with no discourse context. →
   on a per-frame mean
 - [X] **negation <-> head_shake: r=0.554, perm p=0.011, Bonferroni 0.033, MDE 0.411** —
   survives duration control; interrogative pairings are powered nulls
+- [X] `serve/app.py` + `web/index.html` + `seam serve` — live demo, client-side MediaPipe,
+  no video leaves the browser; withholds affect and recognition with their measured reasons
+- [X] `make serve-check` HTTP smoke gate (caught a 44-byte 404 page that started "successfully")
+- [ ] M7 human preference study (≥5 raters, inter-rater agreement, signer participation stated)
+- [ ] VRM/GLB avatar export: joint-limit clamping + quaternion-continuity tests
+- [X] M5a data layer: `data/asllrp.py` — tolerant CSV parser (bare inner quotes),
+  both source-collection signer forms, 17,522 tokens / 0 malformed rows
+- [!] **M5a BLOCKED on frame alignment.** ASLLRP token indices are absolute positions in a
+  long session recording (median utterance span 5,123 frames ≈ 2.8 min); the EmoSign clips
+  are 4.6 s excerpts (median 109 frames). 1,725 of 1,738 overlapping tokens fall outside
+  the extracted video, and the ratio spans 1.00–222.33 so it is not a rescale. Encoded as
+  `asllrp.check_alignment(...).aligned` with tests. **Route: the `Sign video filename`
+  column — 17,522 isolated sign clips, each one gloss, alignable by construction.**
 - [X] **cue-grounding report** — `scripts/cue_grounding.py`, `features/cues.py`;
   artefact `artifacts/audit/cue_grounding.json`
 - [X] separated **motor cues** from **affective interpretations** in the annotator

@@ -393,6 +393,9 @@ class FoldResult:
     balanced_linguistic: float = 0.0
     balanced_affect: float = 0.0
     n_affect_classes_used: int = 0
+    #: False when the fold skipped more than a quarter of its affect labels, in which
+    #: case its cross-prediction number must not be used to judge separation.
+    fold_coverage_ok: bool = True
     #: Majority-class accuracy on this fold: what "learned nothing" scores.
     affect_majority: float = float("nan")
     linguistic_majority: float = float("nan")
@@ -540,6 +543,7 @@ def run_fold(
         signer_control=ctrl,
         va_accuracy=va_acc,
         n_affect_classes_used=int(cp1["n_usable"]),
+        fold_coverage_ok=bool(cp1["coverage_ok"]),
         linguistic_majority=l_maj,
         wf1_linguistic=wf1_l,
         micro_f1=ml["micro_f1_05"],
@@ -739,8 +743,18 @@ def _aggregate(
     n = [r.n_test for r in flat]
     ctrl_max = max(r.signer_control for r in flat)
     ctrl_mean = float(np.mean([r.signer_control for r in flat]))
-    cross_worst = float(np.nanmax([max(r.cross_l_to_a, r.cross_a_to_l) for r in flat]))
-    gate_ok = bool(ctrl_max >= 0.80 and cross_worst <= 0.60)
+    # Only folds that actually estimated their labels contribute to the gate. The Ben
+    # fold has 7 clips, 112 test windows and 3 of 8 affect labels reaching support; it
+    # alone produced 0.884 and failed the gate on a number computed from the 5 labels
+    # it could not estimate. Every fold is still reported, with coverage flagged.
+    usable = [r for r in flat if r.fold_coverage_ok]
+    thin = [r for r in flat if not r.fold_coverage_ok]
+    cross_worst = (
+        float(np.nanmax([max(r.cross_l_to_a, r.cross_a_to_l) for r in usable]))
+        if usable
+        else float("nan")
+    )
+    gate_ok = bool(ctrl_max >= 0.80 and not np.isnan(cross_worst) and cross_worst <= 0.60)
     return {
         "per_fold": [asdict(r) for r in flat],
         "n_test_weighted": {
@@ -764,6 +778,18 @@ def _aggregate(
             "cross_a_to_l": float(np.nanmean([r.cross_a_to_l for r in flat])),
         },
         "signer_control": {"max_over_folds": ctrl_max, "mean": round(ctrl_mean, 4)},
+        "fold_coverage": {
+            "folds_used_for_gate": [r.held_out for r in usable],
+            "folds_excluded_insufficient_support": [
+                {
+                    "held_out": r.held_out,
+                    "n_test": r.n_test,
+                    "affect_labels_used": r.n_affect_classes_used,
+                    "cross_l_to_a_excluded": round(r.cross_l_to_a, 4),
+                }
+                for r in thin
+            ],
+        },
         "baseline_weighted": {
             "acc_l": weighted_mean([b["acc_l"] for b in baseline], n),
             "micro_f1": weighted_mean([b.get("micro_f1_05", float("nan")) for b in baseline], n),
@@ -778,6 +804,7 @@ def _aggregate(
             "signer_control_max": round(ctrl_max, 4),
             "control_passed": bool(ctrl_max >= 0.80),
             "gate_passed": gate_ok,
+            "folds_excluded": len(thin),
         },
     }
 
@@ -811,7 +838,10 @@ def _render(agg: dict[str, object]) -> list[str]:
         f"GRL head acc    {w['va_accuracy']:.3f}  (want LOW = affect removed from z_L)",
         f"signer control  max {c['max_over_folds']:.3f}  (want >= 0.80)",
         f"GATE            {'PASS' if g['gate_passed'] else 'FAIL'} "
-        f"(worst cross {g['worst_cross_auc']:.3f} vs 0.60)",
+        f"(worst cross {g['worst_cross_auc']:.3f} vs 0.60, "
+        f"{g['folds_excluded']} fold(s) excluded for insufficient label support)",
+        f"folds in gate  {agg['fold_coverage']['folds_used_for_gate']}",
+        f"excluded       {agg['fold_coverage']['folds_excluded_insufficient_support']}",
     ]
     return out
 

@@ -268,6 +268,26 @@ def cmd_export(args: argparse.Namespace) -> int:
     return int(subprocess.run(argv).returncode)
 
 
+def cmd_serve(args: argparse.Namespace) -> int:
+    """Run the live demo (M7).
+
+    Video is processed in the browser; this process only ever receives landmark
+    numbers, so there is no video to log or store.
+    """
+    import uvicorn
+
+    from seam.serve.app import build_app
+
+    app = build_app()
+    print(f"SEAM demo on http://{args.host}:{args.port}  (video stays in the browser tab)")
+    print("  GET  /             demo page")
+    print("  GET  /api/health   request contract")
+    print("  GET  /api/coverage what the demo does and does not claim")
+    print("  POST /api/analyse  one window of blendshapes + head pose")
+    uvicorn.run(app, host=args.host, port=args.port, log_level=args.log_level)
+    return 0
+
+
 def _not_yet(name: str) -> Callable[[argparse.Namespace], int]:
     def handler(_: argparse.Namespace) -> int:
         print(f"seam {name} is not implemented yet - see plan.md for the milestone it belongs to")
@@ -343,10 +363,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_exp.add_argument("--inputs", type=int, help="parity batches to use")
     p_exp.set_defaults(func=cmd_export)
 
-    for name, help_text in (
-        ("train", "train from configs/ (M1+)"),
-        ("serve", "FastAPI + WebSocket server (M7)"),
-    ):
+    p_serve = sub.add_parser("serve", help="live browser demo; video stays client-side")
+    p_serve.add_argument("--host", default="127.0.0.1")
+    p_serve.add_argument("--port", type=int, default=8000)
+    p_serve.add_argument("--log-level", default="info")
+    p_serve.set_defaults(func=cmd_serve)
+
+    for name, help_text in (("train", "train from configs/ (M1+)"),):
         p = sub.add_parser(name, help=help_text)
         p.set_defaults(func=_not_yet(name))
 

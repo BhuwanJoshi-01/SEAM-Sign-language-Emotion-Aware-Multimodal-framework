@@ -408,7 +408,23 @@ client-side MediaPipe Tasks in WASM**, so the server ships no video and the demo
 Blinded pairwise human preference, pre-registered rubric, ≥5 raters, inter-rater agreement
 reported; **if no signer participates, that is stated in Limitations, not glossed over.**
 
-**Gate:** preference ≥ 60% over neutral; browser smoke test; 10 min at 30 fps without leak.
+**Status: browser demo built and gated; no human preference study yet.**
+
+- `seam serve` / `make serve` runs it; `make serve-check` boots the server and asserts the
+  HTTP contract, which is how a 44-byte 404 page that started "successfully" was caught.
+- **Video never leaves the browser** — MediaPipe Tasks runs in WASM and the page posts
+  only landmark numbers, so there is nothing to store or leak. The cost is stated in the
+  response: the server cannot verify what the client measured, so every reply carries its
+  input provenance.
+- **It refuses to display what this build cannot support**, with the measured reason
+  inline: affect is withheld because M4 measured 0.497 balanced accuracy against a 0.5
+  reference, and gloss recognition is withheld because M5a's labels are misaligned.
+- **A blind feature is rendered as blind** (zero fraction in the payload), so "no marker"
+  and "this instrument cannot tell" stay distinct on screen.
+- **Outstanding for the M7 gate:** the blinded pairwise human-preference study (≥5 raters,
+  inter-rater agreement, and the explicit statement if no signer participates), and VRM/GLB
+  avatar export with joint-limit and quaternion-continuity tests. 253 tests pass.
+
 **Kill switch:** drop GLB/VRMA export first, keep the live viewer.
 **Survives:** the demo video and system section.
 

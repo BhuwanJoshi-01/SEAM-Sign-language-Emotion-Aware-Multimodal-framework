@@ -59,6 +59,12 @@ bench-seq: ## Sequential perception baseline for the concurrency ablation  [M2]
 export: ## ONNX export + FP32/INT8 parity; non-zero on a failed gate  [M2]
 	$(PY) -m seam.cli export
 
+serve: ## Live browser demo; video is processed client-side, never uploaded  [M7]
+	$(PY) -m seam.cli serve
+
+serve-check: ## Boot the demo server and assert the HTTP contract  [M7]
+	$(PY) scripts/serve_smoke.py
+
 parity-report: ## Print the last parity verdict  [M2]
 	@$(PY) -c "import json,pathlib; d=json.loads(pathlib.Path('artifacts/export/parity.json').read_text()); \
 	[print(r['summary']()) for r in d.get('results_summary',[])]; \

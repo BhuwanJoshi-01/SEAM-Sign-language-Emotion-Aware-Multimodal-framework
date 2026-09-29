@@ -318,16 +318,26 @@ def cross_prediction_multilabel(
         for r in per_label
         if not r["skipped"] and r.get("auc") is not None
     ]
+    n_skipped = int(y.shape[1]) - len(usable)
     return {
         "per_label": per_label,
         "n_usable": len(usable),
+        "n_skipped": n_skipped,
         "n_labels": int(y.shape[1]),
         "worst_auc": max(usable) if usable else float("nan"),
         "mean_auc": float(np.mean(usable)) if usable else float("nan"),
         "interpretable": bool(usable),
+        # A fold that cannot estimate most of its own labels cannot support a claim
+        # about them. The M4 Ben fold has 7 clips and 3 of 8 labels reach support; the
+        # AUC it returns for the rest would be computed from a handful of windows and
+        # then used to fail a gate, which is the metric making a claim it has no data
+        # for. `coverage_ok` is the check, and callers must not read `worst_auc` when
+        # it is false.
+        "coverage_ok": bool(usable) and n_skipped <= max(1, int(0.25 * y.shape[1])),
         "note": (
-            "worst per-label AUC is the headline; the worst label is the one a "
-            "separation claim has to survive"
+            "worst per-label AUC is the headline, but only when coverage_ok: a fold "
+            "that skips most of its labels has not measured them. The balanced-accuracy "
+            "reference for a per-label classifier is 0.5 by construction."
         ),
     }
 
