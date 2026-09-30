@@ -356,7 +356,13 @@ dictionary signing with no discourse context. →
   `blink_close`, `gaze_shift`, `fingerspelling`, `body_posture` — a data-derived spec
   for M4's feature set
 - [X] permutation null calibration asserted in the suite (median p near 0.5 on noise)
-- [ ] Track B (async): BU access request for the real SignStream non-manual XML — **BLOCKED, external.** Access request not yet sent; ungated mirror carries no non-manuals.
+- [ ] Track B (async): real SignStream non-manual XML — **researched 2026-09-30; the obstacle is misdiagnosed and mostly self-service.**
+  - **The non-manuals were never in the mirror.** The `17,522 tokens / 4 signers` download is the Sign Bank *sign-clip* set, whose columns (ASLLRP Report 24) are gloss, frames, handshape and sign type — no non-manual columns. The Hugging Face mirror was built from it, so it is not missing anything; it is the wrong artifact. The non-manuals are a *separate* download from `dai.cs.rutgers.edu/dai/s/dai`, whose XML export contains a `<NON_MANUALS>` block (ASLLRP Report 18 §8.3).
+  - **Access is a free self-service account, not an approval** (Report 18 §8.1: the account exists "to help keep track of prior downloads"). No PI letter or IRB documented.
+  - Contact confirmed current: **carol@bu.edu** (Carol Neidle, Director ASLLRP). DAI support: augustine.opoku@gmail.com.
+  - Drafted, ready to review and send: `paper/provenance/bu_access_request.md`, with the research, the confirmed/unconfirmed split, the field IDs, and the no-redistribution terms.
+  - **Also unblocked:** the real labels will make it possible to check the project's marker definitions (`eye brows` → brow raise/furrow, `head mvmt: shake` → head shake, `mouth` → mouth morpheme). Those definitions were written from blendshape heuristics and have **never** been validated against the real annotations.
+  - **Caveat recorded:** the live DAI portal returned HTTP 503 throughout the research, so the account flow is documented but not yet exercised end to end.
 - [x] cue-grounding report: our prosody features vs the 600 Deaf-annotator cue strings — **done**, `artifacts/audit/cue_grounding.json`
 
 ---

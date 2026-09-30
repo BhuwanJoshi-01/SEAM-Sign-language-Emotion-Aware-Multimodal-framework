@@ -22,14 +22,14 @@ install a second Python.
 
 ## Contents
 
-| # | Task | Who | Time | Blocks |
-|---|---|---|---|---|
-| 0 | [Rotate the exposed password](#0-rotate-the-exposed-password-15-minutes) | whoever owns the machine | 15 min | security |
-| 1 | [Obtain the SMPL-X model weights](#1-obtain-the-smpl-x-model-weights-1-3-hours) | you (licence form) | 1–3 h | the avatar rendering a real body |
-| 2 | [Decide what happens to the M4 result](#2-decide-what-happens-to-the-m4-result-30-minutes) | you (a judgement call) | 30 min | the paper's headline claim |
-| 3 | [Request SignStream non-manual XML from BU](#3-request-signstream-non-manual-xml-from-bu-20-minutes) | you (institutional email) | 20 min + waiting | M3's instrument |
-| 4 | [Download the DWPose pose corpus](#4-download-the-dwpose-pose-corpus-20-minutes) | anyone | 20 min | M5a at real scale |
-| 5 | [Run the M7 human preference study](#5-run-the-m7-human-preference-study-1-2-days) | 5+ people, incl. a Deaf signer if possible | 1–2 days | the last M7 gate |
+| # | Task                                                                                                | Who                                        | Time             | Blocks                           |
+| - | --------------------------------------------------------------------------------------------------- | ------------------------------------------ | ---------------- | -------------------------------- |
+| 0 | [Rotate the exposed password](#0-rotate-the-exposed-password-15-minutes)                             | whoever owns the machine                   | 15 min           | security                         |
+| 1 | [Obtain the SMPL-X model weights](#1-obtain-the-smpl-x-model-weights-1-3-hours)                      | you (licence form)                         | 1–3 h           | the avatar rendering a real body |
+| 2 | [Decide what happens to the M4 result](#2-decide-what-happens-to-the-m4-result-30-minutes)           | you (a judgement call)                     | 30 min           | the paper's headline claim       |
+| 3 | [Request SignStream non-manual XML from BU](#3-request-signstream-non-manual-xml-from-bu-20-minutes) | you (institutional email)                  | 20 min + waiting | M3's instrument                  |
+| 4 | [Download the DWPose pose corpus](#4-download-the-dwpose-pose-corpus-20-minutes)                     | anyone                                     | 20 min           | M5a at real scale                |
+| 5 | [Run the M7 human preference study](#5-run-the-m7-human-preference-study-1-2-days)                   | 5+ people, incl. a Deaf signer if possible | 1–2 days        | the last M7 gate                 |
 
 **Do these in this order.** 0 and 4 are quick and unblock other work. 1 and 3 involve
 waiting on other people, so start them as early as possible. 2 needs nothing but your
@@ -56,7 +56,6 @@ deliberately not repeated anywhere in this file.**
 
    Enter the current password once, then the new one twice. You will not see characters
    as you type — this is normal.
-
 2. Confirm the old password no longer works:
 
    ```bash
@@ -64,7 +63,6 @@ deliberately not repeated anywhere in this file.**
    ```
 
    Type the **new** password when prompted. It should succeed with no output.
-
 3. Confirm the old one fails:
 
    ```bash
@@ -73,7 +71,6 @@ deliberately not repeated anywhere in this file.**
 
    Type the **old** password. It must be rejected with `Sorry, try again.` If the old
    password still works, `passwd` did not take effect — stop and report.
-
 4. Also change it anywhere else it was reused. If the same password was used for Git,
    a database, or an academic account, change those too.
 
@@ -109,15 +106,13 @@ no verified visual output and no real 3D export.
 ### Steps
 
 1. **Register and accept the licence.** Go to the official SMPL-X page linked from
-   <https://smpl-x.is.tue.mpg.de> (the "Model Download" / registration section). You
+   [https://smpl-x.is.tue.mpg.de](https://smpl-x.is.tue.mpg.de) (the "Model Download" / registration section). You
    must fill in a form stating you are a non-commercial researcher and accept the terms.
    **This is the slow part — approval is manual and is not instant.** Expect a delay.
-
 2. **After approval**, download the model. You need the main SMPL-X model file for your
    operating system (Linux). The download is a `.npz` (or `.pkl` for the body-only
    model). Record the exact filename you get — it is usually something like
    `SMPLX_NEUTRAL.npz` or `SMPLX_MALE.npz`.
-
 3. **Check the file is real, not an error page.** A failed download often saves an HTML
    page with a `.npz` name:
 
@@ -128,7 +123,6 @@ no verified visual output and no real 3D export.
 
    `file` must report a NumPy/zip archive. If it says `HTML document` or `ASCII text`,
    the download failed — delete it and try again.
-
 4. **Move it somewhere permanent and out of the repository.** Never put it in the repo
    even temporarily:
 
@@ -140,7 +134,6 @@ no verified visual output and no real 3D export.
 
    `chmod 600` matters: the licence forbids redistribution, and making the file
    owner-only reduces the chance of it being copied somewhere public.
-
 5. **Confirm the code can read it.** Run:
 
    ```bash
@@ -159,7 +152,6 @@ no verified visual output and no real 3D export.
    **If it raises** `FileNotFoundError`, the path is wrong. **If it raises**
    `ValueError: unsupported model file`, you have a `.zip` or `.tar.gz` — unzip it
    first and point at the inner `.npz`.
-
 6. **Confirm it is still not in the repository.** This must all print nothing:
 
    ```bash
@@ -251,59 +243,105 @@ they are the measurement, and they are correct.
 
 ---
 
-## 3. Request SignStream non-manual XML from BU (20 minutes + waiting)
+## 3. Request SignStream non-manual XML from BU (30 minutes + waiting)
 
 ### Why
 
 Every non-manual feature in this project — brow raise, brow furrow, head shake, mouth
 morpheme — currently comes from **heuristic pseudo-labels** derived from MediaPipe
-blendshapes. That is stated in the artifacts (`marker_provenance: "heuristic
-(pseudo-labels); ASLLRP SignStream XML not available"`). It is the single largest
-instrument limitation in the project, and it is why M3's gate says "met on labels,
-blocked on the visual instrument."
+blendshapes. That is the single largest instrument limitation in the project, and it is
+why M3's gate says "met on labels, blocked on the visual instrument."
 
-The authoritative labels are the **ASLLRP SignStream non-manual XML**, which is
-distributed by Boston University under a data-use agreement. The freely downloadable
-Hugging Face mirror contains the **gloss** tokens and DWPose pose, but **no
-non-manual annotations** — that is not an oversight in the mirror, it is what the
-mirror contains.
+### Correction: this is mostly self-service, not an email request
 
-### Steps
+Research on 2026-09-30 found the data sits behind a **free account**, with no documented
+approval step. From ASLLRP Report 18 §8.1:
 
-1. Find the contact. The dataset is "ASLLRP" (American Sign Language Lexicon-Reinforced
-   with Prosodic Features). The distribution is handled by Boston University's
-   Language and Communication Lab / speech-and-language processing group. Look for the
-   dataset request link on the ASLLRP project page or on the related publications
-   (search `ASLLRP non-manual annotation XML download`). If the original authors no
-   longer distribute it, the current maintainer will be listed on the dataset page.
+> "If you are interested in downloading data from DAI 2, you should request a (free)
+> account by clicking on the 'login' link. […] The purpose of the account is to help
+> keep track of prior downloads and downloads in progress."
 
-2. **Email, in your own words, stating all of the following:**
-   - Who you are (name, institution or "independent researcher", contact).
-   - That you are requesting the **SignStream non-manual XML annotations** for
-     ASLLRP — specifically the facial/body non-manual labels, not the glosses, which
-     you already have.
-   - The **research purpose**, in one or two sentences: measuring how facial
-     non-manuals and affect markers interact in ASL, for a reproducibility study.
-   - That you will **redistribute nothing** and will cite the dataset.
-   - That you can sign the data-use agreement if required.
+No PI letter, no IRB, no data-use agreement. **So do part A first — it is the part that
+unblocks the work, and it needs nobody's permission.**
 
-3. **Save the request.** Save the sent email and any reply into
-   `paper/provenance/bu_access_request.md` (create the directory) with the date. A
-   provenance record that lives only in someone's inbox is not a provenance record.
+### The critical distinction: two different downloads
 
-4. **Record the status** in `implimentation.md` under the Track B line, as either
-   "requested YYYY-MM-DD, awaiting reply" or "declined YYYY-MM-DD, reason". If it is
-   declined or unanswered after two weeks, say so — the M3 limitation then stands as
-   final and should be written up as a limitation rather than left as an open action.
+| Download | URL | Has non-manuals? |
+|---|---|---|
+| ASLLRP **SignStream®3 Corpus** | `dai.cs.rutgers.edu/dai/s/dai` | **YES** |
+| **Sign Bank** sign clips (the 17,522 / 4 signers) | `dai.cs.rutgers.edu/dai/s/continuoussigndownload` | **NO** — glosses and handshapes only |
+
+**This is the root of the problem, and it is not a mirror oversight.** The
+`17,522 sign tokens; 4 signers` figure is the *Sign Bank sign-clip* download, and
+ASLLRP Report 24 shows its columns are gloss, frames, handshape and sign type — **no
+non-manual columns**. The Hugging Face mirror this project already uses was built from
+that download. The non-manuals were never in it. They are a different download.
+
+### Part A — Register and download (the part that matters)
+
+1. **Open the portal.** <https://dai.cs.rutgers.edu/dai/s/dai>
+
+   **If the site is down, stop and note it.** During the 2026-09-30 research it returned
+   HTTP 503 ("maintenance downtime or capacity problems") and most requests hung. That
+   is a server problem, not your problem — record the date and retry later. Do not
+   report it as a failure of the account flow.
+
+2. **Request a free account** via the "login" link. You do not need an account to browse
+   and search; you need one to download.
+
+3. **Download the SignStream XML annotations**, per collection. From Report 18 §8.2.1
+   you can choose "the SignStream® file", "the annotations in XML export format", or
+   both. **Choose the XML annotations** — that is the whole point of this step.
+
+4. **Confirm you got what you came for.** The XML must contain a `<NON_MANUALS>` block:
+
+   ```bash
+   grep -l "NON_MANUALS" /path/to/downloaded/*.xml | head
+   ```
+
+   **If this prints nothing, the download is the wrong artifact.** Stop and report — do
+   not proceed as though you have labels. Without this block the step accomplished
+   nothing, and pretending otherwise would put a false claim into the M3 write-up.
+
+5. **Get the field IDs.** Most non-manual IDs live only in `defCodingScheme.xml`, which
+   ships inside the SignStream 3 app. Download it (free, self-service, MIT-licensed):
+   <https://www.bu.edu/asllrp/SignStream/3/download-newSS.html>
+
+   Confirmed without guessing: `10` = `eye brows` (categorical), `40001` = `eye brows`,
+   `40002` = `eye aperture`, `50001`–`50003` = `yaw`/`pitch`/`roll` (continuous). Note
+   `10` and `40001` share a name and are **separate namespaces**. **Do not guess the
+   rest.**
+
+### Part B — Send the email (worthwhile, but not blocking)
+
+Contact: **Carol Neidle, carol@bu.edu** — Director of ASLLRP, Professor Emerita, BU.
+Confirmed current across several November 2025 sources. CC
+**augustine.opoku@gmail.com** for DAI site issues. Do **not** email the Rutgers
+developers — they built the software, they do not handle data requests.
+
+A complete, ready-to-edit draft is in
+**`paper/provenance/bu_access_request.md` §4**. It asks the two questions worth asking:
+whether the account route is complete, and how to get the remaining field IDs.
+
+### Do not commit the data
+
+The terms prohibit redistribution of the video **and** the XML annotations. Full text
+and the required citation are in `paper/provenance/bu_access_request.md` §5. In short:
+store under `data/` (already gitignored), never commit, never upload to a public mirror,
+and publish analyses rather than data.
 
 ### Done when
 
-`paper/provenance/bu_access_request.md` exists with the date and outcome, and
-`implimentation.md` reflects it.
+- [ ] A free account exists, or the portal's downtime is recorded with the date
+- [ ] SignStream XML downloaded to `data/` (gitignored)
+- [ ] `grep -l "NON_MANUALS"` finds at least one file
+- [ ] Email sent, or consciously decided not to send it
+- [ ] Outcome recorded in `paper/provenance/bu_access_request.md` §6 **and** in
+      `implimentation.md` Track B
 
-**This step cannot be hurried.** Start it now, do the other work while it is pending.
-
----
+> **If access is declined, or goes unanswered for two weeks, that is the answer.** The
+> M3 limitation then stands as final and must be written up as a limitation in the
+> paper, not left as an open action.
 
 ## 4. Download the DWPose pose corpus (20 minutes)
 
@@ -333,7 +371,6 @@ utterances. That is the fair test of whether signing-space pose carries lexical 
 
    You need at least 5 GB free. If it reports less than 5 GB, stop and report — do not
    delete anything to make room without asking.
-
 2. **Download the bundle.** It is a single tar at the top level of the dataset repo:
 
    ```bash
@@ -344,7 +381,6 @@ utterances. That is the fair test of whether signing-space pose carries lexical 
    ```
 
    This is roughly 1.2 GB and may take several minutes. Watch the progress bar.
-
 3. **Verify the download is complete and not an error page.** Expected size is about
    1,169,520,640 bytes:
 
@@ -356,7 +392,6 @@ utterances. That is the fair test of whether signing-space pose carries lexical 
    The number must be exactly `1169520640`. If it is much smaller, the download was
    interrupted — delete the file and repeat step 2. **If it is 0 bytes or a few hundred
    bytes, you were rate-limited or blocked; report that instead of retrying in a loop.**
-
 4. **Check the checksum against the source** (the API reports it as `lfs.oid`):
 
    ```bash
@@ -372,7 +407,6 @@ utterances. That is the fair test of whether signing-space pose carries lexical 
    The `lfs oid` is the SHA256 of the file. If you want to verify:
    `sha256sum ASLLRP_utterances_results.tar` should match. **A mismatch means a corrupt
    download — delete and re-fetch, do not use the file.**
-
 5. **Extract.** Extracting roughly doubles disk usage, so you need ~2.5 GB:
 
    ```bash
@@ -382,7 +416,6 @@ utterances. That is the fair test of whether signing-space pose carries lexical 
    ```
 
    **Expected:** a directory named `ASLLRP_utterances_results/`.
-
 6. **Confirm the pose files are really there and in the expected layout:**
 
    ```bash
@@ -395,7 +428,6 @@ utterances. That is the fair test of whether signing-space pose carries lexical 
    `.npz`), under paths shaped exactly like
    `ASLLRP_utterances_results/<utterance_id>/results_dwpose/npz/00000001.npz`.
    If the count is 0, the tar did not contain what is expected — report it.
-
 7. **Inspect one file to find out what layout it actually uses.** The project's own
    feature extractor assumes 18 body + 68 face + 21 left-hand + 21 right-hand keypoints
    per frame, but **that has not been verified against this corpus** — do not treat it
@@ -420,7 +452,6 @@ utterances. That is the fair test of whether signing-space pose carries lexical 
    something else entirely. Whatever it turns out to be, the extractor in
    `src/seam/features/signpose.py` will need to match it, and a mismatch would otherwise
    produce wrong features silently rather than raising an error.
-
 8. **Free the tar once extraction is verified** (it is reproducible, and it is large):
 
    ```bash
@@ -429,7 +460,6 @@ utterances. That is the fair test of whether signing-space pose carries lexical 
    ```
 
    **Do not delete the extracted directory.**
-
 9. **Record it.** Add a line to `implimentation.md` under M5a noting the corpus is on
    disk, its path, and the keypoint count you confirmed in step 7.
 
@@ -481,7 +511,6 @@ be written down either way.
    **"video never leaves the browser"** notice. **Confirm this notice is present** — it
    is a privacy property, not decoration: only landmark numbers are sent to the server,
    never video. Grant camera permission when prompted.
-
 2. **Confirm the server contract still holds** before involving anyone else:
 
    ```bash
@@ -490,8 +519,8 @@ be written down either way.
 
    **Expected:** `serve smoke test passed`. If this fails, stop — do not run a study on
    a build whose contract is broken.
-
 3. **Prepare the stimulus set.** For each clip to be judged, you need two renderings:
+
    - **A (system):** the current avatar pipeline.
    - **B (baseline):** the comparison condition agreed in `plan.md` — read the M7
      section for what baseline was specified and use exactly that, not one invented
@@ -500,8 +529,8 @@ be written down either way.
    Give the two files **non-obvious, randomised names** (e.g. `x7f2.mp4` / `kq91.mp4`).
    Record the mapping in a private file the raters never see. Naming them "A" and "B"
    or revealing the condition is the single easiest way to invalidate the study.
-
 4. **Write the rating sheet.** For each trial, capture:
+
    - Rater ID (anonymous, e.g. `R1`…`R5`).
    - Whether the rater is a Deaf signer (yes/no) and, optionally, first-language signer
      (yes/no).
@@ -510,27 +539,26 @@ be written down either way.
    - Optional free-text reason.
    - Any "the avatar's hands did not match what I signed" observations — these are the
      most valuable data in the study, because they point at specific retargeting bugs.
-
 5. **Run the trials.**
+
    - Every rater sees the **same trials in the same order** (fixed order, randomised
      side assignment — this is a within-subject design).
    - Raters watch each pair once and record a choice. No discussion between raters
      before they finish, so answers stay independent.
    - Raters must not be told what the study is testing beyond "which clip looks more
      like natural signing".
-
 6. **Record the blinding map only after every rater has finished.** Unblinding early
    destroys the design.
-
 7. **Compute the results and check they mean something:**
+
    - For each trial, did raters agree? Report **inter-rater agreement** (e.g. Fleiss'
      kappa). Chance agreement on a forced choice is 0.0 kappa, and with 5 raters a
      3/2 split is common noise.
    - Report the **preference split per condition**, with the count of trials.
    - Report **how many raters are Deaf signers**, separately.
-
 8. **Write it up honestly in `implimentation.md` under the M7 line** and append the
    numbers to `paper/EXPERIMENT_LOG.md`. Include:
+
    - Number of raters, and the Deaf-signer count.
    - Inter-rater agreement.
    - The preference result.
@@ -555,13 +583,13 @@ be written down either way.
 
 Send one message with:
 
-| Step | Report |
-|---|---|
-| 0 | confirmation the old password is rejected |
-| 1 | the model file path, and the `keys:` line |
-| 2 | which option (a/b/c/d) you chose for M4 |
-| 3 | the date sent, and the outcome if known |
-| 4 | the `.npz` file count and the verbatim array shapes from step 7 |
-| 5 | rater count, Deaf-signer count, inter-rater agreement, preference split |
+| Step | Report                                                                  |
+| ---- | ----------------------------------------------------------------------- |
+| 0    | confirmation the old password is rejected                               |
+| 1    | the model file path, and the`keys:` line                              |
+| 2    | which option (a/b/c/d) you chose for M4                                 |
+| 3    | the date sent, and the outcome if known                                 |
+| 4    | the`.npz` file count and the verbatim array shapes from step 7        |
+| 5    | rater count, Deaf-signer count, inter-rater agreement, preference split |
 
 **Never send the SMPL-X model file, and never commit it.** It is licence-restricted.
