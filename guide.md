@@ -31,9 +31,57 @@ install a second Python.
 | 4 | [Download the DWPose pose corpus](#4-download-the-dwpose-pose-corpus-20-minutes)                     | anyone                                     | 20 min           | M5a at real scale                |
 | 5 | [Run the M7 human preference study](#5-run-the-m7-human-preference-study-1-2-days)                   | 5+ people, incl. a Deaf signer if possible | 1–2 days        | the last M7 gate                 |
 
-**Do these in this order.** 0 and 4 are quick and unblock other work. 1 and 3 involve
-waiting on other people, so start them as early as possible. 2 needs nothing but your
-judgement and unblocks the writing.
+## Dependencies — read this before choosing an order
+
+**Short answer: no, task 5 does not need 1, 2, 3 and 4 finished first. But it is not
+independent of task 1, and it is currently blocked by something not on this list.**
+
+| Task | Blocks task 5? | Why |
+|---|---|---|
+| **0** password | No | Unrelated. Do it first anyway; it takes 15 minutes. |
+| **1** SMPL-X | **YES — hard blocker** | No model, no mesh, no avatar, nothing for a rater to look at. |
+| **2** M4 decision | **Partly** | Not needed to *recruit* raters, but it decides whether affect appears in the avatar, so it must be settled **before stimuli are generated**. Otherwise you generate the wrong stimulus set. It is 30 minutes of pure judgement — do it early. |
+| **3** BU non-manual | **No** | Blocked on an external outage with no ETA. Waiting for it would mean waiting indefinitely. The study can run on heuristic markers **with the limitation stated**; M3's limitation is already written up honestly. |
+| **4** DWPose download | **No** | Different track. Task 4 is M5a *recognition*; the avatar is driven by perception landmarks, not by a recogniser's output. Task 4 can start today and will not help task 5. |
+
+### The blocker that is not on this list
+
+**Task 5 has no stimuli to show, and the demo does not display an avatar.** Verified:
+
+- `src/seam/web/index.html` contains **zero** canvas / three.js / model-viewer / GLB
+  references. Its `render()` function draws an HTML table of six marker magnitudes with
+  bar charts.
+- `src/seam/serve/app.py` does **not import `seam.avatar` at all**. The four endpoints
+  are health, analyse, index, coverage.
+- `export_glb()` writes a **JSON parameter file to a `.glb` path** — it is not a mesh
+  exporter, and `trimesh` is not installed.
+
+So the avatar is a tested library (`src/seam/avatar/synthesis.py`, 22 tests) that
+**nothing renders and no pipeline drives**. Task 5 as originally written told raters to
+compare avatar renderings the project cannot yet produce.
+
+**Between the SMPL-X weights and task 5 there is an untracked build step:** a pipeline
+that takes perception landmarks → SMPL-X parameters → a real mesh → a video per
+stimulus condition. That is software work, not a person task, so it does not belong on
+this list — but it must happen before raters can be shown anything.
+
+### What this means in practice
+
+The critical path to task 5 is:
+
+```
+1 (licence approval, unknown latency)
+   -> build the mesh-export + stimulus pipeline   [software, not on this list]
+      -> generate stimuli A and B
+         -> recruit and run raters
+```
+
+**The licence approval is the long pole and its latency is unknown.** Start it before
+anything else. Meanwhile, task 2 (30 min), task 0 (15 min) and task 4 (fully
+independent) can all proceed in parallel — none of them waits on the licence.
+
+**Recruiting 5 raters is also calendar time.** Line them up while the pipeline is being
+built; a study cannot be compressed at the end.
 
 ---
 
@@ -498,25 +546,45 @@ be written down either way.
 
 ### Prerequisites
 
-- At least **5 independent raters**. More is better; 5 is the floor in the plan.
-- **At least one Deaf signer** if at all possible. If none participates, the study is
-  still runnable, but the write-up must state that explicitly and must not describe the
-  result as a sign-language-community judgement.
-- Raters must be **blind** to which system produced which video.
+> **Verified gap — read before starting.** The demo at `make serve` shows **no avatar**.
+> It renders a table of six marker magnitudes; there is no canvas, no 3D view, and
+> `serve` does not import the avatar module. And `export_glb()` does not export a mesh.
+> **You cannot run this study until a pipeline produces actual avatar videos.** Treat
+> that pipeline as a prerequisite task of your own, not as part of step 5.
+
+You need, in order:
+
+1. **The SMPL-X model** (task 1) — otherwise there is no body to render.
+2. **A working mesh exporter.** `export_glb()` currently writes JSON to a `.glb` path
+   and `trimesh` is not installed. Either implement it, or delete the misleading
+   docstring so nobody reports a mesh export that has not happened.
+3. **A stimulus-generation script**: perception landmarks → SMPL-X parameters → mesh →
+   video, run once per condition.
+4. **The M4 decision (task 2)** — settled before generating stimuli, because it decides
+   whether affect appears in the avatar at all.
+5. **At least 5 independent raters.** More is better; 5 is the floor in the plan.
+6. **At least one Deaf signer** if at all possible. If none participates, the study is
+   still runnable, but the write-up must state that explicitly and must not describe the
+   result as a sign-language-community judgement.
+7. Raters must be **blind** to which system produced which video.
 
 ### Steps
 
-1. **Start the demo and confirm it works:**
+1. **Confirm the demo still works** — but note it shows markers, **not an avatar**:
 
    ```bash
    cd /mnt/Volume2/Sign_Language_EmotionAware
    make serve
    ```
 
-   Open the printed URL in a browser. You should see a camera view with a
+   Open the printed URL. You should see a camera view with a
    **"video never leaves the browser"** notice. **Confirm this notice is present** — it
    is a privacy property, not decoration: only landmark numbers are sent to the server,
    never video. Grant camera permission when prompted.
+
+   **What you will *not* see is a 3D avatar.** That is expected today, and it is the gap
+   described in Prerequisites. This step is a regression check on the perception half
+   of the pipeline, not a check that the study is ready.
 2. **Confirm the server contract still holds** before involving anyone else:
 
    ```bash

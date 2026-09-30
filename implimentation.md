@@ -332,7 +332,11 @@ dictionary signing with no discourse context. →
 - [X] `serve/app.py` + `web/index.html` + `seam serve` — live demo, client-side MediaPipe,
   no video leaves the browser; withholds affect and recognition with their measured reasons
 - [X] `make serve-check` HTTP smoke gate (caught a 44-byte 404 page that started "successfully")
-- [ ] M7 human preference study (≥5 raters, inter-rater agreement, signer participation stated) — **BLOCKED, needs people.** Cannot be self-certified; it is the last M7 gate item.
+- [ ] M7 human preference study (≥5 raters, inter-rater agreement, signer participation stated) — **BLOCKED twice over, and the first blocker is not the people.**
+  - **Verified 2026-09-30: there are no stimuli to show.** `src/seam/web/index.html` has zero canvas/three.js/model-viewer/GLB references — `render()` draws a table of six marker magnitudes — and `src/seam/serve/app.py` does not import `seam.avatar` at all. The avatar is a tested library (22 tests) that **nothing renders and no pipeline drives.**
+  - So the missing prerequisite is software, not raters: landmarks → SMPL-X parameters → real mesh → video, per condition. Plus a real mesh exporter, since `export_glb()` writes JSON to a `.glb` path and `trimesh` is not installed.
+  - **Dependency order:** step 1 (SMPL-X) blocks this hard; the M4 decision must be settled before stimuli are generated, because it decides whether affect appears; the DWPose corpus does **not** block it (different track — the avatar is driven by perception landmarks, not by a recogniser); the BU request does not block it (external outage, and running on heuristic markers with the limitation stated is honest).
+  - Once stimuli exist, the raters are needed — and raters are calendar time, so line them up early.
 - [x] VRM/GLB avatar export: joint-limit clamping + quaternion-continuity tests — **done 2026-09-29** (`src/seam/avatar/synthesis.py`, 22 tests)
 - [X] M5a data layer: `data/asllrp.py` — tolerant CSV parser (bare inner quotes),
   both source-collection signer forms, 17,522 tokens / 0 malformed rows

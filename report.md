@@ -54,7 +54,7 @@ Update this table whenever you change a status. It is the only part most people 
 | 2 | M4 gate decision | | `NOT STARTED` | | |
 | 3 | BU non-manual XML request | | `NOT STARTED` | | |
 | 4 | DWPose corpus download | | `NOT STARTED` | | |
-| 5 | M7 preference study | | `NOT STARTED` | | |
+| 5 | M7 preference study | | `BLOCKED — no stimuli exist` | | |
 
 **Project state at the time this form was written** — so a later reader can tell
 whether a number has moved:
@@ -66,7 +66,15 @@ whether a number has moved:
   shuffled-label control of 0.911. The model is indistinguishable from always predicting
   the most common gloss.
 - Known open defect: `export_glb()` writes a JSON parameter file, not a GLB mesh,
-  despite its docstring. Not a valid mesh export.
+  despite its docstring. Not a valid mesh export, and `trimesh` is not installed.
+- **Task 5 is blocked by an untracked build step.** The avatar is a tested library that
+  nothing renders: `src/seam/web/index.html` has zero canvas/3D references, and
+  `src/seam/serve/app.py` does not import `seam.avatar`. There are currently no avatar
+  stimuli for a preference study to compare.
+- Task dependencies: **1 blocks 5** (no model, no mesh). **2 must be decided before 5's
+  stimuli are generated** (it decides whether affect appears). **3 and 4 do not block
+  5** — 3 is stuck on an external outage, 4 is a different track (M5a recognition) and
+  the avatar is driven by perception landmarks, not by a recogniser.
 
 ---
 
@@ -340,6 +348,14 @@ it. The M7 gate requires a **blinded pairwise human preference study**, and ther
 ethical dimension specific to this project: a study of ASL avatar quality run only by
 hearing people does not establish whether the work is *good*, only that some raters
 preferred one video to another. That distinction must be written down either way.
+
+> **This step cannot start yet, for a reason that was not obvious.** The demo renders a
+> table of marker magnitudes — there is no canvas, no 3D view, and `serve` does not
+> import the avatar module. `export_glb()` does not export a mesh. **There are no
+> stimuli to compare.** Before this step: obtain the SMPL-X model (step 1), implement a
+> real mesh exporter, build a stimulus-generation script, and settle the M4 decision
+> (step 2) so the stimuli contain the right content. Steps 3 and 4 do **not** block this
+> one.
 
 | Field | Entry |
 |---|---|
