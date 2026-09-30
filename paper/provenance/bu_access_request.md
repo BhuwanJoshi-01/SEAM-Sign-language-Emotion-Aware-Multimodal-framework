@@ -2,6 +2,49 @@
 
 **Status: prepared, not sent.** Compiled 2026-09-30.
 
+## 0. Outage log — the portal is down
+
+**The download portal is unavailable.** This is an external outage on Rutgers' server,
+not a project problem, and it blocks the one step that would lift M3's instrument
+limitation.
+
+| Date (UTC) | Host | Result |
+|---|---|---|
+| 2026-09-30 | `dai.cs.rutgers.edu/dai/s/dai` | HTTP 503, Apache/2.4.58 (Ubuntu) — "maintenance downtime or capacity problems" |
+| 2026-09-30 | `dai.cs.rutgers.edu/dai/s/continuoussigndownload` | connection timeout (25 s, no response) |
+| 2026-09-30 | `dai.cs.rutgers.edu/dai/s/runningstats` | connection timeout (25 s, no response) |
+| 2026-09-30 | `dai.cs.rutgers.edu/` (root) | **HTTP 302 in 0.9 s — host is alive** |
+| 2026-09-30 | `www.bu.edu/asllrp/` and `/SignStream/3/download-newSS.html` | HTTP 200 — **unaffected** |
+
+### What the pattern tells us
+
+The host answers in under a second but **every `/dai/s/*` path times out**. Apache is
+running and serving; the application behind it is not responding. That distinguishes
+"the site is down" from "the application is down", and it is worth telling the contact
+because it narrows what is wrong and suggests the outage is not a whole-machine failure.
+
+Independently confirmed by a second person hitting the same 503 on the same date, so
+this is not a single-user network problem.
+
+### Consequences
+
+- **M3's instrument limitation stands** until the portal returns. It is currently
+  written up honestly as a limitation; nothing needs correcting.
+- **No ETA is available to us** and none should be invented. The log records observations
+  only, and each new observation gets its own dated row.
+- **`defCodingScheme.xml` is not on the critical path.** It is only needed to interpret
+  an XML file we do not yet have, so obtaining the SignStream software is second-order
+  and can wait. It is also form-gated (name, email, employer) and therefore not
+  something to submit on someone's behalf.
+
+### What is NOT blocked
+
+The 1.17 GB DWPose pose corpus on Hugging Face is a **different host and is up** — the
+`resolve` endpoint returns HTTP 200 with `x-linked-size: 1169520640`. That is step 4, it
+unblocks the scaled M5a test, and it is not waiting on Rutgers. It can start now.
+
+---
+
 > **I did not send the email and cannot.** This record exists so the request is
 > reproducible and auditable, and so the research behind it is not lost. The draft in
 > §4 must be sent by a person, from an account the project owns, by the person who will
@@ -157,18 +200,31 @@ Dear Professor Neidle,
 I am writing about the ASLLRP SignStream®3 corpus, available through the DAI 2 data
 access interface.
 
+**First, something practical that may be useful to you.** The DAI 2 interface has been
+unavailable for me since 2026-09-30. `dai.cs.rutgers.edu` itself responds — the root
+returns a redirect in under a second — but every path under `/dai/s/` times out with no
+response, including `/dai/s/dai`, `/dai/s/continuoussigndownload` and
+`/dai/s/runningstats`. An Apache 2.4.58 error page with "maintenance downtime or
+capacity problems" is returned for at least one of those paths. I mention it in case it
+is not already known; I am happy to send the exact responses if useful, and I realise
+this may be entirely routine.
+
 My research involves measuring how facial non-manuals and affect markers interact in
 American Sign Language, and I am trying to do that with your annotations rather than
 with heuristic labels derived from a face tracker. I have built a reproducible
 analysis pipeline and I am at the stage where I need the linguistic annotations.
 
-I have registered a free DAI 2 account and I can see the SignStream®3 corpus listing.
-Two things I would be grateful for confirmation on:
+I am not yet able to register a DAI 2 account, because the login flow sits behind the
+same unavailable interface. Once it is reachable I intend to do so, but two things I
+would be grateful for confirmation on in the meantime:
 
 1. **Is the account route the correct and complete route for the non-manual
    annotations?** The Report 18 documentation describes the XML export as a per-
    collection download, and I want to confirm I am not missing a separate request
-   process or a restricted subset before I download a large number of collections.
+   process or a restricted subset before I download a large number of collections. I
+   also want to be sure I am downloading the SignStream®3 corpus at
+   `/dai/s/dai` rather than the Sign Bank sign-clip download, since Report 24's column
+   list for the latter has no non-manual fields and I would like the former.
 
 2. **Field identifiers.** The SignStream 3 XML documentation lists the manual field IDs
    and gives `eye brows` as field 10, plus the continuous IDs 40001 (`eye brows`),

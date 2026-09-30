@@ -281,10 +281,16 @@ that download. The non-manuals were never in it. They are a different download.
 
 1. **Open the portal.** <https://dai.cs.rutgers.edu/dai/s/dai>
 
-   **If the site is down, stop and note it.** During the 2026-09-30 research it returned
-   HTTP 503 ("maintenance downtime or capacity problems") and most requests hung. That
-   is a server problem, not your problem — record the date and retry later. Do not
-   report it as a failure of the account flow.
+   **KNOWN DOWN as of 2026-09-30.** It returns HTTP 503, Apache/2.4.58 (Ubuntu),
+   "maintenance downtime or capacity problems". The host itself is alive — the root
+   returns a 302 in under a second — but every path under `/dai/s/` times out with no
+   response, so the application behind Apache is what is down. Independently confirmed
+   by two people on the same date.
+
+   If you hit this: **it is not your problem and not a mistake in the steps.** Record the
+   date and the exact response, retry later, and move on to step 4, which uses a
+   different host and is not affected. Do not report it as a failure of the account
+   flow — the account flow has not been exercised yet, so it cannot have failed.
 
 2. **Request a free account** via the "login" link. You do not need an account to browse
    and search; you need one to download.

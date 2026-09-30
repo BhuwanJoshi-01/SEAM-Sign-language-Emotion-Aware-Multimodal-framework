@@ -23,6 +23,7 @@ this file.
 | `DONE — NEEDS VERIFICATION` | You finished it. Someone else must check before it counts. |
 | `VERIFIED` | Checked by a second person against the expected values below. |
 | `FAILED` | Attempted and did not work. **Record the error — a failure here is information, not a reason to hide the attempt.** |
+| `BLOCKED — EXTERNAL` | Waiting on something outside the project: a third-party service, an institution, a person who has not replied. **Name the service and the date you last checked.** An outage is not your failure and must not be recorded as one. |
 
 > **You cannot mark your own work `VERIFIED`.** The person who did the work and the
 > person who checks it must be different. This is not bureaucracy: in this project a
@@ -218,15 +219,33 @@ annotations** — that is all it contains, not an oversight.
 |---|---|
 | Owner | |
 | Date sent | |
-| Status | `NOT STARTED` |
+| Status | `BLOCKED — EXTERNAL` — DAI 2 portal down since 2026-09-30 |
 | Verified by | |
+
+> **State as of 2026-09-30: the Rutgers DAI 2 portal is returning HTTP 503.** The host
+> answers (root 302 in <1 s) but every `/dai/s/*` path times out, so the application
+> behind Apache is down. Confirmed independently by two people on the same date. The
+> account flow has never been reached, so it has not failed — there is nothing to retry
+> yet. Detailed log with dated observations:
+> `paper/provenance/bu_access_request.md` §0.
+>
+> **This is not blocked on anyone on the team.** It needs no email, no permission and no
+> work; it needs the server to come back. Do not mark it `FAILED`.
+>
+> **The email in Part B is still worth sending** — reporting a downed portal is useful
+> to them, and the field-ID question can be answered without the download. Draft ready in
+> `paper/provenance/bu_access_request.md` §4.
 
 **Results**
 
-- [ ] Contact identified (name, institution): ______________________
+- [x] Research completed — route is a free self-service account, not an approval
+- [x] Root cause of the original obstacle identified (wrong download, not missing access)
+- [x] Email drafted and ready for a person to send
+- [ ] Contact identified (name, institution): Carol Neidle, carol@bu.edu
 - [ ] Request sent, stating purpose, non-redistribution, and citation
-- [ ] Email saved to `paper/provenance/bu_access_request.md` **with the date**
-- [ ] `implimentation.md` Track B line updated
+- [x] Research and draft saved to `paper/provenance/bu_access_request.md` **with the date**
+- [x] `implimentation.md` Track B line updated
+- [ ] Free account registered (blocked on the portal)
 
 **Outcome**
 
