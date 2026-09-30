@@ -22,12 +22,12 @@ The page you will probably land on first is:
 
 Use these instead:
 
-| Page | URL | What it is |
-|---|---|---|
-| **SignStream® 3 Corpora** | `https://dai.cs.rutgers.edu/dai/s/dai` | **← the one you want.** Search, Download Cart, XML annotations |
-| **Utterance search** | `https://dai.cs.rutgers.edu/dai/s/utterancesearch` | Browse by utterance — non-manuals are annotated at **utterance** level, so this is the right browse view |
-| Statistics | `https://dai.cs.rutgers.edu/dai/s/runningstats` | Confirms counts (see below) |
-| Login / register | `https://dai.cs.rutgers.edu/dai/s/index?redirect=dai` | Has a **"Request new account"** button |
+| Page                             | URL                                                     | What it is                                                                                                     |
+| -------------------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| **SignStream® 3 Corpora** | `https://dai.cs.rutgers.edu/dai/s/dai`                | **← the one you want.** Search, Download Cart, XML annotations                                          |
+| **Utterance search**       | `https://dai.cs.rutgers.edu/dai/s/utterancesearch`    | Browse by utterance — non-manuals are annotated at**utterance** level, so this is the right browse view |
+| Statistics                       | `https://dai.cs.rutgers.edu/dai/s/runningstats`       | Confirms counts (see below)                                                                                    |
+| Login / register                 | `https://dai.cs.rutgers.edu/dai/s/index?redirect=dai` | Has a**"Request new account"** button                                                                    |
 
 ### This is the right corpus
 
@@ -61,9 +61,9 @@ measurements, and would let us check whether our marker definitions are even cor
 **The data we already have does not contain the non-manuals, and that is not a mirror
 problem.** There are two different downloads:
 
-| Download | URL | Has non-manuals? |
-|---|---|---|
-| ASLLRP **SignStream®3 Corpus** | `dai.cs.rutgers.edu/dai/s/dai` | **YES** |
+| Download                                                  | URL                                                 | Has non-manuals?                            |
+| --------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------- |
+| ASLLRP**SignStream®3 Corpus**                      | `dai.cs.rutgers.edu/dai/s/dai`                    | **YES**                               |
 | **Sign Bank** sign clips (the "17,522 / 4 signers") | `dai.cs.rutgers.edu/dai/s/continuoussigndownload` | **NO** — glosses and handshapes only |
 
 The Hugging Face mirror this project already reads was built from the **second** one.
@@ -79,12 +79,12 @@ non-manuals. Step 5 below is the check that catches that.
 The portal was down through 2026-09-30 morning (three separate checks). **It came back the
 same morning**, verified 2026-09-30 ~09:35 UTC:
 
-| Path | Result |
-|---|---|
-| `dai.cs.rutgers.edu/dai/s/dai` | **200** ✅ |
+| Path                                         | Result           |
+| -------------------------------------------- | ---------------- |
+| `dai.cs.rutgers.edu/dai/s/dai`             | **200** ✅ |
 | `dai.cs.rutgers.edu/dai/s/utterancesearch` | **200** ✅ |
-| `dai.cs.rutgers.edu/dai/s/runningstats` | **200** ✅ |
-| `www.bu.edu/asllrp/` | **200** ✅ |
+| `dai.cs.rutgers.edu/dai/s/runningstats`    | **200** ✅ |
+| `www.bu.edu/asllrp/`                       | **200** ✅ |
 
 The history is in `artifacts/m7a/dai_portal_status.json`, written by
 `scripts/check_dai_portal.py`. Keep that script — if the site goes down again mid-task,
@@ -101,14 +101,12 @@ hunch.
 
 ## A1. Get a free account
 
-1. Open <https://dai.cs.rutgers.edu/dai/s/index?redirect=dai>
+1. Open [https://dai.cs.rutgers.edu/dai/s/index?redirect=dai](https://dai.cs.rutgers.edu/dai/s/index?redirect=dai)
 
    The page says verbatim: *"You must log in to access the feature you have requested.
    You can request a free account if you don't already have one."*
-
 2. Fill in email and password, then click **"Request new account"** (it is a button on
    that same form, next to Login and Reset password).
-
 3. Check your email for the temporary password, then log in and change it. Per Report 18,
    the temporary password is sent by email and you should log in promptly.
 
@@ -120,8 +118,8 @@ downloads in progress." No PI letter, no IRB, no data-use agreement.**
 
 ## A2. Download the SignStream XML
 
-1. Go to <https://dai.cs.rutgers.edu/dai/s/dai> and log in.
-2. Prefer <https://dai.cs.rutgers.edu/dai/s/utterancesearch> to browse — the non-manuals
+1. Go to [https://dai.cs.rutgers.edu/dai/s/dai](https://dai.cs.rutgers.edu/dai/s/dai) and log in.
+2. Prefer [https://dai.cs.rutgers.edu/dai/s/utterancesearch](https://dai.cs.rutgers.edu/dai/s/utterancesearch) to browse — the non-manuals
    are annotated per **utterance**, not per sign token, so the utterance view is where
    they will be.
 3. Search, then add the collections you want to the **Download Cart**.
@@ -132,15 +130,33 @@ downloads in progress." No PI letter, no IRB, no data-use agreement.**
 
    The four signers in this corpus are Ben, Cory, Jonathan and Rachel — the same four our
    token table resolves. Prefer those four collections if the portal lets you choose.
-
 5. Save under `data/` (which is gitignored). **Do not put it in the repository.**
 
 ## A3. Verify you got the right thing — do not skip this
 
 ```bash
-cd /mnt/Volume2/Sign_Language_EmotionAware
-grep -l "NON_MANUALS" data/<wherever-you-downloaded>/*.xml | head
+grep -rl "NON_MANUALS" /path/to/downloaded --include=*.xml | head
 ```
+
+**Or, better, run the parser — it is already written, tested, and waiting:**
+
+```bash
+cd /mnt/Volume2/Sign_Language_EmotionAware
+/home/bhuwan/miniconda3/envs/slr/bin/python scripts/parse_signstream.py \
+  --path /path/to/downloaded --min-utterances 100
+```
+
+`src/seam/data/signstream.py` parses the documented schema and reports what the corpus
+*actually* contains: utterances, participants, non-manual events, how many map onto the
+project's existing markers, and — importantly — **every label it could not map**. It
+writes `artifacts/m3/signstream_report.json`.
+
+> **Expect the mapped fraction to be well under 100%, and that is not a failure.** The
+> first label in ASLLRP Report 18's own example, `'head pos: tilt fr/bk'`, has no marker
+> in this project, because the vocabulary covers head *movement* (shake, nod) and not head
+> *position*. The unmapped list is the honest measure of how far the marker vocabulary is
+> from the annotations, and it is what tells you whether M3 can use these labels at all
+> or whether the vocabulary needs extending first.
 
 **This must print at least one file.** The XML looks like this (Report 18 §8.3):
 
@@ -164,7 +180,7 @@ landmarks already on disk.
 
 Most non-manual field IDs are defined only in `defCodingScheme.xml`, which ships inside
 the SignStream 3 desktop app (macOS, free, self-service, MIT-licensed):
-<https://www.bu.edu/asllrp/SignStream/3/download-newSS.html>
+[https://www.bu.edu/asllrp/SignStream/3/download-newSS.html](https://www.bu.edu/asllrp/SignStream/3/download-newSS.html)
 
 Already confirmed without guessing: `10` = `eye brows` (categorical), `40001` =
 `eye brows`, `40002` = `eye aperture`, `50001/50002/50003` = `yaw`/`pitch`/`roll`
@@ -224,7 +240,6 @@ SignStream software; they do not handle data requests.
 >    also want to be sure I am downloading the SignStream®3 corpus at `/dai/s/dai` rather
 >    than the Sign Bank sign-clip download, since Report 24's column list for the latter
 >    has no non-manual fields and I would like the former.
->
 > 2. **Field identifiers.** The SignStream 3 XML documentation lists the manual field IDs
 >    and gives `eye brows` as field 10, plus the continuous IDs 40001 (`eye brows`),
 >    40002 (`eye aperture`) and 50001–50003 (`yaw`/`pitch`/`roll`). I understand the
@@ -284,18 +299,18 @@ plus `http://dai.cs.rutgers.edu/`, `http://dai.cs.rutgers.edu/dai/s/signbank`,
 
 Fill this in and put it in `report.md` under **Step 3**.
 
-| Field | Value |
-|---|---|
-| Owner | |
-| Date portal first seen up | |
-| Account registered? | date |
-| Email sent? | date |
-| Reply? | date |
-| Collections downloaded | |
-| **`grep -l NON_MANUALS` found files?** | yes / **no — wrong download** |
-| Any field IDs obtained? | |
-| Files stored at | `data/...` (must be gitignored) |
-| `git status` shows nothing data-related? | |
+| Field                                          | Value                               |
+| ---------------------------------------------- | ----------------------------------- |
+| Owner                                          |                                     |
+| Date portal first seen up                      |                                     |
+| Account registered?                            | date                                |
+| Email sent?                                    | date                                |
+| Reply?                                         | date                                |
+| Collections downloaded                         |                                     |
+| **`grep -l NON_MANUALS` found files?** | yes /**no — wrong download** |
+| Any field IDs obtained?                        |                                     |
+| Files stored at                                | `data/...` (must be gitignored)   |
+| `git status` shows nothing data-related?     |                                     |
 
 **A "no" in the `NON_MANUALS` row is a genuinely useful result** — it means the download
 route in this document is wrong, and someone needs to know before more time goes into it.

@@ -4,6 +4,12 @@
 # acquisition package was invisible to git while existing on disk.
 artifacts/
 /data/
+# SignStream XML annotations. The ASLLRP terms say the data "cannot be redistributed
+# without permission", and that covers the annotations as well as the video. The anchor on
+# /data/ above is the real protection; this is a second net, because the licence
+# consequence of a stray `git add` is worse than the inconvenience of ignoring a file
+# type that no source file in this repo uses.
+*.xml
 *.npz
 *.npy
 *.pt
