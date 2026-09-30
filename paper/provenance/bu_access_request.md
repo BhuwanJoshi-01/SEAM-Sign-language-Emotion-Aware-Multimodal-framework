@@ -15,6 +15,16 @@ limitation.
 | 2026-09-30 | `dai.cs.rutgers.edu/dai/s/runningstats` | connection timeout (25 s, no response) |
 | 2026-09-30 | `dai.cs.rutgers.edu/` (root) | **HTTP 302 in 0.9 s — host is alive** |
 | 2026-09-30 | `www.bu.edu/asllrp/` and `/SignStream/3/download-newSS.html` | HTTP 200 — **unaffected** |
+| 2026-09-30 09:12 UTC | all of the above, re-checked | **unchanged**: root 302, every `/dai/s/` path times out |
+| 2026-09-30 09:25 UTC | re-checked via `scripts/check_dai_portal.py` | **unchanged**, verdict `APP_DOWN` |
+
+Re-checks are now machine-logged to `artifacts/m7a/dai_portal_status.json` by
+`scripts/check_dai_portal.py`, so the waiting period leaves a dated record rather than
+depending on anyone's memory.
+
+**The handoff for the person doing this task is
+[`STEP3_HANDOFF.md`](STEP3_HANDOFF.md)** — self-contained, with the email draft, the
+verification command, and the report-back table.
 
 ### What the pattern tells us
 
