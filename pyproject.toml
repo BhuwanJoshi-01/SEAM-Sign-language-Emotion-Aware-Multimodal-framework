@@ -44,6 +44,12 @@ text = [
     "sacrebleu==2.6.0",
     "bert-score==0.3.13",
 ]
+# Mesh generation for the M7 avatar. Without it export_glb() cannot write a real GLB,
+# and without a real GLB there are no stimuli for the preference study - so this sits
+# in core, not in an optional extra, and the dependency is not optional in practice.
+avatar = [
+    "trimesh==4.7.1",
+]
 dev = [
     "pytest==9.1.1",
     "pytest-asyncio==1.3.0",

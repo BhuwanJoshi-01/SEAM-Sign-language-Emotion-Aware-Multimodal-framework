@@ -345,6 +345,53 @@ def canonical_rest_pose() -> np.ndarray:
     return j
 
 
+def forward_kinematics(
+    body_pose: np.ndarray,
+    global_orient: np.ndarray,
+    *,
+    transl: np.ndarray | None = None,
+    rest: np.ndarray | None = None,
+) -> np.ndarray:
+    """Joint positions in metres, (24, 3), from a body pose.
+
+    Needed to place *anything* in the body: the proxy mesh, a skeleton overlay, or the
+    joints a viewer should show. It uses :func:`canonical_rest_pose` for bone offsets
+    rather than the licence-gated model, because bone *directions* are all a retargeting
+    estimate needs and they do not depend on the learned shape - which is what keeps this
+    usable before the SMPL-X weights arrive.
+
+    The rest pose is T-pose with the pelvis at the origin and the model facing +z, so the
+    result is in the same convention the retargeting assumes. Pass `transl` for world
+    placement.
+
+    **Only joints 1-21 have a `body_pose` rotation.** In SMPL-X, 22 and 23 are the hands
+    and are driven by `left_hand_pose`/`right_hand_pose`, and the head is driven by
+    `jaw_pose`; none of those live in the 21-vector. Indexing `body_pose[j-1]` for them
+    runs off the end, so they are placed with their parent's accumulated rotation and no
+    own rotation - which is the neutral here, not an approximation.
+    """
+    r = np.asarray(rest if rest is not None else canonical_rest_pose(), dtype=np.float64)
+    aa = np.asarray(body_pose, dtype=np.float64)
+    go = np.asarray(global_orient, dtype=np.float64)
+    if aa.shape != (21, 3):
+        raise ValueError(f"body_pose must be (21, 3), got {aa.shape}")
+    if go.shape != (3,):
+        raise ValueError(f"global_orient must be (3,), got {go.shape}")
+
+    n_body = 21  # body_pose covers SMPL joints 1..21 only
+    Rg = _rodrigues(go)
+    out = np.zeros((24, 3), dtype=np.float64)
+    out[0] = np.zeros(3) if transl is None else np.asarray(transl, dtype=np.float64)
+    # World rotation accumulated down the chain, so a joint inherits its parent's frame.
+    R_world = {0: Rg}
+    for j in range(1, 24):
+        parent = SMPL_PARENTS[j]
+        local = _rodrigues(aa[j - 1]) if j <= n_body else np.eye(3)
+        R_world[j] = R_world[parent] @ local
+        out[j] = out[parent] + R_world[parent] @ (r[j] - r[parent])
+    return out
+
+
 def retarget_hand(keypoints_21: np.ndarray, *, hand: str = "right") -> np.ndarray:
     """MANO local rotations from a 21-point hand skeleton.
 

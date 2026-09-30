@@ -71,7 +71,10 @@ whether a number has moved:
   nothing renders: `src/seam/web/index.html` has zero canvas/3D references, and
   `src/seam/serve/app.py` does not import `seam.avatar`. There are currently no avatar
   stimuli for a preference study to compare.
-- Task dependencies: **1 blocks 5** (no model, no mesh). **2 must be decided before 5's
+- **Avatar mesh export and stimulus pipeline are built** (2026-09-30): real binary glTF
+  with re-load verification, plus `scripts/make_stimuli.py` on real landmarks. Output is a
+  labelled **proxy**, not a human body.
+- Task dependencies: **1 blocks 5** (no model, no real mesh). **2 must be decided before 5's
   stimuli are generated** (it decides whether affect appears). **3 and 4 do not block
   5** — 3 is stuck on an external outage, 4 is a different track (M5a recognition) and
   the avatar is driven by perception landmarks, not by a recogniser.
@@ -349,13 +352,21 @@ ethical dimension specific to this project: a study of ASL avatar quality run on
 hearing people does not establish whether the work is *good*, only that some raters
 preferred one video to another. That distinction must be written down either way.
 
-> **This step cannot start yet, for a reason that was not obvious.** The demo renders a
-> table of marker magnitudes — there is no canvas, no 3D view, and `serve` does not
-> import the avatar module. `export_glb()` does not export a mesh. **There are no
-> stimuli to compare.** Before this step: obtain the SMPL-X model (step 1), implement a
-> real mesh exporter, build a stimulus-generation script, and settle the M4 decision
-> (step 2) so the stimuli contain the right content. Steps 3 and 4 do **not** block this
-> one.
+> **Status: two blockers down, two to go.** The mesh export and the stimulus pipeline
+> were **built 2026-09-30** — `seam.avatar.mesh` writes real binary glTF (verified by
+> re-loading) and `scripts/make_stimuli.py` produces `.glb` per clip from real extracted
+> landmarks. What remains:
+>
+> 1. **The SMPL-X model** (step 1). Until then the mesh is a joint-capsule **proxy, not
+>    a human body** — stamped `is_proxy: true` everywhere. **Do not collect ratings on
+>    proxy output**: raters would judge the stand-in rather than the retargeting.
+> 2. **Video.** The pipeline emits `.glb`; raters watch mp4. Render with whatever tool
+>    you have, keeping the randomised filenames below.
+> 3. **The M4 decision** (step 2), settled before stimuli are generated, because it
+>    decides whether affect appears in the avatar.
+>
+> Steps 3 and 4 do **not** block this one. The demo still renders a table of marker
+> magnitudes — that is unchanged and is not what raters will be shown.
 
 | Field | Entry |
 |---|---|

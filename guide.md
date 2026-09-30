@@ -143,13 +143,26 @@ angles, FLAME expression coefficients) and they are all unit-tested. What is mis
 the model that turns those parameters into geometry. Until this step is done, there is
 no verified visual output and no real 3D export.
 
-> **Honest warning before you start.** The current `export_glb()` function in
-> `src/seam/avatar/synthesis.py` does **not** write a real GLB mesh, despite its
-> docstring saying it does. It writes a JSON file of SMPL-X parameters to a path ending
-> in `.glb`. `trimesh` is not currently installed either. Do not report the avatar as
-> "exporting a mesh" after this step — the exporter still needs to be implemented, and
-> the parameter file is not a mesh. This is a known open item, listed in
-> `implimentation.md`.
+> **What is already built (2026-09-30), so you do not redo it.** A real mesh export
+> path and a stimulus-generation pipeline now exist and run on real landmarks:
+> `src/seam/avatar/mesh.py` (15 tests) and `scripts/make_stimuli.py`. Try it with
+>
+> ```bash
+> /home/bhuwan/miniconda3/envs/slr/bin/python scripts/make_stimuli.py --limit 3
+> ```
+>
+> which writes loadable `.glb` files to `artifacts/m7a/stimuli/`. `trimesh==4.7.1` is
+> installed and pinned as the `avatar` extra.
+>
+> **What is still missing is the one thing only you can do: the model weights.** The
+> mesh it produces today is a **joint-capsule proxy, not a human body** — every file is
+> stamped `is_proxy: true` and `is_human_mesh: false`. Once the SMPL-X model is
+> available, the mesh source swaps and the rest of the pipeline is unchanged.
+>
+> **The old `export_glb()` that wrote JSON to a `.glb` path is gone**, replaced by
+> `mesh.export_glb`, which writes real binary glTF and verifies it by re-loading. The
+> parameter dump moved to `mesh.export_parameters`, which writes a `.json` path on
+> purpose. Do not report a mesh export that has not happened: the proxy is not a mesh.
 
 ### Steps
 
@@ -555,11 +568,17 @@ be written down either way.
 You need, in order:
 
 1. **The SMPL-X model** (task 1) — otherwise there is no body to render.
-2. **A working mesh exporter.** `export_glb()` currently writes JSON to a `.glb` path
-   and `trimesh` is not installed. Either implement it, or delete the misleading
-   docstring so nobody reports a mesh export that has not happened.
-3. **A stimulus-generation script**: perception landmarks → SMPL-X parameters → mesh →
-   video, run once per condition.
+2. ~~**A working mesh exporter.**~~ **Done** — `seam.avatar.mesh.export_glb` writes real
+   binary glTF and re-loads it to verify; `trimesh` is installed and pinned.
+3. ~~**A stimulus-generation script.**~~ **Done** — `scripts/make_stimuli.py` runs
+   landmarks → SMPL-X parameters → joint positions → mesh → `.glb` on real extracted
+   landmarks, and writes a per-clip sidecar plus a manifest.
+
+   **Still needed: real geometry, and video.** Two gaps remain after the weights land —
+   `mesh.smplx_mesh()` is the one function still raising `NotImplementedError` (on
+   purpose, so it cannot silently fall back to a proxy), and the output is currently
+   `.glb` rather than the video files a rater would watch. Render the GLB to mp4 with
+   whatever you have; keep the blinded filenames described below.
 4. **The M4 decision (task 2)** — settled before generating stimuli, because it decides
    whether affect appears in the avatar at all.
 5. **At least 5 independent raters.** More is better; 5 is the floor in the plan.
