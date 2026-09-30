@@ -222,30 +222,40 @@ correct.)*
 ## Step 3 — Request SignStream non-manual XML from BU
 
 **Why:** every non-manual feature in this project is currently a **heuristic
-pseudo-label**. The authoritative annotations are distributed by Boston University under
-a data-use agreement. The free mirror has glosses and pose but **no non-manual
-annotations** — that is all it contains, not an oversight.
+pseudo-label**. The authoritative annotations are distributed by Boston University through a
+free self-service portal. The Hugging Face mirror has glosses and pose but **no non-manual
+annotations** — because it was built from a different, manual-only download, not an oversight.
 
 | Field | Entry |
 |---|---|
 | Owner | |
 | Date sent | |
-| Status | `BLOCKED — EXTERNAL` — DAI 2 portal down since 2026-09-30 |
+| Status | `IN PROGRESS` — portal RECOVERED 2026-09-30 ~09:35 UTC |
 | Verified by | |
 
-> **State as of 2026-09-30: the Rutgers DAI 2 portal is returning HTTP 503.** The host
-> answers (root 302 in <1 s) but every `/dai/s/*` path times out, so the application
-> behind Apache is down. Confirmed independently by two people on the same date. The
-> account flow has never been reached, so it has not failed — there is nothing to retry
-> yet. Detailed log with dated observations:
-> `paper/provenance/bu_access_request.md` §0.
+> **State as of 2026-09-30: the outage is RESOLVED.** The portal returned HTTP 503 / timed
+> out for several hours this morning and now answers **200** on `/dai/s/dai` and
+> `/dai/s/utterancesearch`. **Do this task now, while it is reachable** — the site was
+> unreachable for the previous three attempts. Full dated history:
+> `artifacts/m7a/dai_portal_status.json`.
 >
-> **This is not blocked on anyone on the team.** It needs no email, no permission and no
-> work; it needs the server to come back. Do not mark it `FAILED`.
+> **Two facts confirmed while the site was reachable** — both are traps:
 >
-> **The email in Part B is still worth sending** — reporting a downed portal is useful
-> to them, and the field-ID question can be answered without the download. Draft ready in
-> `paper/provenance/bu_access_request.md` §4.
+> - **`/dai/s/signbank` is the wrong page.** It is the ASL Sign Bank and never mentions
+>   XML or annotations. A download from there looks fine and contains no non-manuals.
+> - **It is the right corpus.** `runningstats` lists *"ASLLRP SignStream® 3 Corpus:
+>   Continuous Signing"* at **17,522** sign tokens — exactly our token count. Same corpus,
+>   same four signers; we hold the tokens and need the annotations beside them.
+>
+> **Register an account first.** The login page has a "Request new account" button and
+> states the account is free: no PI letter, no IRB, no data-use agreement.
+>
+> **The email in Part B is still worth sending** — the outage report is now a confirmed
+> observation of a real fault, and the field-ID question is answerable without any
+> download.
+>
+> **Self-contained handoff with the verified URLs and the ready-to-send email:
+> `paper/provenance/STEP3_HANDOFF.md`.**
 
 **Results**
 

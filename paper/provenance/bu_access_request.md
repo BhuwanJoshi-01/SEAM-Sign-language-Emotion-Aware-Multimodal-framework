@@ -1,8 +1,12 @@
 # Provenance: ASLLRP non-manual annotation access
 
-**Status: prepared, not sent.** Compiled 2026-09-30.
+**Status: portal RECOVERED 2026-09-30 ~09:35 UTC; email still prepared, not sent.**
 
-## 0. Outage log — the portal is down
+## 0. Outage log — resolved
+
+**The portal came back the same day.** Full sequence below; the point of recording it is
+that the outage report in the email is now a *confirmed* observation of a real fault
+rather than a guess, and because the site may go down again.
 
 **The download portal is unavailable.** This is an external outage on Rutgers' server,
 not a project problem, and it blocks the one step that would lift M3's instrument
@@ -17,6 +21,20 @@ limitation.
 | 2026-09-30 | `www.bu.edu/asllrp/` and `/SignStream/3/download-newSS.html` | HTTP 200 — **unaffected** |
 | 2026-09-30 09:12 UTC | all of the above, re-checked | **unchanged**: root 302, every `/dai/s/` path times out |
 | 2026-09-30 09:25 UTC | re-checked via `scripts/check_dai_portal.py` | **unchanged**, verdict `APP_DOWN` |
+| **2026-09-30 ~09:35 UTC** | re-checked after the user reported the site working | **`/dai/s/dai` 200, `/dai/s/utterancesearch` 200, `/dai/s/runningstats` 200 — RECOVERED** |
+
+### Confirmed while it was down
+
+`/dai/s/dai`, `/dai/s/utterancesearch` and `/dai/s/runningstats` were all checked on
+recovery. Two findings recorded permanently:
+
+- **`/dai/s/signbank` is the wrong page.** It is the ASL Sign Bank and its HTML never
+  mentions XML or annotations. Anyone who downloads from there gets videos and
+  handshapes, no non-manuals — and the download will look perfectly plausible.
+- **The corpus identity is confirmed.** `runningstats` lists *"ASLLRP SignStream® 3
+  Corpus: Continuous Signing"* at **17,522** sign tokens, which is exactly the token
+  count in this project's token table. Same corpus; we hold the tokens and need the
+  annotations beside them.
 
 Re-checks are now machine-logged to `artifacts/m7a/dai_portal_status.json` by
 `scripts/check_dai_portal.py`, so the waiting period leaves a dated record rather than

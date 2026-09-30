@@ -5,8 +5,40 @@ task. Everything you need is here.
 
 **For:** whoever on the team owns this.
 **Blocks:** M3's instrument limitation. Nothing else.
-**Time:** ~20 minutes of work, then it is a waiting game.
-**Status as of 2026-09-30 09:25 UTC:** `BLOCKED — EXTERNAL`. The Rutgers portal is down.
+**Time:** ~30 minutes, including waiting for the account email.
+**Status as of 2026-09-30 ~09:35 UTC:** **PORTAL IS UP.** The outage is over — do this now
+while it is reachable.
+
+---
+
+## 0. Read this first: the obvious URL is the wrong one
+
+The page you will probably land on first is:
+
+- `dai.cs.rutgers.edu/dai/s/signbank` — **this is the wrong page.** It is the ASL Sign
+  Bank (lexical signs). Verified 2026-09-30: its HTML does **not** mention XML or
+  annotations anywhere. Downloading from here gets you videos and handshapes, and no
+  non-manuals.
+
+Use these instead:
+
+| Page | URL | What it is |
+|---|---|---|
+| **SignStream® 3 Corpora** | `https://dai.cs.rutgers.edu/dai/s/dai` | **← the one you want.** Search, Download Cart, XML annotations |
+| **Utterance search** | `https://dai.cs.rutgers.edu/dai/s/utterancesearch` | Browse by utterance — non-manuals are annotated at **utterance** level, so this is the right browse view |
+| Statistics | `https://dai.cs.rutgers.edu/dai/s/runningstats` | Confirms counts (see below) |
+| Login / register | `https://dai.cs.rutgers.edu/dai/s/index?redirect=dai` | Has a **"Request new account"** button |
+
+### This is the right corpus
+
+The statistics page lists, for **"ASLLRP SignStream® 3 Corpus: Continuous Signing"**:
+
+- **17,522** sign tokens
+- 1,898 distinct sign entries/variants
+
+**17,522 is exactly the token count in this project's ASLLRP token table.** So this is the
+same corpus we have been working with — we have the tokens and need the annotations that
+sit alongside them. The Signers are the same four.
 
 ---
 
@@ -42,38 +74,26 @@ first download, which is a different thing.**
 If you download the wrong one you will get files that look plausible and contain no
 non-manuals. Step 5 below is the check that catches that.
 
-## 3. Current state of the blocker
+## 3. Current state of the blocker — RESOLVED
 
-The portal is down. Measured repeatedly on 2026-09-30:
+The portal was down through 2026-09-30 morning (three separate checks). **It came back the
+same morning**, verified 2026-09-30 ~09:35 UTC:
 
 | Path | Result |
 |---|---|
-| `dai.cs.rutgers.edu/` | **302 in ~1.3 s — the host is alive** |
-| `dai.cs.rutgers.edu/dai/s/dai` | timeout, no response |
-| `dai.cs.rutgers.edu/dai/s/continuoussigndownload` | timeout, no response |
-| `dai.cs.rutgers.edu/dai/s/runningstats` | timeout, no response |
-| `www.bu.edu/asllrp/` | **200 — Boston's site is fine** |
+| `dai.cs.rutgers.edu/dai/s/dai` | **200** ✅ |
+| `dai.cs.rutgers.edu/dai/s/utterancesearch` | **200** ✅ |
+| `dai.cs.rutgers.edu/dai/s/runningstats` | **200** ✅ |
+| `www.bu.edu/asllrp/` | **200** ✅ |
 
-So the web server is running and the **application behind it is not responding**. That is
-not our problem to fix, and it is not blocked on anyone on our team. Confirmed
-independently by two people on the same date.
+The history is in `artifacts/m7a/dai_portal_status.json`, written by
+`scripts/check_dai_portal.py`. Keep that script — if the site goes down again mid-task,
+run `scripts/check_dai_portal.py --watch` and you have dated evidence rather than a
+hunch.
 
-### Check it yourself (one command)
-
-```bash
-cd /mnt/Volume2/Sign_Language_EmotionAware
-/home/bhuwan/miniconda3/envs/slr/bin/python scripts/check_dai_portal.py
-```
-
-It prints a verdict and appends a dated row to `artifacts/m7a/dai_portal_status.json`,
-so the waiting period leaves a record instead of being remembered. To poll until it
-comes back:
-
-```bash
-/home/bhuwan/miniconda3/envs/slr/bin/python scripts/check_dai_portal.py --watch
-```
-
-**`APP_DOWN` → keep waiting. `PORTAL_UP` → go to Part A.**
+> The outage was real and it was worth reporting: the host answered with a 302 while every
+> `/dai/s/` path timed out, which points at the application behind Apache rather than the
+> machine. Part B's email still includes that report, and it is still worth sending.
 
 ---
 
@@ -81,20 +101,39 @@ comes back:
 
 ## A1. Get a free account
 
-1. Open <https://dai.cs.rutgers.edu/dai/s/dai>
-2. Click **login**, then request a free account.
+1. Open <https://dai.cs.rutgers.edu/dai/s/index?redirect=dai>
 
-Per ASLLRP Report 18 §8.1, the account exists "to help keep track of prior downloads and
-downloads in progress." **No PI letter, no IRB, no data-use agreement.** You do not need
-permission from anyone.
+   The page says verbatim: *"You must log in to access the feature you have requested.
+   You can request a free account if you don't already have one."*
+
+2. Fill in email and password, then click **"Request new account"** (it is a button on
+   that same form, next to Login and Reset password).
+
+3. Check your email for the temporary password, then log in and change it. Per Report 18,
+   the temporary password is sent by email and you should log in promptly.
+
+**Per ASLLRP Report 18 §8.1, the account exists "to help keep track of prior downloads and
+downloads in progress." No PI letter, no IRB, no data-use agreement.**
+
+> Use a real inbox you actually read — the account email carries the temporary password.
+> Do not use a throwaway address; if you lose access to the inbox you lose the account.
 
 ## A2. Download the SignStream XML
 
-In the portal, per SignStream collection, choose the **XML annotations** download. From
-Report 18 §8.2.1 you can pick the SignStream file, the XML export, or both — **choose the
-XML.** That is the point of the whole task.
+1. Go to <https://dai.cs.rutgers.edu/dai/s/dai> and log in.
+2. Prefer <https://dai.cs.rutgers.edu/dai/s/utterancesearch> to browse — the non-manuals
+   are annotated per **utterance**, not per sign token, so the utterance view is where
+   they will be.
+3. Search, then add the collections you want to the **Download Cart**.
+4. From Report 18 §8.2.1, per collection you can choose the SignStream file, **the
+   annotations in XML export format**, or both — plus a separate "Video" button.
+   **Choose the XML annotations.** Video is optional and is a much larger download; the
+   task needs the annotations.
 
-Save under `data/` (which is gitignored). **Do not put it in the repository.**
+   The four signers in this corpus are Ben, Cory, Jonathan and Rachel — the same four our
+   token table resolves. Prefer those four collections if the portal lets you choose.
+
+5. Save under `data/` (which is gitignored). **Do not put it in the repository.**
 
 ## A3. Verify you got the right thing — do not skip this
 
