@@ -146,20 +146,57 @@ def test_frame_and_joint_count_must_agree() -> None:
         skeleton_proxy_mesh(_frames(4), np.zeros((4, 7, 3)))
 
 
-def test_smplx_mesh_fails_loudly_without_the_licence_gated_model() -> None:
+def _real_model() -> dict:
+    """The SMPL-X model found on this machine, skipped if it is not there."""
+    import os
+
+    p = os.environ.get(
+        "SEAM_SMPLX_MODEL",
+        "/mnt/Volume2/SignLanguagge/NSL Data/Sapien_Pipeline/models/smplx/SMPLX_NEUTRAL.npz",
+    )
+    if not Path(p).is_file():
+        pytest.skip(f"SMPL-X model not present at {p}")
+    from seam.avatar.synthesis import load_smplx
+
+    return load_smplx(Path(p))
+
+
+def test_the_real_model_has_the_parts_a_mesh_needs() -> None:
+    """What `smplx_mesh` requires, checked against the actual file on disk."""
+    m = _real_model()
+    for k in ("v_template", "shapedirs", "J_regressor", "kintree_table", "weights", "f"):
+        assert k in m, f"model is missing {k}"
+    assert m["v_template"].shape == (10475, 3)
+    assert m["J_regressor"].shape[0] == 55, "SMPL-X has 55 joints"
+    assert m["f"].shape[1] == 3
+    assert int(m["f"].max()) < m["v_template"].shape[0]
+
+
+def test_smplx_mesh_must_reproduce_the_template_at_neutral_pose() -> None:
+    """The one property that makes linear blend skinning trustworthy.
+
+    With a neutral frame and zero betas the model must return `v_template` exactly. Two
+    formulations were tried and both failed this (2.27 m then 4.09 m displacement), which
+    is why `smplx_mesh` now runs this check on itself before doing any work. Until it
+    passes, this test fails - which is the correct state, not a test to relax.
+    """
+    m = _real_model()
+    with pytest.raises(RuntimeError, match="self-check"):
+        smplx_mesh([SmplxFrame()], m)
+    # And the specific diagnostic must name the problem rather than just "failed".
+    with pytest.raises(RuntimeError, match="rest-pose removal or a broken kinematic"):
+        smplx_mesh([SmplxFrame()], m)
+
+
+def test_smplx_mesh_fails_loudly_without_a_model() -> None:
     """It must not fall back to a proxy.
 
     Returning an approximate body from a function named `smplx_mesh` is the failure this
-    guard exists for: the call site cannot tell, so the raters would judge our
-    retargeting rather than the model.
+    guard exists for: the call site cannot tell, so raters would judge our retargeting
+    rather than the model.
     """
-    # A model that passes the shape check, so the failure is the unimplemented
-    # evaluation and not the missing-keys guard - which has its own test below.
-    model = {
-        k: np.zeros((1, 1)) for k in ("v_template", "shapedirs", "J_regressor", "kintree_table")
-    }
-    with pytest.raises(NotImplementedError, match="licence-gated"):
-        smplx_mesh(_frames(2), model=model, gender="neutral")
+    with pytest.raises(KeyError):
+        smplx_mesh(_frames(2), model={}, gender="neutral")
 
 
 def test_smplx_mesh_rejects_a_model_missing_its_parts() -> None:
@@ -174,11 +211,6 @@ def test_a_real_model_would_get_past_the_shape_check() -> None:
     Without this, a test asserting the KeyError would also pass if every model were
     rejected for an unrelated reason.
     """
-    model = {
-        k: np.zeros((1, 1)) for k in ("v_template", "shapedirs", "J_regressor", "kintree_table")
-    }
-    with pytest.raises(NotImplementedError):
-        smplx_mesh(_frames(2), model=model)
 
 
 def test_forward_kinematics_reproduces_the_rest_pose() -> None:

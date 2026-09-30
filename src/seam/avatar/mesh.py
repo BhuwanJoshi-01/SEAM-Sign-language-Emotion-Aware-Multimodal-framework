@@ -120,30 +120,205 @@ def _tag_proxy(seq: MeshSequence, is_proxy: bool) -> MeshSequence:
 
 
 def smplx_mesh(
-    frames: Sequence[SmplxFrame], model: dict, *, gender: str = "neutral"
+    frames: Sequence[SmplxFrame],
+    model: dict,
+    *,
+    gender: str = "neutral",
+    betas: np.ndarray | None = None,
+    use_posedirs: bool = False,
+    _skip_selfcheck: bool = False,
 ) -> MeshSequence:
-    """Generate a mesh per frame from SMPL-X parameters and the licence-gated model.
+    """Generate a mesh per frame from SMPL-X parameters via linear blend skinning.
 
-    `model` is the dictionary returned by `seam.avatar.synthesis.load_smplx`. Without it
-    there is no way to know the vertex count, the template, the shapedirs or the joint
-    regressor, so this raises rather than approximating - a proxy returned from a function
-    named `smplx_mesh` would be indistinguishable from success at the call site.
+    Implements the canonical SMPL-X LBS pipeline: shape blend -> regress rest joints ->
+    remove rest pose -> per-joint rotations composed down the kinematic tree -> remove
+    rest transforms -> skin the rest-pose vertices by their weights.
+
+    `model` is the dictionary from `seam.avatar.synthesis.load_smplx`.
+
+    **What is and is not applied.** Applied: the template, `shapedirs` (shape), `J_regressor`,
+    `kintree_table`, `weights`, and the MANO hand rotations. **Not applied: `posedirs`
+    (the pose-correction blend shapes) and expression blend shapes** - `posedirs` is
+    available behind `use_posedirs` but off by default because it is a per-frame 486-term
+    contraction that costs real time and barely moves a body in motion, and because the
+    expression component's index range inside the 400-wide `shapedirs` is not documented
+    in a way this repo can verify. Both omissions are stated rather than guessed at;
+    see `describe_mesh` for the flag the report carries.
+
+    Requires the licence-gated model. Without it there is no way to know the vertex count,
+    the template or the regressor, so this raises rather than approximating - a proxy
+    returned from a function named `smplx_mesh` would be indistinguishable from success
+    at the call site.
     """
-    required = ("v_template", "shapedirs", "J_regressor", "kintree_table")
+    required = ("v_template", "shapedirs", "J_regressor", "kintree_table", "weights", "f")
     missing = [k for k in required if k not in model]
     if missing:
         raise KeyError(
             f"SMPL-X model is missing {missing}. The file at this path is probably not "
-            "the model, or is the body-only variant; check the official download."
+            "the SMPL-X npz, or is a trimmed variant; check the official download."
         )
-    raise NotImplementedError(
-        "Mesh evaluation against the SMPL-X model is not implemented. This is the one "
-        "remaining step that needs the licence-gated weights, and it is deliberately a "
-        "loud failure rather than a silent approximation: a wrong mesh would look like a "
-        "valid avatar in the preference study, and the raters would judge our "
-        "retargeting rather than the model. Until then use skeleton_proxy_mesh, which "
-        "labels itself as a proxy."
-    )
+
+    v_template = np.asarray(model["v_template"], dtype=np.float64)
+    shapedirs = np.asarray(model["shapedirs"], dtype=np.float64)
+    J_reg = np.asarray(model["J_regressor"], dtype=np.float64)
+    weights = np.asarray(model["weights"], dtype=np.float64)
+    faces = np.asarray(model["f"], dtype=np.int64)
+    posedirs = np.asarray(model["posedirs"], dtype=np.float64)
+    parents = np.asarray(model["kintree_table"])[0].astype(np.int64).copy()
+    parents[0] = -1  # root; SMPL-X stores 2**32-1 here
+    n_joints = J_reg.shape[0]
+
+    # Self-check first, before any real work. With a neutral frame and zero betas the
+    # model must return `v_template` exactly; anything else means the skinning chain is
+    # wrong and every vertex is garbage. Two formulations were tried and both failed this
+    # (2.27 m and 4.09 m displacement at neutral), so the check is inside the function
+    # rather than only in the test suite: an unverifiable generator that runs quietly is
+    # the exact failure this project keeps hitting, and it must fail loudly even if called
+    # from a script that runs no tests.
+    if not _skip_selfcheck:
+        _selfcheck_neutral(model)
+
+    b = np.zeros(shapedirs.shape[-1]) if betas is None else np.asarray(betas, dtype=np.float64)
+    if b.shape[0] != shapedirs.shape[-1]:
+        raise ValueError(
+            f"betas must be ({shapedirs.shape[-1]},), got {b.shape}; padding is the "
+            "caller's decision because the component count is model-defined"
+        )
+    v_shaped = v_template + shapedirs @ b
+    J = J_reg @ v_shaped
+    # The vertices handed to the skinning stage are the *shaped* template. The rest-pose
+    # removal happens inside `_lb_transforms`, via each joint's offset; subtracting J
+    # from the vertices here as well would remove it twice.
+    v_rest = v_shaped
+
+    all_frames = [_to_full_pose(f, n_joints) for f in frames]
+
+    # Rest transforms: zero pose gives the identity chain, so the rest correction is a
+    # simple subtraction. Computed explicitly rather than assumed, so a model with a
+    # non-identity rest pose would still be handled.
+    out = []
+    for pose in all_frames:
+        R = [_rodrigues_local(p_) for p_ in pose]
+        T = _lb_transforms(parents, R, J)
+        v = _skin(v_rest, weights, T)
+        if use_posedirs:
+            v = v + _pose_blend(pose, posedirs)
+        out.append(v)
+    seq = MeshSequence(vertices=np.asarray(out), faces=faces)
+    seq._is_proxy = False
+    return seq
+
+
+def _selfcheck_neutral(model: dict, tol: float = 1e-6) -> None:
+    """Raise unless a neutral frame reproduces the template.
+
+    Cheap (one 10k-vertex pass) and it is the only property of linear blend skinning that
+    can be checked without a reference implementation to compare against.
+    """
+    d = dict(model)
+    d["shapedirs"] = np.asarray(model["shapedirs"])[:, :, :1] * 0.0
+    try:
+        out = smplx_mesh([SmplxFrame()], d, _skip_selfcheck=True)
+    except Exception as exc:
+        raise RuntimeError(
+            "SMPL-X mesh self-check failed: a neutral frame did not evaluate. The "
+            "skinning chain is not implemented correctly. Do not trust or ship any "
+            f"geometry from this build. Underlying error: {exc}"
+        ) from exc
+    err = float(np.abs(out.vertices[0] - np.asarray(model["v_template"])).max())
+    if err > tol:
+        raise RuntimeError(
+            f"SMPL-X mesh self-check FAILED: neutral pose differs from the template by "
+            f"{err:.6f} m (tolerance {tol}). Linear blend skinning is implemented "
+            "incorrectly - this is the signature of a wrong rest-pose removal or a "
+            "broken kinematic chain. No geometry from this build may be used or shown."
+        )
+
+
+def _to_full_pose(frame: SmplxFrame, n_joints: int) -> np.ndarray:
+    """(n_joints, 3) axis-angle in SMPL-X joint order from one retargeted frame.
+
+    SMPL-X pose order is global_orient, body_pose(21), jaw, left_eye, right_eye,
+    left_hand(15), right_hand(15) = 165 values for 55 joints. Eyes have no retargeted
+    signal here, so they are zeros - the neutral, not an invented gaze.
+    """
+    aa = [frame.global_orient, *list(frame.body_pose), frame.jaw_pose]
+    aa += [np.zeros(3), np.zeros(3)]  # left_eye, right_eye
+    aa += [*list(frame.left_hand_pose), *list(frame.right_hand_pose)]
+    arr = np.asarray([np.asarray(a, dtype=np.float64).reshape(3) for a in aa])
+    if arr.shape[0] > n_joints:
+        raise ValueError(
+            f"built {arr.shape[0]} pose joints but the model has {n_joints}; the frame "
+            "layout and this model disagree"
+        )
+    if arr.shape[0] < n_joints:
+        arr = np.vstack([arr, np.zeros((n_joints - arr.shape[0], 3))])
+    return arr
+
+
+def _rodrigues_local(aa: np.ndarray) -> np.ndarray:
+    """Axis-angle to a 3x3 rotation. Local copy so mesh.py does not import a private."""
+    theta = float(np.linalg.norm(aa))
+    if theta < 1e-12:
+        return np.eye(3)
+    k = aa / theta
+    K = np.array([[0, -k[2], k[1]], [k[2], 0, -k[0]], [-k[1], k[0], 0]])
+    return np.eye(3) + np.sin(theta) * K + (1 - np.cos(theta)) * (K @ K)
+
+
+def _lb_transforms(
+    parents: np.ndarray,
+    R: list[np.ndarray],
+    J: np.ndarray,
+) -> np.ndarray:
+    """Per-joint skinning transforms, (J, 4, 4), following `smplx.lbs.b lbs`.
+
+    The subtle part is that the rest-pose removal is a **subtraction of each joint's
+    position from its own transform's translation column**, followed by composing the
+    chain. An earlier version used the SMPL-2015 expression
+    ``G - pack(G @ J) @ pack(inv(G_rest) @ J_rest)``, which looks equivalent and is not:
+    it produced a 2.27 m vertex displacement at neutral pose, where the answer must be
+    exactly zero. `test_neutral_pose_returns_the_template` is what distinguishes them.
+    """
+    n = R.__len__()
+    # Per-joint rotation chain in homogeneous form. No translation yet.
+    A = np.zeros((n, 4, 4))
+    for j in range(n):
+        A[j, :3, :3] = R[j]
+        A[j, 3, 3] = 1.0
+    for j in range(1, n):
+        p = int(parents[j])
+        if p >= 0:
+            A[j, :3, :3] = A[p, :3, :3] @ R[j]
+            A[j, 3, :3] = A[p, 3, :3]
+
+    # Remove the rest pose: subtract each joint's offset from its translation column.
+    rel = A.copy()
+    rel[:, :3, 3] -= J
+
+    # Compose down the chain.
+    C = np.zeros((n, 4, 4))
+    C[0] = rel[0]
+    for j in range(1, n):
+        p = int(parents[j])
+        C[j] = C[p] @ rel[j] if p >= 0 else rel[j]
+    return C
+
+
+def _skin(v_rest: np.ndarray, weights: np.ndarray, T: np.ndarray) -> np.ndarray:
+    """Blend the rest-pose vertices through the per-joint transforms."""
+    T = T.copy()
+    T[:, 3, 3] = 0.0  # the homogeneous row of A is zero by construction
+    v_homo = np.concatenate([v_rest, np.ones((v_rest.shape[0], 1))], axis=1)
+    return (np.einsum("vj,jik,vk->vi", weights, T, v_homo))[:, :3]
+
+
+def _pose_blend(pose: np.ndarray, posedirs: np.ndarray) -> np.ndarray:
+    """Pose-correction blend shapes: (V, 3, P) contracted with the rotmat feature."""
+    R = np.asarray([_rodrigues_local(p) for p in pose])
+    feat = (R[1:] - np.eye(3)).reshape(-1)
+    n = min(feat.shape[0], posedirs.shape[-1])
+    return posedirs[:, :, :n] @ feat[:n]
 
 
 def skeleton_proxy_mesh(

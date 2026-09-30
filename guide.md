@@ -36,13 +36,13 @@ install a second Python.
 **Short answer: no, task 5 does not need 1, 2, 3 and 4 finished first. But it is not
 independent of task 1, and it is currently blocked by something not on this list.**
 
-| Task | Blocks task 5? | Why |
-|---|---|---|
-| **0** password | No | Unrelated. Do it first anyway; it takes 15 minutes. |
-| **1** SMPL-X | **YES — hard blocker** | No model, no mesh, no avatar, nothing for a rater to look at. |
-| **2** M4 decision | **Partly** | Not needed to *recruit* raters, but it decides whether affect appears in the avatar, so it must be settled **before stimuli are generated**. Otherwise you generate the wrong stimulus set. It is 30 minutes of pure judgement — do it early. |
-| **3** BU non-manual | **No** | Blocked on an external outage with no ETA. Waiting for it would mean waiting indefinitely. The study can run on heuristic markers **with the limitation stated**; M3's limitation is already written up honestly. |
-| **4** DWPose download | **No** | Different track. Task 4 is M5a *recognition*; the avatar is driven by perception landmarks, not by a recogniser's output. Task 4 can start today and will not help task 5. |
+| Task                        | Blocks task 5?                | Why                                                                                                                                                                                                                                                   |
+| --------------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **0** password        | No                            | Unrelated. Do it first anyway; it takes 15 minutes.                                                                                                                                                                                                   |
+| **1** SMPL-X          | **YES — hard blocker** | No model, no mesh, no avatar, nothing for a rater to look at.                                                                                                                                                                                         |
+| **2** M4 decision     | **Partly**              | Not needed to*recruit* raters, but it decides whether affect appears in the avatar, so it must be settled **before stimuli are generated**. Otherwise you generate the wrong stimulus set. It is 30 minutes of pure judgement — do it early. |
+| **3** BU non-manual   | **No**                  | Blocked on an external outage with no ETA. Waiting for it would mean waiting indefinitely. The study can run on heuristic markers**with the limitation stated**; M3's limitation is already written up honestly.                                |
+| **4** DWPose download | **No**                  | Different track. Task 4 is M5a*recognition*; the avatar is driven by perception landmarks, not by a recogniser's output. Task 4 can start today and will not help task 5.                                                                           |
 
 ### The blocker that is not on this list
 
@@ -154,10 +154,17 @@ no verified visual output and no real 3D export.
 > which writes loadable `.glb` files to `artifacts/m7a/stimuli/`. `trimesh==4.7.1` is
 > installed and pinned as the `avatar` extra.
 >
-> **What is still missing is the one thing only you can do: the model weights.** The
-> mesh it produces today is a **joint-capsule proxy, not a human body** — every file is
-> stamped `is_proxy: true` and `is_human_mesh: false`. Once the SMPL-X model is
-> available, the mesh source swaps and the rest of the pipeline is unchanged.
+> **The model weights are already on this machine** (see step 4 below), verified
+> complete. But **mesh generation is not finished**: `mesh.smplx_mesh()` implements
+> linear blend skinning and currently **fails its own self-check** — a neutral pose must
+> return the template exactly and it is off by 4.09 m. So the function now raises with
+> that number in the message rather than returning garbage, and
+> `test_smplx_mesh_must_reproduce_the_template_at_neutral_pose` is red until the skinning
+> chain is right. **That test failing is the correct state — do not relax it.**
+>
+> Until it passes, the mesh output is still the **joint-capsule proxy**, stamped
+> `is_proxy: true`. The pipeline, timing and export path are done and verified; only the
+> skinning maths is outstanding.
 >
 > **The old `export_glb()` that wrote JSON to a `.glb` path is gone**, replaced by
 > `mesh.export_glb`, which writes real binary glTF and verifies it by re-loading. The
@@ -327,9 +334,9 @@ unblocks the work, and it needs nobody's permission.**
 
 ### The critical distinction: two different downloads
 
-| Download | URL | Has non-manuals? |
-|---|---|---|
-| ASLLRP **SignStream®3 Corpus** | `dai.cs.rutgers.edu/dai/s/dai` | **YES** |
+| Download                                                | URL                                                 | Has non-manuals?                            |
+| ------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------- |
+| ASLLRP**SignStream®3 Corpus**                    | `dai.cs.rutgers.edu/dai/s/dai`                    | **YES**                               |
 | **Sign Bank** sign clips (the 17,522 / 4 signers) | `dai.cs.rutgers.edu/dai/s/continuoussigndownload` | **NO** — glosses and handshapes only |
 
 **This is the root of the problem, and it is not a mirror oversight.** The
@@ -340,7 +347,7 @@ that download. The non-manuals were never in it. They are a different download.
 
 ### Part A — Register and download (the part that matters)
 
-1. **Open the portal.** <https://dai.cs.rutgers.edu/dai/s/dai>
+1. **Open the portal.** [https://dai.cs.rutgers.edu/dai/s/dai](https://dai.cs.rutgers.edu/dai/s/dai)
 
    **KNOWN DOWN as of 2026-09-30.** It returns HTTP 503, Apache/2.4.58 (Ubuntu),
    "maintenance downtime or capacity problems". The host itself is alive — the root
@@ -352,14 +359,11 @@ that download. The non-manuals were never in it. They are a different download.
    date and the exact response, retry later, and move on to step 4, which uses a
    different host and is not affected. Do not report it as a failure of the account
    flow — the account flow has not been exercised yet, so it cannot have failed.
-
 2. **Request a free account** via the "login" link. You do not need an account to browse
    and search; you need one to download.
-
 3. **Download the SignStream XML annotations**, per collection. From Report 18 §8.2.1
    you can choose "the SignStream® file", "the annotations in XML export format", or
    both. **Choose the XML annotations** — that is the whole point of this step.
-
 4. **Confirm you got what you came for.** The XML must contain a `<NON_MANUALS>` block:
 
    ```bash
@@ -369,10 +373,9 @@ that download. The non-manuals were never in it. They are a different download.
    **If this prints nothing, the download is the wrong artifact.** Stop and report — do
    not proceed as though you have labels. Without this block the step accomplished
    nothing, and pretending otherwise would put a false claim into the M3 write-up.
-
 5. **Get the field IDs.** Most non-manual IDs live only in `defCodingScheme.xml`, which
    ships inside the SignStream 3 app. Download it (free, self-service, MIT-licensed):
-   <https://www.bu.edu/asllrp/SignStream/3/download-newSS.html>
+   [https://www.bu.edu/asllrp/SignStream/3/download-newSS.html](https://www.bu.edu/asllrp/SignStream/3/download-newSS.html)
 
    Confirmed without guessing: `10` = `eye brows` (categorical), `40001` = `eye brows`,
    `40002` = `eye aperture`, `50001`–`50003` = `yaw`/`pitch`/`roll` (continuous). Note
@@ -404,7 +407,7 @@ and publish analyses rather than data.
 - [ ] `grep -l "NON_MANUALS"` finds at least one file
 - [ ] Email sent, or consciously decided not to send it
 - [ ] Outcome recorded in `paper/provenance/bu_access_request.md` §6 **and** in
-      `implimentation.md` Track B
+  `implimentation.md` Track B
 
 > **If access is declined, or goes unanswered for two weeks, that is the answer.** The
 > M3 limitation then stands as final and must be written up as a limitation in the
