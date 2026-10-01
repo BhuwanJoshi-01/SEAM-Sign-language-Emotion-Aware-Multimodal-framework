@@ -394,7 +394,9 @@ dictionary signing with no discourse context. →
 
 ## M5 — Recognition + translation
 
-- [ ] M5a: continuous recognition on the 17,522 frame-aligned ASLLRP gloss tokens — **pipeline built and run 2026-09-29; result is NEGATIVE, and that is the finding.**
+- [x] M4 gate decision — **decided 2026-10-01: option (c) attempted and refuted, so option (a).** The "more data" branch was tried as the decisive test, and the decisive move turned out to be *better labels* rather than more of them, available immediately after step 3. Re-running the whole experiment with human `y_L` in the same four slots moved worst-fold cross-AUC 0.7276 → **0.7031**, gate still failing, with cross A→L getting worse (0.505 → 0.617). The label-noise explanation is refuted. M4 is reported as a refuted hypothesis with a validated instrument; gate not moved to fit.
+  - Underpinning it: three of four heuristic linguistic labels are at or near chance against human annotation (kappa 0.028 / 0.038 / 0.141; negation 0.639) — `artifacts/m3/label_agreement.json`, measured with Cohen's kappa rather than majority-dominated accuracy.
+- [x] M5a: continuous recognition on the 17,522 frame-aligned ASLLRP gloss tokens — **pipeline built and run 2026-09-29; result is NEGATIVE, and that is the finding.**
   - `src/seam/features/signpose.py` + `scripts/train_recogniser.py`; artifact `artifacts/m5a/recogniser.json`.
   - 1,563 alignable tokens over 499 glosses (175 dropped as overshooting their crop, counted not clamped). 284 of 499 types are hapax.
   - **OOV floor 24-48% by fold** (30.6% on Cory): a third of one signer's tokens use a gloss the other three never use, so the open-vocabulary WER is bounded below by the data, not the model.

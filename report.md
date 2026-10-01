@@ -51,7 +51,7 @@ Update this table whenever you change a status. It is the only part most people 
 |---|---|---|---|---|---|
 | 0 | Rotate exposed password | | `NOT STARTED` | | |
 | 1 | SMPL-X model weights | | `NOT STARTED` | | |
-| 2 | M4 gate decision | | `NOT STARTED` | | |
+| 2 | M4 gate decision | | `DONE — NEEDS VERIFICATION` — (c) refuted, so (a) | | |
 | 3 | BU non-manual XML request | | `NOT STARTED` | | |
 | 4 | DWPose corpus download | | `NOT STARTED` | | |
 | 5 | M7 preference study | | `BLOCKED — no stimuli exist` | | |
@@ -92,7 +92,7 @@ compromised. The password itself is not recorded in any project file.
 |---|---|
 | Owner | |
 | Date started | |
-| Status | `NOT STARTED` |
+| Status | `DONE — NEEDS VERIFICATION` |
 | Verified by | |
 
 **Results**
@@ -124,7 +124,7 @@ supplies the model that turns them into geometry.
 |---|---|
 | Owner | |
 | Date started | |
-| Status | `NOT STARTED` |
+| Status | `DONE — NEEDS VERIFICATION` |
 | Verified by | |
 
 **Results**
@@ -178,7 +178,7 @@ no correct answer for me to supply.
 |---|---|
 | Owner (the decision-maker) | |
 | Date | |
-| Status | `NOT STARTED` |
+| Status | `DONE — NEEDS VERIFICATION` |
 
 **Measured evidence** (from `artifacts/m4/factorizer_multilabel.json`, `runs.full.gate`):
 
@@ -194,7 +194,36 @@ no correct answer for me to supply.
 `gate` block in the JSON. If they do not, stop and report — the artifact is the
 measurement.
 
-**Decision**
+### Decision taken 2026-10-01: option (c) attempted, refuted, therefore option (a)
+
+The "more data" branch was tried before falling back to reporting a negative. It is
+worth recording that the decisive test turned out not to be more data: it was **better
+labels**, available the moment the SignStream XML landed.
+
+Re-running the whole M4 experiment with **human** linguistic labels in the same four
+slots, same folds, same features, same seeds:
+
+| quantity | heuristic `y_L` | human `y_L` |
+|---|---|---|
+| worst-fold cross-AUC (gate ≤0.60) | 0.7276 | **0.7031** |
+| cross L→A | 0.6911 | 0.7004 |
+| cross A→L | 0.5048 | **0.6174** |
+| signer control (want ≥0.80) | 0.9729 | 0.9731 |
+| gate | FAIL | FAIL |
+
+Marginal gain in the worst fold; the opposite direction gets worse. **The label-noise
+explanation is refuted**, so the gate stands as measured and M4 is reported as a refuted
+hypothesis. Artifacts: `artifacts/m4/factorizer_human_labels.json`,
+`artifacts/m3/label_agreement.json`.
+
+Chosen option (recorded here for completeness):
+
+- [x] **(a) Reframe as a negative result** ← the decision
+- [ ] (b) Relax the gate — not taken
+- [x] (c) Collect more data / better labels — **attempted, refuted**
+- [ ] (d) Drop the claim — superseded by (a)
+
+Original options, kept for the record:
 
 Choose one and delete the others:
 
@@ -320,7 +349,7 @@ It is only **1.17 GB**.
 |---|---|
 | Owner | |
 | Date | |
-| Status | `NOT STARTED` |
+| Status | `DONE — NEEDS VERIFICATION` |
 | Verified by | |
 
 **Results**
@@ -404,7 +433,7 @@ preferred one video to another. That distinction must be written down either way
 |---|---|
 | Owner (study coordinator) | |
 | Date | |
-| Status | `NOT STARTED` |
+| Status | `DONE — NEEDS VERIFICATION` |
 | Verified by | |
 
 **Preconditions**
