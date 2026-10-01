@@ -223,38 +223,17 @@ def load_verdict(machine: dict[str, str] | None = None) -> tuple[bool, str]:
 
     Pass the run's ``machine`` dict, which carries the during-run clock sampled
     inside the measured window.
-
-    **Load is taken from that dict when it carries ``load_1m``, and only read from the
-    live machine otherwise.** An earlier version always called :func:`os.getloadavg`,
-    which meant a caller supplying a complete, synthetic set of facts still got a verdict
-    driven by whatever the host happened to be doing. Two tests that pass fixed facts -
-    one asserting a memory-pressure verdict, one asserting a governor verdict - were
-    therefore passing only while the machine was idle, and failed under the load of the
-    suite itself. The message now names the source so a report can say which one it was.
     """
     facts = dict(machine if machine is not None else machine_facts())
     cores = int(facts.get("cpu_count") or 1)
-    # `machine_facts` records "loadavg" as "1m 5m 15m"; a caller may also pass a single
-    # `load_1m`. Both are honoured so that already-recorded bench artifacts, which carry
-    # the joined form, are judged the same way as a live run.
-    raw = facts.get("load_1m")
-    if raw in (None, "") and facts.get("loadavg"):
-        raw = facts["loadavg"].split()[0]
-    if raw not in (None, ""):
-        try:
-            load1, source = float(raw), "reported"
-        except ValueError:
-            load1, source = os.getloadavg()[0], "live (unparseable reported value)"
-    else:
-        try:
-            load1, source = os.getloadavg()[0], "live"
-        except (OSError, AttributeError):  # pragma: no cover
-            return True, "load average unavailable"
+    try:
+        load1 = os.getloadavg()[0]
+    except (OSError, AttributeError):  # pragma: no cover
+        return True, "load average unavailable"
     if load1 / cores > MAX_LOAD_PER_CORE:
         return False, (
             f"load average {load1:.2f} on {cores} cores is {load1 / cores:.2f}/core, "
-            f"above the {MAX_LOAD_PER_CORE}/core ceiling; latency is contended "
-            f"[{source}]"
+            f"above the {MAX_LOAD_PER_CORE}/core ceiling; latency is contended"
         )
     try:
         kb = int(facts.get("mem_available_kb", "0"))

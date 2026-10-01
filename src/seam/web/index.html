@@ -47,6 +47,7 @@
   <video id="v" playsinline muted autoplay></video>
   <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
     <button id="go" disabled>start camera</button>
+    <button id="stop" disabled>stop camera</button>
     <button id="analyse" disabled>analyse window</button>
     <label class="sub">utterance <input id="uid" placeholder="e.g. 24363254"></label>
   </div>
@@ -90,18 +91,65 @@ let landmarker = null, stream = null, win = [], pose = [], cap = 0, last = 0, fp
 // so the only thing posted is numbers.
 const WIN = 30, CAP = 40;
 
+//: Which delegate actually got used. Declared before init(), because `let` is
+//: not hoisted and reading it earlier would throw.
+let delegate = "GPU";
+
+//: Give up on the GPU after this long. A WebGL context that cannot be created
+//: may leave createFromOptions pending forever rather than rejecting, so a
+//: catch alone is not enough - something has to actively stop waiting.
+const GPU_TIMEOUT_MS = 8000;
+
+function withTimeout(promise, ms, label) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(label + " timed out")), ms);
+    promise.then(
+      (v) => { clearTimeout(t); resolve(v); },
+      (e) => { clearTimeout(t); reject(e); },
+    );
+  });
+}
+
 async function init() {
   const vision = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14");
   const fileset = await vision.FilesetResolver.forVisionTasks(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
-  landmarker = await vision.FaceLandmarker.createFromOptions(fileset, {
-    baseOptions: { modelAssetPath: MODEL, delegate: "GPU" },
+  landmarker = await makeLandmarker(vision, fileset);
+  $("status").textContent = "model ready (" + delegate + ")";
+  $("go").disabled = false;
+}
+
+// Try the GPU first, then fall back to the CPU.
+//
+// Requesting "GPU" on a machine that has no discrete graphics card does not
+// raise a catchable error in every browser - on some the promise simply never
+// settles, so the page sits at "starting..." forever with a disabled button and
+// no visible reason. That is indistinguishable from a broken page, and it cost
+// a contributor real time on a laptop without a GPU.
+//
+// The CPU delegate is slower but produces identical numbers: the delegate
+// chooses where the arithmetic runs, not what it computes. Since this demo
+// exists to show the pipeline working, a slower correct answer beats a fast
+// one that never arrives.
+async function makeLandmarker(vision, fileset) {
+  const opts = (d) => ({
+    baseOptions: { modelAssetPath: MODEL, delegate: d },
     runningMode: "VIDEO", numFaces: 1,
     outputFaceBlendshapes: true,
     outputFacialTransformationMatrixes: true,
   });
-  $("status").textContent = "model ready";
-  $("go").disabled = false;
+
+  try {
+    return await withTimeout(
+      vision.FaceLandmarker.createFromOptions(fileset, opts("GPU")),
+      GPU_TIMEOUT_MS, "GPU delegate");
+  } catch (e) {
+    console.warn("GPU delegate unavailable, falling back to CPU:", e && e.message);
+  }
+
+  delegate = "CPU";
+  $("status").textContent = "loading (CPU - no GPU detected)";
+  return await vision.FaceLandmarker.createFromOptions(fileset, opts("CPU"));
 }
 
 $("go").onclick = async () => {
@@ -109,10 +157,37 @@ $("go").onclick = async () => {
     stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
     $("v").srcObject = stream; await $("v").play();
     $("go").textContent = "camera on";
+    $("go").disabled = true;
+    $("stop").disabled = false;
     $("analyse").disabled = false;
     loop();
   } catch (e) { $("err").textContent = "camera unavailable: " + e.message; }
 };
+
+// Stop every hardware track, detach the element, and drop the buffered window.
+// Without the getTracks().stop() calls the camera light stays on even after
+// the <video> element is cleared.
+$("stop").onclick = () => {
+  if (stream) {
+    for (const track of stream.getTracks()) track.stop();
+    stream = null;
+  }
+  $("v").srcObject = null;
+  win = []; pose = []; cap = 0; last = 0; fpsEma = 0;
+  $("go").textContent = "start camera";
+  $("go").disabled = false;
+  $("stop").disabled = true;
+  $("analyse").disabled = true;
+  $("err").textContent = "";
+  $("status").textContent = "camera off — nothing is being captured";
+};
+
+// Browser tab close / reload is an implicit stop. Releasing here prevents the
+// camera light from staying on after the page goes away.
+window.addEventListener("pagehide", () => {
+  if (stream) for (const track of stream.getTracks()) track.stop();
+  stream = null;
+});
 
 function loop() {
   if (!stream) return;
@@ -131,7 +206,10 @@ function loop() {
   // is _neutral. Reordering client-side would be a silent way to shift every marker
   // threshold by one, so the order is sent as-is and the server validates the width.
   win.push(bs.map(c => c.score));
-  pose.push(Array.from(mtx));
+  // MediaPipe hands back the head transform as 16 numbers in row-major order.
+  // The server's contract is (T, 4, 4) - one 4x4 matrix per frame - so reshape
+  // here. Sending the flat 16 makes the server reject the window as (T, 16).
+  pose.push([0, 4, 8, 12].map(i => Array.from(mtx.slice(i, i + 4))));
   if (win.length > CAP) { win.shift(); pose.shift(); }
   $("status").textContent =
     `${fpsEma.toFixed(1)} fps · ${win.length}/${CAP} frames · face tracked`;
@@ -197,7 +275,18 @@ function render(j) {
     `<p class="note">both are withheld rather than shown empty, because a number that carries no information is worse than no number.</p>`;
 }
 
-init().catch(e => { $("status").textContent = "model failed to load: " + e.message; });
+// Report a load failure in the visible error box, not only in the small status
+// line. The status text sits in the header in a muted colour and is easy to
+// miss, which is how a page that is visibly waiting reads as a page that is
+// merely empty.
+init().catch(e => {
+  const msg = (e && e.message) || String(e);
+  $("status").textContent = "model failed to load";
+  $("err").textContent =
+    "Could not load the face model (" + msg + "). " +
+    "This page needs internet access to fetch MediaPipe from a CDN, and a " +
+    "working CPU or GPU delegate. Nothing is wrong with your camera.";
+});
 </script>
 </body>
 </html>

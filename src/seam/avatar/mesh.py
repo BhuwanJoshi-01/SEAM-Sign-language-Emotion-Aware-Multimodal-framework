@@ -197,9 +197,10 @@ def smplx_mesh(
     # simple subtraction. Computed explicitly rather than assumed, so a model with a
     # non-identity rest pose would still be handled.
     out = []
-    for pose in all_frames:
+    for pose, frame in zip(all_frames, frames):
         R = [_rodrigues_local(p_) for p_ in pose]
-        T = _lb_transforms(parents, R, J)
+        transl = getattr(frame, "global_transl", None)
+        T = _lb_transforms(parents, R, J, transl=transl)
         v = _skin(v_rest, weights, T)
         if use_posedirs:
             v = v + _pose_blend(pose, posedirs)
@@ -270,45 +271,85 @@ def _lb_transforms(
     parents: np.ndarray,
     R: list[np.ndarray],
     J: np.ndarray,
+    transl: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Per-joint skinning transforms, (J, 4, 4), following `smplx.lbs.b lbs`.
+    """Per-joint skinning transforms, (J, 4, 4), following `smplx.lbs.lbs`.
 
-    The subtle part is that the rest-pose removal is a **subtraction of each joint's
-    position from its own transform's translation column**, followed by composing the
-    chain. An earlier version used the SMPL-2015 expression
-    ``G - pack(G @ J) @ pack(inv(G_rest) @ J_rest)``, which looks equivalent and is not:
-    it produced a 2.27 m vertex displacement at neutral pose, where the answer must be
-    exactly zero. `test_neutral_pose_returns_the_template` is what distinguishes them.
+    **The canonical formulation.** Each local transform is built with its *parent-relative*
+    joint offset, and the skinning transform for joint ``j`` is
+    ``G_j = A_j @ inv(A_rest_j)`` where ``A`` is the rotated chain and ``A_rest`` the
+    same chain at the rest pose. At neutral pose every ``R_j`` is the identity, so
+    ``A_j == A_rest_j`` and therefore ``G_j == I`` for every joint — which is exactly
+    what makes the neutral frame reproduce ``v_template``.
+
+    Two earlier versions of this function were wrong, and both failed the same way:
+
+    1. The SMPL-2015 expression ``G - pack(G @ J) @ pack(inv(G_rest) @ J_rest)`` —
+       2.27 m displacement at neutral pose.
+    2. Subtracting each joint's **absolute** rest position ``J`` from the translation
+       column of its own transform, then composing — 4.09 m displacement at neutral
+       pose. The residual is not zero because the pelvis sits at ``y = -0.351``, so the
+       subtraction leaves that offset in every transform and the error accumulates down
+       the chain.
+
+    The lesson both times was the same: the offset must be *parent-relative*
+    (``J[j] - J[parent]``), because that is what ``A = A_parent @ T_local`` composes.
+    Neither earlier version could be caught, because the licence-gated model did not
+    exist yet; `test_smplx_mesh_must_reproduce_the_template_at_neutral_pose` is the test
+    that distinguishes them, and it is the reason that test must never be relaxed.
+
+    **``transl`` places the body.** It is added to the root's translation, which every
+    joint inherits, exactly as SMPL-X's own ``global_transl`` behaves. It is a *world
+    placement*: where the body is, not how it is posed. It must NOT be folded into the
+    rest offsets, because ``A_rest`` is the rest chain and a translation in one branch
+    only would make ``G_j`` non-identity at neutral and break the template self-check.
+    Applying it to the root of both ``A`` and ``A_rest`` equally cancels in
+    ``A @ inv(A_rest)``, so it is added to the *skinning transform* after that product,
+    where it moves every vertex once and leaves neutral reproducibility intact.
     """
-    n = R.__len__()
-    # Per-joint rotation chain in homogeneous form. No translation yet.
+    n = len(R)
+    # Forward chain, proper homogeneous composition: A_j = A_parent @ T_local, where
+    # T_local carries the rotation and the parent-relative offset.
     A = np.zeros((n, 4, 4))
+    A_rest = np.zeros((n, 4, 4))
     for j in range(n):
-        A[j, :3, :3] = R[j]
-        A[j, 3, 3] = 1.0
-    for j in range(1, n):
         p = int(parents[j])
+        offset = J[j] - (J[p] if p >= 0 else 0.0)
+
+        local = np.eye(4)
+        local[:3, :3] = R[j]
+        local[:3, 3] = offset
+
+        local_rest = np.eye(4)
+        local_rest[:3, 3] = offset
+
         if p >= 0:
-            A[j, :3, :3] = A[p, :3, :3] @ R[j]
-            A[j, 3, :3] = A[p, 3, :3]
+            A[j] = A[p] @ local
+            A_rest[j] = A_rest[p] @ local_rest
+        else:
+            A[j] = local
+            A_rest[j] = local_rest
 
-    # Remove the rest pose: subtract each joint's offset from its translation column.
-    rel = A.copy()
-    rel[:, :3, 3] -= J
-
-    # Compose down the chain.
-    C = np.zeros((n, 4, 4))
-    C[0] = rel[0]
-    for j in range(1, n):
-        p = int(parents[j])
-        C[j] = C[p] @ rel[j] if p >= 0 else rel[j]
-    return C
+    G = np.stack([A[j] @ np.linalg.inv(A_rest[j]) for j in range(n)])
+    if transl is not None:
+        t = np.asarray(transl, dtype=np.float64).reshape(3)
+        if np.any(t != 0.0):
+            # Add the world offset to each joint's translation column. Because it is the
+            # same offset on every joint, the blended vertex moves by exactly that offset
+            # (the weights sum to 1), while relative bone geometry is untouched.
+            G[:, :3, 3] += t
+    return G
 
 
 def _skin(v_rest: np.ndarray, weights: np.ndarray, T: np.ndarray) -> np.ndarray:
-    """Blend the rest-pose vertices through the per-joint transforms."""
-    T = T.copy()
-    T[:, 3, 3] = 0.0  # the homogeneous row of A is zero by construction
+    """Blend the rest-pose vertices through the per-joint transforms.
+
+    `T` now holds proper homogeneous transforms with a populated bottom row (see
+    `_lb_transforms`), so the vertex is lifted to homogeneous coordinates and the full
+    4x4 is applied. The previous version zeroed the homogeneous row because the old
+    transform layout left it empty; that is no longer the case and zeroing it here would
+    discard the translation component of every transform.
+    """
     v_homo = np.concatenate([v_rest, np.ones((v_rest.shape[0], 1))], axis=1)
     return (np.einsum("vj,jik,vk->vi", weights, T, v_homo))[:, :3]
 
@@ -502,7 +543,14 @@ def export_parameters(frames: Sequence[SmplxFrame], out: Path, *, fps: int = 25)
 
 
 def describe_mesh(seq: MeshSequence) -> dict[str, object]:
-    """Machine-readable description, so a report cannot call a proxy a real body."""
+    """Machine-readable description, so a report cannot call a proxy a real body.
+
+    ``is_human_mesh`` is derived from ``seq.is_proxy``, not a constant. It was
+    briefly hardcoded to ``False``, which meant a real SMPL-X export was
+    described as a proxy - the exact inversion this function exists to prevent,
+    and one that would have read as "the study ran on stand-in geometry" in a
+    manifest whose own top-level field said otherwise.
+    """
     v = seq.vertices
     return {
         "n_frames": seq.n_frames,
@@ -510,7 +558,7 @@ def describe_mesh(seq: MeshSequence) -> dict[str, object]:
         "n_faces": int(seq.faces.shape[0]),
         "is_proxy": seq.is_proxy,
         "height_m": round(float(v[:, :, 1].max() - v[:, :, 1].min()), 4),
-        "is_human_mesh": False,
+        "is_human_mesh": not seq.is_proxy,
         "note": (
             "skeleton proxy - joint capsules, not a human body"
             if seq.is_proxy

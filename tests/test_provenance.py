@@ -64,7 +64,6 @@ ALLOWED: dict[str, str] = {
     "4": "Number of signers/folds.",
     "5": "Number of folds in k-fold, raters in the study target.",
     "6": "Ordinals.",
-    "8.3": "A document section reference (ASLLRP Report 18 section 8.3), not a measurement.",
     "10": "Ordinals, and the FLAME coefficient count.",
     "12": "fps in the M5b design target.",
     "24": "fps target; number of sampled clips in the face gate.",
