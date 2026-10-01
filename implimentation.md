@@ -372,7 +372,10 @@ dictionary signing with no discourse context. →
   - Contact confirmed current: **carol@bu.edu** (Carol Neidle, Director ASLLRP). DAI support: augustine.opoku@gmail.com.
   - Drafted, ready to review and send: `paper/provenance/bu_access_request.md`, with the research, the confirmed/unconfirmed split, the field IDs, and the no-redistribution terms.
   - **Also unblocked:** the real labels will make it possible to check the project's marker definitions (`eye brows` → brow raise/furrow, `head mvmt: shake` → head shake, `mouth` → mouth morpheme). Those definitions were written from blendshape heuristics and have **never** been validated against the real annotations.
-  - **Caveat recorded:** the live DAI portal returned HTTP 503 throughout the research, so the account flow is documented but not yet exercised end to end.
+  - **RESOLVED 2026-10-01.** Portal recovered; Professor Neidle replied and confirmed the Download Cart route at `/dai/s/cart`. **51 XML collections downloaded** (Ben 10, Cory 10, Jonathan 8, Rachel 19, RIT 4).
+  - **Parsed and joined: 2,407 utterances, 21,902 signs, 43,038 non-manual events, all frame-aligned, 100% mapped to markers.**
+  - **The join that unblocks M3: 200/200 of our EmoSign utterance IDs appear directly in the XML**, carrying **4,443 human non-manual annotations** across all 24 markers — brow_raise 282, brow_furrow 202, head_shake 125, head_nod 111, negation 41, question_wh 9, question_yn 25, topic 102, plus eye_aperture 1,315 and head position/posture channels.
+  - **M3's "blocked on the visual instrument" limitation is lifted.** The marker labels are no longer heuristic pseudo-labels from blendshapes.
 - [x] cue-grounding report: our prosody features vs the 600 Deaf-annotator cue strings — **done**, `artifacts/audit/cue_grounding.json`
 
 ---

@@ -51,35 +51,47 @@ def main() -> int:
         return 1
 
     utterances, rep = parse_directory(root, args.pattern)
+    from seam.data.signstream import gloss_vocabulary
+
+    vocab = gloss_vocabulary(utterances)
+    per: dict[str, dict[str, int]] = {}
+    for u in utterances:
+        d = per.setdefault(u.participant or "(unknown)", {"utterances": 0, "events": 0, "signs": 0})
+        d["utterances"] += 1
+        d["events"] += len(u.non_manuals)
+        d["signs"] += len(u.glosses)
     out = {
         "source": str(root),
         "pattern": args.pattern,
         "report": rep.as_dict(),
-        "per_participant_utterances": dict(rep.participants),
-        "per_participant_events": {},
+        "per_participant": per,
+        "gloss_vocabulary": {
+            "n_types": len(vocab),
+            "n_tokens": sum(vocab.values()),
+            "hapax_types": sum(1 for v in vocab.values() if v == 1),
+            "top_20": vocab.most_common(20),
+        },
         "sample_utterance": None,
     }
-    per: dict[str, dict[str, int]] = {}
-    for u in utterances:
-        d = per.setdefault(u.participant or "(unknown)", {"utterances": 0, "events": 0})
-        d["utterances"] += 1
-        d["events"] += len(u.non_manuals)
-    out["per_participant_events"] = per
     if utterances:
-        s = utterances[0]
+        u = next((x for x in utterances if x.non_manuals), utterances[0])
         out["sample_utterance"] = {
-            "id": s.utterance_id,
-            "participant": s.participant,
-            "fields": s.fields,
+            "id": u.utterance_id,
+            "participant": u.participant,
+            "collection": u.collection,
+            "start_frame": u.start_frame,
+            "end_frame": u.end_frame,
+            "translation": u.translation[:160],
+            "glosses": [g for g, _a, _b in u.glosses[:8]],
             "non_manuals": [
                 {
                     "label": n.label,
                     "value": n.value,
-                    "marker": n.marker,
+                    "markers": n.markers,
                     "start_frame": n.start_frame,
                     "end_frame": n.end_frame,
                 }
-                for n in s.non_manuals[:5]
+                for n in u.non_manuals[:6]
             ],
         }
 
@@ -87,16 +99,30 @@ def main() -> int:
     OUT.write_text(json.dumps(out, indent=2) + "\n")
 
     r = rep.as_dict()
-    print(f"files        : {r['files']}")
-    print(f"utterances   : {r['utterances']}")
-    print(f"non-manual events : {r['non_manual_events']}")
-    print(f"mapped       : {r['mapped_events']}  (fraction {r['mapped_fraction']})")
-    print(f"unmapped label types: {r['n_unmapped_label_types']}")
-    print(f"participants : {dict(rep.participants)}")
-    if rep.unmapped_labels:
-        print("\ntop unmapped labels (these are REAL annotations we cannot use yet):")
-        for label, n in rep.unmapped_labels.most_common(12):
-            print(f"  {n:5d}  {label}")
+    print(f"files            : {r['files']}   collections: {r['collections']}")
+    print(f"utterances       : {r['utterances']}   signs: {r['signs']}")
+    print(
+        f"non-manual events: {r['non_manual_events']}"
+        f"  (frame-aligned: {r['events_with_frame_alignment']})"
+    )
+    print(
+        f"mapped to a marker: {r['events_mapped_to_a_marker']}  (fraction {r['mapped_fraction']})"
+    )
+    print(f"unmapped pairs   : {r['n_unmapped_pairs']}")
+    print(f"participants     : {dict(rep.participants.most_common())}")
+    print(f"gloss vocabulary : {len(vocab)} types / {sum(vocab.values())} tokens")
+    if rep.events_by_marker:
+        print("\nevents by marker:")
+        for m, n in rep.events_by_marker.most_common(14):
+            print(f"  {n:6d}  {m}")
+    if rep.unmapped:
+        print("\nunmapped label :: value  (REAL annotations this vocabulary cannot express):")
+        for label, n in rep.unmapped.most_common(12):
+            print(f"  {n:6d}  {label}")
+    if rep.unparseable:
+        print("\nUNPARSEABLE FILES:")
+        for f in rep.unparseable:
+            print(f"  {f}")
     print(f"\nwrote {OUT.relative_to(REPO)}")
 
     if args.min_utterances and rep.utterances < args.min_utterances:

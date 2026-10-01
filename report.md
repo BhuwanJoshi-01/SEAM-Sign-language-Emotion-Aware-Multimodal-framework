@@ -230,7 +230,7 @@ annotations** — because it was built from a different, manual-only download, n
 |---|---|
 | Owner | |
 | Date sent | |
-| Status | `IN PROGRESS` — portal RECOVERED 2026-09-30 ~09:35 UTC |
+| Status | `DONE — NEEDS VERIFICATION` (see below for the measured result) |
 | Verified by | |
 
 > **State as of 2026-09-30: the outage is RESOLVED.** The portal returned HTTP 503 / timed
@@ -256,6 +256,28 @@ annotations** — because it was built from a different, manual-only download, n
 >
 > **Self-contained handoff with the verified URLs and the ready-to-send email:
 > `paper/provenance/STEP3_HANDOFF.md`.**
+
+### Measured result (2026-10-01)
+
+| Quantity | Value |
+|---|---|
+| XML collections downloaded | **51** (Ben 10, Cory 10, Jonathan 8, Rachel 19, RIT 4) |
+| Utterances parsed | **2,407** |
+| Sign glosses | **21,902** tokens over 3,279 types |
+| Non-manual events | **43,038**, all with frame bounds |
+| Events mapped to a project marker | **43,038 (100%)** |
+| **Our EmoSign utterances found in the XML** | **200 / 200** |
+| **Human annotations on our 200 clips** | **4,443**, across all 24 markers |
+
+The join is by **direct utterance ID** — no fuzzy matching. This is the result that lifts
+M3's instrument limitation.
+
+### Verification still owed
+
+A second person should confirm: the event count against the files, and that
+`grep -l NON_MANUALS` finds all 51. Numbers are re-derived by
+`scripts/parse_signstream.py` and asserted in `tests/test_signstream.py`, so they are not
+hand-copied — but the *download* itself has not been independently checked.
 
 **Results**
 

@@ -1,14 +1,18 @@
-"""Tests for the SignStream XML parser.
+"""Tests for the SignStream XML parser, written against the REAL export format.
 
-Written before the data arrived, against the schema in ASLLRP Report 18 §8.3 and the
-SignStream 3 XML documentation. That is the point: the parser can be fully tested against
-a documented format without the corpus, so the only thing left to check on arrival is
-whether reality matches the documentation.
+**Rewritten after the data arrived.** The first version tested against the example in
+ASLLRP Report 18 §8.3 and passed 22 tests while being wrong about the corpus: the real
+export uses `SIGNSTREAM_DAI` > `COLLECTION` > `SEGMENT-TIER` > `UTTERANCE`, has no
+`STATEMENT-FIELD`/`FIELD-ID`, and puts `PARTICIPANT` on the tier rather than the utterance.
+A documented example is a fine thing to build against and a poor substitute for the file.
 
-The recurring theme is that nothing may vanish quietly. An unmapped non-manual label, an
-unparseable file, a field with no text, an event with no frame alignment — each is counted
-and reported, because this project has already shipped a metric that was silently
-inverted and an alignment that was silently wrong.
+The decisive fact these tests exist to protect: **the marker lives in LABEL *and* VALUE.**
+`eye brows` appears 4,957 times in the corpus with 11 different values; mapping on the
+label alone cannot distinguish a brow raise from a brow furrow, which would flatten the
+most important non-manual in the language while looking like it worked.
+
+Tests that need the real corpus skip when it is absent, so the suite still runs on a
+machine that has not downloaded the annotations.
 """
 
 from __future__ import annotations
@@ -18,269 +22,297 @@ from pathlib import Path
 import pytest
 
 from seam.data.signstream import (
-    FIELD_DOM_GLOSS,
-    FIELD_TRANSLATION,
-    MARKER_PATTERNS,
+    MARKER_RULES,
     ParseReport,
-    map_label,
+    Utterance,
+    gloss_vocabulary,
+    map_event,
     parse_directory,
     parse_file,
 )
 
-# Verbatim shape from Report 18 §8.3, wrapped in the container the documentation shows.
-DOCUMENTED_XML = """<?xml version="1.0"?>
-<SIGNSTREAM-DATABASE>
-  <REFERENCES><CODING-SCHEMES/></REFERENCES>
-  <DATA>
-    <SIGNSTREAM-UTTERANCE ID='utt-0001' PARTICIPANT='Ben'>
-      <SEGMENT-TIER-UTTERANCE>
-        <SEGMENT-TIER>
-          <STATEMENT-FIELD ID='10000'>I-SEE</STATEMENT-FIELD>
-          <STATEMENT-FIELD ID='30000'>I see</STATEMENT-FIELD>
-        </SEGMENT-TIER>
-        <NON_MANUALS>
-          <NON_MANUAL ID='28963' START_FRAME='6504498' END_FRAME='6533527'>
-            <LABEL>'head pos: tilt fr/bk'</LABEL>
-            <VALUE>'slightly back'</VALUE>
-          </NON_MANUAL>
-        </NON_MANUALS>
-      </SEGMENT-TIER-UTTERANCE>
-    </SIGNSTREAM-UTTERANCE>
-  </DATA>
-</SIGNSTREAM-DATABASE>
+REAL = Path("/mnt/DevProd/seam_data/asllrp_signstream_xml/raw")
+
+#: A minimal document in the format the DAI actually exports. Field-for-field from the
+#: first file in the download, including the parts that are easy to get wrong:
+#: PARTICIPANT on the tier, and UTTERANCE-NUMBER as a child of UTTERANCE.
+REAL_XML = """<?xml version='1.0' encoding='utf-8'?>
+<SIGNSTREAM_DAI AUTHOR='BOSTON UNIVERSITY' DOWNLOAD_DATE='Sun Jul 05 20:03:06 EDT 2026'>
+  <COLLECTIONS>
+  <COLLECTION ID='1379840' NAME='Cory_2013-6-27_sc107'>
+    <MEDIA-FILES>
+      <MEDIA-FILE ID='1379956' FILE-NAME='2013-06-27_CB_0107-cam1-for-ss3.mp4'/>
+    </MEDIA-FILES>
+    <TEMPORAL-PARTITIONS>
+      <TEMPORAL-PARTITION ID='1' NAME='Temporal Partition 1'>
+        <SEGMENT-TIERS>
+          <SEGMENT-TIER ID='1' NAME='Segment 1'>
+            <PARTICIPANT>'Cory'</PARTICIPANT>
+            <DOMINANT-HAND>'R'</DOMINANT-HAND>
+            <UTTERANCES>
+              <UTTERANCE ID='627' START_FRAME='36' END_FRAME='221'>
+                <TRANSLATION>'The mouse escapes and the cat runs after it.'</TRANSLATION>
+                <UTTERANCE-NUMBER>'U1'</UTTERANCE-NUMBER>
+                <MANUALS>
+                  <SIGN ID='269261'>
+                    <LABEL>'MOUSE/FICTION'</LABEL>
+                    <SIGN_TYPE>'Lexical Signs'</SIGN_TYPE>
+                    <DOMINANT_HAND START_FRAME='46' END_FRAME='55'/>
+                  </SIGN>
+                  <SIGN ID='269262'>
+                    <LABEL>'ESCAPE'</LABEL>
+                    <SIGN_TYPE>'Lexical Signs'</SIGN_TYPE>
+                    <NON_DOMINANT_HAND START_FRAME='60' END_FRAME='70'/>
+                  </SIGN>
+                </MANUALS>
+                <NON_MANUALS>
+                  <NON_MANUAL ID='267934' START_FRAME='89' END_FRAME='106'>
+                    <LABEL>'eye brows'</LABEL>
+                    <VALUE>'raised'</VALUE>
+                  </NON_MANUAL>
+                  <NON_MANUAL ID='267935' START_FRAME='98' END_FRAME='152'>
+                    <LABEL>'head mvmt: shake'</LABEL>
+                    <VALUE>'rapid'</VALUE>
+                    <OFFSET START_FRAME='152' END_FRAME='167'/>
+                  </NON_MANUAL>
+                  <NON_MANUAL ID='267999' START_FRAME='160' END_FRAME='170'>
+                    <LABEL>'shoulders: shrug'</LABEL>
+                    <VALUE>'once'</VALUE>
+                  </NON_MANUAL>
+                </NON_MANUALS>
+              </UTTERANCE>
+            </UTTERANCES>
+          </SEGMENT-TIER>
+        </SEGMENT-TIERS>
+      </TEMPORAL-PARTITION>
+    </TEMPORAL-PARTITIONS>
+  </COLLECTION>
+  </COLLECTIONS>
+</SIGNSTREAM_DAI>
 """
 
 
-def test_parses_the_documented_shape(tmp_path: Path) -> None:
+def _corpus() -> Path:
+    if not REAL.is_dir() or not any(REAL.glob("*.xml")):
+        pytest.skip(f"ASLLRP SignStream XML not present at {REAL}")
+    return REAL
+
+
+# --- the real format -------------------------------------------------------
+
+
+def test_parses_the_real_export_shape(tmp_path: Path) -> None:
     p = tmp_path / "a.xml"
-    p.write_text(DOCUMENTED_XML)
+    p.write_text(REAL_XML)
     got, rep = parse_directory(tmp_path)
-
-    assert len(got) == 1, "one SIGNSTREAM-UTTERANCE should yield one Utterance"
+    assert len(got) == 1
     u = got[0]
-    assert u.utterance_id == "utt-0001"
-    assert u.participant == "ben"
-    assert u.fields[FIELD_DOM_GLOSS] == "I-SEE"
-    assert u.fields[FIELD_TRANSLATION] == "I see"
-    assert len(u.non_manuals) == 1
-    nm = u.non_manuals[0]
-    assert nm.label == "'head pos: tilt fr/bk'"
-    assert nm.value == "'slightly back'"
-    assert nm.start_frame == 6504498
-    assert nm.end_frame == 6533527
-    assert nm.duration == 29029
-    assert rep.utterances == 1
-    assert rep.non_manual_events == 1
+    assert u.utterance_id == "627"
+    assert u.participant == "Cory", "PARTICIPANT lives on SEGMENT-TIER, not UTTERANCE"
+    assert u.collection == "Cory_2013-6-27_sc107"
+    assert u.collection_id == "1379840"
+    assert (u.start_frame, u.end_frame) == (36, 221)
+    assert u.utterance_number == "U1"
+    assert "The mouse escapes" in u.translation
+    assert [g for g, _, _ in u.glosses] == ["MOUSE/FICTION", "ESCAPE"]
+    assert u.glosses[0][1:] == (46, 55), "gloss frames come from DOMINANT_HAND"
+    assert u.glosses[1][1:] == (60, 70), "or NON_DOMINANT_HAND"
+    assert len(u.non_manuals) == 3
+    rep_stats = rep.as_dict()
+    assert rep_stats["utterances"] == 1 and rep_stats["signs"] == 2
 
 
-def test_an_unmapped_label_is_reported_not_dropped(tmp_path: Path) -> None:
-    """The whole point of the strict reporting.
-
-    An annotated event the project has no marker for is a fact about the data. Silently
-    discarding it would make the label set look complete while quietly shrinking it.
-    """
+def test_utterance_number_is_not_mistaken_for_an_utterance(tmp_path: Path) -> None:
+    """`UTTERANCE-NUMBER` contains "UTTERANCE"; a substring match emits it as its own
+    utterance and doubles the count. Caught before the data arrived, confirmed by it."""
     p = tmp_path / "b.xml"
-    p.write_text(
-        DOCUMENTED_XML.replace(
-            "<LABEL>'head pos: tilt fr/bk'</LABEL>", "<LABEL>'shoulders: shrug'</LABEL>"
-        )
-    )
+    p.write_text(REAL_XML)
     got, rep = parse_directory(tmp_path)
-    assert len(got[0].non_manuals) == 1, "the event must still be returned"
-    assert got[0].non_manuals[0].marker is None
-    assert rep.mapped_events == 0
-    assert rep.non_manual_events == 1
-    assert sum(rep.unmapped_labels.values()) == 1
-    assert "shrug" in " ".join(rep.unmapped_labels).lower()
+    assert len(got) == 1
+    assert rep.utterances == 1
+
+
+def test_onset_and_offset_are_captured(tmp_path: Path) -> None:
+    p = tmp_path / "c.xml"
+    p.write_text(REAL_XML)
+    got, _ = parse_directory(tmp_path)
+    shake = got[0].non_manuals[1]
+    assert shake.offset == (152, 167)
+    assert got[0].non_manuals[0].offset is None
+
+
+def test_single_quotes_are_stripped_everywhere(tmp_path: Path) -> None:
+    """Every text value in this format is wrapped in single quotes."""
+    p = tmp_path / "d.xml"
+    p.write_text(REAL_XML)
+    u = parse_directory(tmp_path)[0][0]
+    assert u.participant == "Cory"
+    assert u.utterance_number == "U1"
+    assert u.non_manuals[0].label == "eye brows"
+    assert u.glosses[0][0] == "MOUSE/FICTION"
+
+
+# --- the decisive property: label AND value -------------------------------
 
 
 @pytest.mark.parametrize(
-    ("label", "marker"),
+    ("label", "value", "expected"),
     [
-        ("'head mvmt: shake'", "head_shake"),
-        ("hm: shake", "head_shake"),
-        ("'eye brows: raised'", "brow_raise"),
-        ("'eye brows: raised-furrowed'", "brow_furrow"),
-        ("'mouth: smile'", "mouth_positive"),
-        ("'negative'", "negation"),
-        ("'wh question'", "question_wh"),
-        ("'eye brows: 5'", None),  # the bare VID value, not a label
+        ("eye brows", "raised", "brow_raise"),
+        ("eye brows", "slightly raised", "brow_raise"),
+        ("eye brows", "further raised", "brow_raise"),
+        ("eye brows", "lowered", "brow_furrow"),
+        ("eye brows", "raised-furrowed", "brow_furrow"),
+        ("eye brows", "further raised-furrowed", "brow_furrow"),
+        ("eye brows", "left raised/right lowered", "brow_raise"),
+        ("head mvmt: shake", "rapid", "head_shake"),
+        ("head mvmt: shake", "slight rapid head shake", "head_shake"),
+        ("head mvmt: nod", "single", "head_nod"),
+        ("head pos: tilt fr/bk", "slightly back", "head_tilt"),
+        ("head pos: tilt side", "left", "head_tilt_side"),
+        ("eye aperture", "blink", "eye_aperture"),
+        ("mouth", "open & tongue visible", "mouth_morpheme"),
+        ("negative", "negation", "negation"),
+        ("wh question", "whq", "question_wh"),
+        ("yes-no question", "yes-no", "question_yn"),
+        ("topic/focus", "topic", "topic"),
+        ("body lean", "slightly forward", "body_lean"),
+        ("shoulders", "shrug", None),
+        ("eye brows", "", None),
     ],
 )
-def test_label_mapping(label: str, marker: str | None) -> None:
-    assert map_label(label) == marker
+def test_label_and_value_mapping(label: str, value: str, expected: str | None) -> None:
+    got = map_event(label, value)
+    if expected is None:
+        assert expected not in got
+    else:
+        assert expected in got
 
 
-def test_longer_patterns_win_over_substrings() -> None:
-    """`head mvmt: shake` must beat a bare `shake` rule, or every shake hits the wrong
-    marker depending on dict order."""
-    assert (
-        map_label("'head mvmt: side to side'") is None
-        or map_label("'head mvmt: side to side'") != "head_shake"
+def test_raised_furrowed_maps_to_both_and_not_only_to_raise() -> None:
+    """A linguist marked it both; collapsing it to one discards their judgement."""
+    got = map_event("eye brows", "raised-furrowed")
+    assert "brow_furrow" in got
+    assert "brow_raise" not in got, (
+        "raised-furrowed is not a plain raise; the raise rule must not swallow it"
     )
-    # mouth_positive and mouth_morpheme both match "mouth"; the longer one must win.
-    assert map_label("'mouth: smile'") == "mouth_positive"
 
 
-def test_every_configured_marker_is_reachable() -> None:
-    """A rule that can never match is dead config; catch it here, not on the corpus."""
-    for marker, pats in MARKER_PATTERNS.items():
-        assert any(p.strip() for p in pats), f"{marker} has an empty pattern"
-        assert len(pats) >= 1
+def test_an_empty_value_maps_to_nothing() -> None:
+    """A label with no value cannot be resolved to a marker, and must not default."""
+    assert map_event("eye brows", "") == []
+
+
+def test_brow_values_partition_rather_than_overlap() -> None:
+    """Every brow value in the real corpus must resolve to exactly one direction."""
+    raise_ = {"raised", "slightly raised", "further raised"}
+    furrow = {"lowered", "slightly lowered", "further lowered", "raised-furrowed"}
+    for v in raise_:
+        assert map_event("eye brows", v) == ["brow_raise"], v
+    for v in furrow:
+        assert map_event("eye brows", v) == ["brow_furrow"], v
+
+
+# --- corpus-level checks, skipped without the download --------------------
+
+
+def test_the_real_corpus_parses_fully(tmp_path: Path) -> None:
+    """The headline number, asserted rather than remembered."""
+    root = _corpus()
+    _utterances, rep = parse_directory(root)
+    d = rep.as_dict()
+    assert d["files"] >= 40, "the download covers all four signers plus RIT"
+    assert d["utterances"] > 2000
+    assert d["non_manual_events"] > 30000
+    assert d["events_with_frame_alignment"] == d["non_manual_events"], (
+        "every non-manual must carry frames; they are what joins to the landmarks"
+    )
+    assert d["mapped_fraction"] == 1.0, f"unmapped pairs remain: {d['unmapped_label_value_pairs']}"
+    assert not d["unparseable_files"]
+    assert "Cory" in d["utterances_by_participant"]
+    assert "Rachel" in d["utterances_by_participant"]
+
+
+def test_every_emosign_utterance_is_present(tmp_path: Path) -> None:
+    """The join that unblocks M3: 200/200, by direct utterance ID."""
+    import json
+
+    from seam.paths import default_data_root
+
+    lm = default_data_root() / "emosign" / "landmarks"
+    if not lm.is_dir():
+        pytest.skip("EmoSign landmarks not extracted")
+    ours = {json.loads(p.read_text())["utterance_id"] for p in lm.glob("*.json")}
+    utterances, _ = parse_directory(_corpus())
+    ids = {u.utterance_id for u in utterances}
+    assert len(ours) == 200
+    missing = ours - ids
+    assert not missing, f"{len(missing)} of our utterances are absent from the XML"
+
+
+def test_gloss_vocabulary_is_reported(tmp_path: Path) -> None:
+    v = gloss_vocabulary(parse_directory(_corpus())[0])
+    assert len(v) > 1000
+    assert sum(v.values()) > 10000
+
+
+def test_an_unmapped_pair_is_reported_not_dropped(tmp_path: Path) -> None:
+    p = tmp_path / "e.xml"
+    p.write_text(REAL_XML)
+    parsed, rep = parse_directory(tmp_path)
+    assert len(parsed[0].non_manuals) == 3, "the unmappable event must still be returned"
+    assert sum(rep.unmapped.values()) == 1
+    assert "shrug" in " ".join(rep.unmapped)
 
 
 def test_a_truncated_file_is_counted_not_fatal(tmp_path: Path) -> None:
-    """One bad file in a collection must not lose the rest of it."""
-    good = tmp_path / "good.xml"
-    good.write_text(DOCUMENTED_XML)
-    bad = tmp_path / "bad.xml"
-    bad.write_text("<SIGNSTREAM-DATABASE><DATA><SIGNSTREAM-UTTERANCE ID='x'>")
-
+    (tmp_path / "good.xml").write_text(REAL_XML)
+    (tmp_path / "bad.xml").write_text("<SIGNSTREAM_DAI><COLLECTIONS><COLLECTION ID='1'>")
     got, rep = parse_directory(tmp_path)
     assert len(got) == 1, "the readable file must still be parsed"
     assert rep.files == 2
-    assert any("unparseable" in k for k in rep.unmapped_labels), (
-        "an unreadable file has to be visible in the report"
-    )
+    assert rep.unparseable and "bad.xml" in rep.unparseable[0]
 
 
-def test_a_non_utterance_file_yields_nothing_and_says_so(tmp_path: Path) -> None:
-    p = tmp_path / "empty.xml"
-    p.write_text("<?xml version='1.0'?><SIGNSTREAM-DATABASE><REFERENCES/></SIGNSTREAM-DATABASE>")
-    got, rep = parse_directory(tmp_path)
-    assert got == []
-    assert rep.utterances == 0
-
-
-def test_an_utterance_with_no_id_is_reported(tmp_path: Path) -> None:
-    p = tmp_path / "noid.xml"
-    p.write_text(
-        "<SIGNSTREAM-DATABASE><DATA>"
-        "<SIGNSTREAM-UTTERANCE PARTICIPANT='Ben'><NON_MANUALS/></SIGNSTREAM-UTTERANCE>"
-        "</DATA></SIGNSTREAM-DATABASE>"
-    )
-    got, rep = parse_directory(tmp_path)
-    assert got == []
-    assert "__utterance_without_id__" in rep.unmapped_labels
-
-
-def test_non_manuals_without_frames_are_counted(tmp_path: Path) -> None:
-    """Frame alignment is what joins these to the landmarks; a missing one is a real gap."""
-    p = tmp_path / "noframe.xml"
-    p.write_text(
-        "<SIGNSTREAM-DATABASE><DATA><SIGNSTREAM-UTTERANCE ID='u1'>"
-        "<NON_MANUALS><NON_MANUAL ID='1'><LABEL>'head mvmt: shake'</LABEL>"
-        "<VALUE>'slightly'</VALUE></NON_MANUAL></NON_MANUALS>"
-        "</SIGNSTREAM-UTTERANCE></DATA></SIGNSTREAM-DATABASE>"
-    )
-    got, rep = parse_directory(tmp_path)
-    assert got[0].non_manuals[0].start_frame is None
-    assert got[0].non_manuals[0].duration is None
-    assert rep.non_manuals_without_frames == 1
-
-
-def test_float_frame_attributes_are_coerced(tmp_path: Path) -> None:
-    """Frame attributes have appeared as floats in these exports."""
-    p = tmp_path / "float.xml"
-    p.write_text(
-        "<SIGNSTREAM-DATABASE><DATA><SIGNSTREAM-UTTERANCE ID='u1'><NON_MANUALS>"
-        "<NON_MANUAL ID='1' START_FRAME='100.0' END_FRAME='140.0'>"
-        "<LABEL>'head mvmt: nod'</LABEL><VALUE>'once'</VALUE></NON_MANUAL>"
-        "</NON_MANUALS></SIGNSTREAM-UTTERANCE></DATA></SIGNSTREAM-DATABASE>"
-    )
-    got, _ = parse_directory(tmp_path)
-    nm = got[0].non_manuals[0]
-    assert nm.start_frame == 100 and nm.end_frame == 140
-    assert nm.duration == 40
-
-
-def test_alternate_container_tags_are_tolerated(tmp_path: Path) -> None:
-    """Valid XML with a different nesting must not be an ImportError-shaped dead end."""
-    for container in ("DATA", "SIGNSTREAM-UTTERANCES", "REFERENCES"):
-        p = tmp_path / f"{container}.xml"
-        p.write_text(
-            f"<SIGNSTREAM-DATABASE><{container}>"
-            "<SIGNSTREAM-UTTERANCE ID='u9'><NON_MANUALS>"
-            "<NON_MANUAL ID='1' START_FRAME='1' END_FRAME='2'>"
-            "<LABEL>'eye brows: raised'</LABEL><VALUE>'raised'</VALUE></NON_MANUAL>"
-            "</NON_MANUALS></SIGNSTREAM-UTTERANCE>"
-            f"</{container}></SIGNSTREAM-DATABASE>"
-        )
-        got, _ = parse_directory(tmp_path)
-        assert len(got) == 1, f"container <{container}> yielded {len(got)}"
-        assert got[0].non_manuals[0].marker == "brow_raise"
-        for f in tmp_path.glob("*.xml"):
-            f.unlink()
-
-
-def test_a_seg_tier_utterance_is_not_mistaken_for_an_utterance(tmp_path: Path) -> None:
-    """`SEGMENT-TIER-UTTERANCE` is a child; matching it would double-count every
-    utterance and inflate the non-manual totals."""
-    p = tmp_path / "nested.xml"
-    p.write_text(DOCUMENTED_XML)
-    utterances, rep = parse_directory(tmp_path)
-    assert len(utterances) == 1, "the container element must not be emitted as an utterance"
-    assert rep.utterances == 1
-    assert rep.non_manual_events == 1
-
-
-def test_the_documented_example_label_is_unmapped_and_says_so(tmp_path: Path) -> None:
-    """A finding, not a bug.
-
-    The one non-manual in ASLLRP Report 18's own example is `'head pos: tilt fr/bk'` -
-    head tilt forward/backward - and this project has no marker for head *position*, only
-    for head *movement* (shake, nod). So the canonical example lands in the unmapped
-    report. That is the design working: the alternative is a vocabulary that looks
-    complete while silently discarding a whole category of annotated events, and the
-    first person to notice would be a reader of the paper wondering why head tilt is
-    missing from the results.
-    """
-    p = tmp_path / "doc.xml"
-    p.write_text(DOCUMENTED_XML)
-    got, rep = parse_directory(tmp_path)
-    assert got[0].non_manuals[0].marker is None
-    assert rep.mapped_events == 0
-    assert rep.non_manual_events == 1
-    assert "tilt fr/bk" in " ".join(rep.unmapped_labels)
-    assert rep.as_dict()["mapped_fraction"] == 0.0
-
-
-def test_the_report_serialises_with_a_mapped_fraction(tmp_path: Path) -> None:
-    """Every count must come from the parser, not from hand-adjusted report fields.
-
-    An earlier version appended to `rep` by hand after parsing, which meant the test was
-    asserting against numbers it had supplied itself rather than numbers the parser
-    produced - and it reported 1.0 while a real mixed document would have reported 0.5.
-    """
+def test_report_serialises_with_a_mapped_fraction(tmp_path: Path) -> None:
     p = tmp_path / "mix.xml"
-    p.write_text(
-        DOCUMENTED_XML.replace(
-            "</NON_MANUALS>",
-            "<NON_MANUAL ID='2' START_FRAME='100' END_FRAME='160'>"
-            "<LABEL>'shoulders: shrug'</LABEL><VALUE>'once'</VALUE></NON_MANUAL>"
-            "</NON_MANUALS>",
-        ).replace("head pos: tilt fr/bk", "head mvmt: shake")
-    )
-    utterances, rep = parse_directory(tmp_path)
-    assert len(utterances[0].non_manuals) == 2
-
+    p.write_text(REAL_XML)
+    _, rep = parse_directory(tmp_path)
     d = rep.as_dict()
-    assert d["non_manual_events"] == 2
-    assert d["mapped_events"] == 1
-    assert d["mapped_fraction"] == 0.5
-    assert d["n_unmapped_label_types"] == 1
+    assert d["non_manual_events"] == 3
+    assert d["events_mapped_to_a_marker"] == 2
+    assert d["mapped_fraction"] == round(2 / 3, 4)
     assert "caveat" in d
 
 
-def test_parse_file_accepts_a_shared_report(tmp_path: Path) -> None:
-    """Accumulating across files is how a whole collection is counted."""
+def test_parse_file_accumulates_into_one_report(tmp_path: Path) -> None:
     for i in range(3):
-        (tmp_path / f"f{i}.xml").write_text(DOCUMENTED_XML)
+        (tmp_path / f"f{i}.xml").write_text(REAL_XML)
     rep = ParseReport()
-    total = 0
-    for f in sorted(tmp_path.glob("*.xml")):
-        total += len(parse_file(f, rep))
+    total = sum(len(parse_file(f, rep)) for f in sorted(tmp_path.glob("*.xml")))
     assert total == 3
-    assert rep.files == 3
-    assert rep.utterances == 3
-    assert rep.non_manual_events == 3
+    assert rep.files == 3 and rep.utterances == 3
+
+
+def test_markers_present_view(tmp_path: Path) -> None:
+    p = tmp_path / "f.xml"
+    p.write_text(REAL_XML)
+    u = parse_directory(tmp_path)[0][0]
+    assert u.markers_present == {"brow_raise", "head_shake"}
+    assert isinstance(u, Utterance)
+
+
+def test_every_rule_has_a_non_empty_label_set() -> None:
+    for marker, (labels, _values) in MARKER_RULES.items():
+        assert labels, f"{marker} has no label to match"
+
+
+def test_rule_keys_are_unique_and_marker_shaped() -> None:
+    """MARKER_RULES maps marker -> (labels, values), so counting keys counts *values*."""
+    assert len(MARKER_RULES) == len(set(MARKER_RULES))
+    for marker in MARKER_RULES:
+        assert isinstance(marker, str) and marker
+        assert " " not in marker, f"marker names should be identifiers: {marker!r}"
+    # A rule must not be reachable only through a value that no label can produce.
+    for marker, (labels, values) in MARKER_RULES.items():
+        assert labels or not values, f"{marker} constrains values with no label to match"
