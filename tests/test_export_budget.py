@@ -412,3 +412,48 @@ def test_non_performance_governor_is_not_reportable() -> None:
     ok, why = bench.load_verdict(facts)
     assert not ok
     assert "powersave" in why
+
+
+def test_load_verdict_prefers_reported_load_over_the_live_machine() -> None:
+    """`load_verdict` must be hermetic when the caller supplies its own facts.
+
+    It used to call `os.getloadavg()` unconditionally, so a fully-specified synthetic
+    facts dict still got a verdict driven by whatever the host was doing. That made two
+    tests above pass only while the machine was idle, and fail under the load of the
+    suite itself - a green run that depended on the weather. The facts must win.
+    """
+    from seam.eval import bench
+
+    idle = {"cpu_count": "16", "mem_available_kb": str(8 * 1024 * 1024), "load_1m": "0.10"}
+    ok, why = bench.load_verdict(idle)
+    assert ok, f"a quiet reported load must be reportable regardless of the real host: {why}"
+    assert "reported" in why or ok  # source is named when it rejects
+
+    busy = dict(idle, load_1m="14.00")
+    ok2, why2 = bench.load_verdict(busy)
+    assert not ok2
+    assert "reported" in why2, "the message must say where the load came from"
+
+
+def test_load_verdict_falls_back_to_the_live_machine_when_unsupplied() -> None:
+    """With no load in the facts it must still work, and must say that it read live."""
+    from seam.eval import bench
+
+    ok, why = bench.load_verdict({"cpu_count": "16", "mem_available_kb": str(8 * 1024 * 1024)})
+    assert isinstance(ok, bool) and why
+    if not ok:
+        assert "live" in why
+
+
+def test_recorded_loadavg_strings_are_honoured() -> None:
+    """Existing bench artifacts store "loadavg" as "1m 5m 15m"; they must still judge."""
+    from seam.eval import bench
+
+    facts = {
+        "cpu_count": "16",
+        "mem_available_kb": str(8 * 1024 * 1024),
+        "loadavg": "0.20 0.30 0.40",
+        "cpu_governor": "performance",
+    }
+    ok, why = bench.load_verdict(facts)
+    assert ok, f"a quiet recorded loadavg must not be overridden by the live host: {why}"

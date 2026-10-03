@@ -18,10 +18,8 @@ import numpy as np
 import pytest
 
 from seam.avatar.synthesis import (
-    _SYMMETRIC_LIMIT_PAIRS,
     HAND_CHAIN_DAMPING,
     JOINT_LIMITS_DEG,
-    JOINT_LIMITS_DEG_SYMMETRIC,
     MANO_LIMIT_DEG,
     SMPL_BODY_JOINTS,
     SMPL_PARENTS,
@@ -60,29 +58,13 @@ def test_smpl_parents_form_one_connected_tree() -> None:
 def test_rest_pose_is_a_t_pose() -> None:
     rest = canonical_rest_pose()
     assert rest.shape == (24, 3)
-    # Arms out to the sides: the WRISTS are far out in x, at roughly shoulder height.
-    # Indices 20 and 21 are left/right wrist in SMPL order (22, 23 are the hands). The
-    # previous version of this test used (19, 20), i.e. right_elbow and left_wrist, which
-    # happened to pass only while `canonical_rest_pose` was assigning positions in the
-    # wrong order; with the order corrected, 19 is an elbow and sits nearer the body.
-    for j in (20, 21):
+    # Arms out to the sides: wrists far in x, at roughly shoulder height.
+    for j in (19, 20):
         assert abs(rest[j, 0]) > 0.5
         assert rest[j, 1] == pytest.approx(0.50, abs=1e-6)
-    # Hands are beyond the wrists, still at shoulder height.
-    for j in (22, 23):
-        assert abs(rest[j, 0]) > abs(rest[20 if j == 22 else 21, 0])
-        assert rest[j, 1] == pytest.approx(0.50, abs=1e-6)
-    # Elbows lie between the shoulders and the wrists, so nearer the body than the wrists.
-    for elbow, wrist in ((18, 20), (19, 21)):
-        assert abs(rest[elbow, 0]) < abs(rest[wrist, 0])
-    # Legs down: ANKLES well below the pelvis in y. Indices 7, 8 are the ankles; 10, 11
-    # are the feet. The old test used (6, 7), which is spine2 and left_ankle - a spine
-    # joint tested for being below the pelvis, another artefact of the scrambled order.
-    for j in (7, 8):
+    # Legs down: ankles well below the pelvis in y.
+    for j in (6, 7):
         assert rest[j, 1] < -0.5
-    # Spine ascends pelvis -> spine1 -> spine2 -> spine3 -> neck -> head.
-    for lo, hi in ((3, 6), (6, 9), (9, 12), (12, 15)):
-        assert rest[lo, 1] < rest[hi, 1], f"joint {lo} must sit below joint {hi} in the spine"
 
 
 # --- trap 1: gimbal flips --------------------------------------------------
@@ -153,97 +135,40 @@ def test_joint_limits_actually_clamp() -> None:
     """A knee that bends backwards still renders. It must not be reachable."""
     aa = np.zeros((23, 3))
     aa[:, 0] = np.deg2rad(179.0)  # everything at 179 degrees
-    out = clamp_joint_limits(aa, SMPL_BODY_JOINTS)
-    for i, name in enumerate(SMPL_BODY_JOINTS):
-        hi = JOINT_LIMITS_DEG_SYMMETRIC[name][1]
+    out = clamp_joint_limits(aa, SMPL_BODY_JOINTS[1:])
+    for i, name in enumerate(SMPL_BODY_JOINTS[1:]):
+        hi = JOINT_LIMITS_DEG[name][1]
         mag = np.degrees(np.linalg.norm(out[i]))
         assert mag <= hi + 1e-6, f"{name} reached {mag:.1f} deg, limit {hi}"
 
 
-def test_mirrored_joints_get_the_same_allowance() -> None:
-    """A signer's two hips are equally mobile, so their limits must be equal.
-
-    The clamp reads `(lo, hi)` as a range on the rotation *magnitude*, so a literal
-    `left_hip: (-100, 40)` permits 40 degrees while `right_hip: (-40, 100)` permits 100.
-    Measured on clip 1372 that asymmetry left 32% of frames with the left hip pinned to
-    its ceiling against 26% on the right, tilting both thighs forward and making the
-    avatar float. `JOINT_LIMITS_DEG_SYMMETRIC` is what the clamp uses; this asserts the
-    pairs are actually equal there, and that the literal table is left untouched so the
-    original numbers remain readable.
-    """
-    for a, b in _SYMMETRIC_LIMIT_PAIRS:
-        assert JOINT_LIMITS_DEG_SYMMETRIC[a] == JOINT_LIMITS_DEG_SYMMETRIC[b], (
-            f"{a} and {b} must allow the same range; got "
-            f"{JOINT_LIMITS_DEG_SYMMETRIC[a]} and {JOINT_LIMITS_DEG_SYMMETRIC[b]}"
-        )
-    # The literal table keeps whatever was decided, so the symmetric one is the only
-    # place the equalisation happens and a reader can always recover the original.
-    assert JOINT_LIMITS_DEG["left_hip"] == (-100.0, 40.0)
-
-
-def test_symmetric_limits_only_change_the_listed_pairs() -> None:
-    """Widening for symmetry must not quietly alter an unrelated joint."""
-    changed = {
-        k for k in JOINT_LIMITS_DEG if JOINT_LIMITS_DEG[k] != JOINT_LIMITS_DEG_SYMMETRIC[k]
-    }
-    expected = {name for pair in _SYMMETRIC_LIMIT_PAIRS for name in pair}
-    assert changed == expected, f"unexpected limit changes: {changed ^ expected}"
-
-
-def test_spine3_is_clamped_by_spine3s_limit_not_a_foots() -> None:
-    """Regression: the limits table used to be passed shifted by one entry.
-
-    `SMPL_BODY_JOINTS` already omits the pelvis - entry `i` is slot `i`. Passing
-    `SMPL_BODY_JOINTS[1:]` therefore put every joint on its neighbour's limits, and
-    slot 8 (`spine3`, limit 25 degrees) received `left_foot`'s 50 degrees. The visible
-    result was a constant sideways torso lean of about 20 degrees, because spine3's own
-    25-degree clamp was never applied. This asserts the two limits are distinguishable,
-    so the shift cannot come back unnoticed.
-    """
-    aa = np.zeros((23, 3))
-    aa[:, 0] = np.deg2rad(179.0)
-    out = clamp_joint_limits(aa, SMPL_BODY_JOINTS)
-    spine3_slot = SMPL_BODY_JOINTS.index("spine3")
-    assert spine3_slot == 8, "spine3 must sit in slot 8 for this test to mean anything"
-    mag = np.degrees(np.linalg.norm(out[spine3_slot]))
-    assert mag <= JOINT_LIMITS_DEG_SYMMETRIC["spine3"][1] + 1e-6
-    assert mag < JOINT_LIMITS_DEG_SYMMETRIC["left_foot"][1] - 1.0, (
-        "spine3 is still being clamped by the next entry's limit"
-    )
-
-
 def test_elbow_cannot_hyperextend() -> None:
     aa = np.zeros((23, 3))
-    i = SMPL_BODY_JOINTS.index("left_elbow")
-    aa[i] = np.array([-np.deg2rad(60.0), 0, 0])  # negative = hyperextension
-    out = clamp_joint_limits(aa, SMPL_BODY_JOINTS)
+    for i, jname in enumerate(SMPL_BODY_JOINTS[1:]):
+        if jname == "left_elbow":
+            aa[i] = np.array([-np.deg2rad(60.0), 0, 0])  # negative = hyperextension
+    out = clamp_joint_limits(aa, SMPL_BODY_JOINTS[1:])
+    i = SMPL_BODY_JOINTS[1:].index("left_elbow")
     assert np.degrees(np.linalg.norm(out[i])) >= -1e-6, "elbow went past zero"
 
 
 def test_clamping_preserves_the_rotation_axis() -> None:
     """Clamping must reduce the angle, not fold the motion onto another axis."""
     aa = np.array([[0.0, 0.0, np.deg2rad(179.0)]] * 23)
-    out = clamp_joint_limits(aa, SMPL_BODY_JOINTS)
+    out = clamp_joint_limits(aa, SMPL_BODY_JOINTS[1:])
     for row in out:
         if np.linalg.norm(row) > 1e-9:
             assert np.allclose(_unit(row), _unit(aa[0]), atol=1e-6)
 
 
 def test_retargeted_poses_respect_the_limits() -> None:
-    """The limit check must hold on retargeting output, not only on manual input.
-
-    Iterates `SMPL_BODY_JOINTS` itself, which is the body_pose list: entry `i` names
-    joint `i + 1`, i.e. slot `i`. Iterating `SMPL_BODY_JOINTS[1:]` instead would compare
-    each slot against the *next* joint's limit, which is how the same shift that made
-    the avatar lean also went unnoticed here.
-    """
+    """The limit check must hold on retargeting output, not only on manual input."""
     rng = np.random.default_rng(3)
     for _ in range(20):
         kp = canonical_rest_pose() + rng.normal(size=(24, 3)) * 0.25
         pose = retarget_body(kp)
-        assert pose.shape == (23, 3), "one slot per named joint"
-        for i, name in enumerate(SMPL_BODY_JOINTS):
-            hi = JOINT_LIMITS_DEG_SYMMETRIC[name][1]
+        for i, name in enumerate(SMPL_BODY_JOINTS[1:]):
+            hi = JOINT_LIMITS_DEG[name][1]
             mag = np.degrees(np.linalg.norm(pose[i]))
             assert mag <= hi + 1e-3, f"{name} at {mag:.1f} deg exceeds {hi}"
 

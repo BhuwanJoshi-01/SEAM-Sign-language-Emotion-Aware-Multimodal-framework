@@ -311,24 +311,14 @@ def build_app() -> Any:
         page = web / "index.html"
         if not page.is_file():
             return HTMLResponse("<h1>SEAM</h1><p>web/index.html not found</p>", 404)
-        # The UI is edited by hand and served straight off disk, so a stale browser
-        # copy is the default outcome without an explicit no-store. During the M7
-        # study a cached page would silently show raters an older instrument than
-        # the one being recorded against, which is worse than the extra request.
-        return HTMLResponse(
-            page.read_text(encoding="utf-8"),
-            headers={"Cache-Control": "no-store, must-revalidate", "Pragma": "no-cache"},
-        )
+        return HTMLResponse(page.read_text(encoding="utf-8"))
 
     @app.get("/api/coverage", response_class=HTMLResponse)
     def coverage() -> Any:
         """What the demo does and does not claim, served from the same text as the UI."""
         page = web / "coverage.html"
         if page.is_file():
-            return HTMLResponse(
-                page.read_text(encoding="utf-8"),
-                headers={"Cache-Control": "no-store, must-revalidate", "Pragma": "no-cache"},
-            )
+            return HTMLResponse(page.read_text(encoding="utf-8"))
         from seam.features import cues as C
 
         rows = "".join(

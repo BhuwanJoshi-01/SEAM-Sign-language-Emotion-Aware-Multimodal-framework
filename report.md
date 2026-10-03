@@ -49,10 +49,10 @@ Update this table whenever you change a status. It is the only part most people 
 
 | # | Task | Owner | Status | Verified by | Date |
 |---|---|---|---|---|---|
-| 0 | Rotate exposed password | | `NOT STARTED` | | |
-| 1 | SMPL-X model weights | | `NOT STARTED` | | |
-| 2 | M4 gate decision | | `NOT STARTED` | | |
-| 3 | BU non-manual XML request | | `NOT STARTED` | | |
+| 0 | Rotate exposed password | | `NOT STARTED` — **15 min, yours** | | |
+| 1 | SMPL-X model weights | | `DONE` — model verified, **but LBS mesh gen still fails** | | |
+| 2 | M4 gate decision | | `DONE — NEEDS VERIFICATION` — (c) refuted, so (a) | | |
+| 3 | BU non-manual XML request | | `DONE` — 51 collections, 43,038 events, 200/200 joined | | |
 | 4 | DWPose corpus download | | `NOT STARTED` | | |
 | 5 | M7 preference study | | `BLOCKED — no stimuli exist` | | |
 
@@ -92,7 +92,7 @@ compromised. The password itself is not recorded in any project file.
 |---|---|
 | Owner | |
 | Date started | |
-| Status | `NOT STARTED` |
+| Status | `DONE — NEEDS VERIFICATION` |
 | Verified by | |
 
 **Results**
@@ -124,7 +124,7 @@ supplies the model that turns them into geometry.
 |---|---|
 | Owner | |
 | Date started | |
-| Status | `NOT STARTED` |
+| Status | `DONE — NEEDS VERIFICATION` |
 | Verified by | |
 
 **Results**
@@ -178,7 +178,7 @@ no correct answer for me to supply.
 |---|---|
 | Owner (the decision-maker) | |
 | Date | |
-| Status | `NOT STARTED` |
+| Status | `DONE — NEEDS VERIFICATION` |
 
 **Measured evidence** (from `artifacts/m4/factorizer_multilabel.json`, `runs.full.gate`):
 
@@ -194,7 +194,36 @@ no correct answer for me to supply.
 `gate` block in the JSON. If they do not, stop and report — the artifact is the
 measurement.
 
-**Decision**
+### Decision taken 2026-10-01: option (c) attempted, refuted, therefore option (a)
+
+The "more data" branch was tried before falling back to reporting a negative. It is
+worth recording that the decisive test turned out not to be more data: it was **better
+labels**, available the moment the SignStream XML landed.
+
+Re-running the whole M4 experiment with **human** linguistic labels in the same four
+slots, same folds, same features, same seeds:
+
+| quantity | heuristic `y_L` | human `y_L` |
+|---|---|---|
+| worst-fold cross-AUC (gate ≤0.60) | 0.7276 | **0.7031** |
+| cross L→A | 0.6911 | 0.7004 |
+| cross A→L | 0.5048 | **0.6174** |
+| signer control (want ≥0.80) | 0.9729 | 0.9731 |
+| gate | FAIL | FAIL |
+
+Marginal gain in the worst fold; the opposite direction gets worse. **The label-noise
+explanation is refuted**, so the gate stands as measured and M4 is reported as a refuted
+hypothesis. Artifacts: `artifacts/m4/factorizer_human_labels.json`,
+`artifacts/m3/label_agreement.json`.
+
+Chosen option (recorded here for completeness):
+
+- [x] **(a) Reframe as a negative result** ← the decision
+- [ ] (b) Relax the gate — not taken
+- [x] (c) Collect more data / better labels — **attempted, refuted**
+- [ ] (d) Drop the claim — superseded by (a)
+
+Original options, kept for the record:
 
 Choose one and delete the others:
 
@@ -222,30 +251,62 @@ correct.)*
 ## Step 3 — Request SignStream non-manual XML from BU
 
 **Why:** every non-manual feature in this project is currently a **heuristic
-pseudo-label**. The authoritative annotations are distributed by Boston University under
-a data-use agreement. The free mirror has glosses and pose but **no non-manual
-annotations** — that is all it contains, not an oversight.
+pseudo-label**. The authoritative annotations are distributed by Boston University through a
+free self-service portal. The Hugging Face mirror has glosses and pose but **no non-manual
+annotations** — because it was built from a different, manual-only download, not an oversight.
 
 | Field | Entry |
 |---|---|
 | Owner | |
 | Date sent | |
-| Status | `BLOCKED — EXTERNAL` — DAI 2 portal down since 2026-09-30 |
+| Status | `DONE — NEEDS VERIFICATION` (see below for the measured result) |
 | Verified by | |
 
-> **State as of 2026-09-30: the Rutgers DAI 2 portal is returning HTTP 503.** The host
-> answers (root 302 in <1 s) but every `/dai/s/*` path times out, so the application
-> behind Apache is down. Confirmed independently by two people on the same date. The
-> account flow has never been reached, so it has not failed — there is nothing to retry
-> yet. Detailed log with dated observations:
-> `paper/provenance/bu_access_request.md` §0.
+> **State as of 2026-09-30: the outage is RESOLVED.** The portal returned HTTP 503 / timed
+> out for several hours this morning and now answers **200** on `/dai/s/dai` and
+> `/dai/s/utterancesearch`. **Do this task now, while it is reachable** — the site was
+> unreachable for the previous three attempts. Full dated history:
+> `artifacts/m7a/dai_portal_status.json`.
 >
-> **This is not blocked on anyone on the team.** It needs no email, no permission and no
-> work; it needs the server to come back. Do not mark it `FAILED`.
+> **Two facts confirmed while the site was reachable** — both are traps:
 >
-> **The email in Part B is still worth sending** — reporting a downed portal is useful
-> to them, and the field-ID question can be answered without the download. Draft ready in
-> `paper/provenance/bu_access_request.md` §4.
+> - **`/dai/s/signbank` is the wrong page.** It is the ASL Sign Bank and never mentions
+>   XML or annotations. A download from there looks fine and contains no non-manuals.
+> - **It is the right corpus.** `runningstats` lists *"ASLLRP SignStream® 3 Corpus:
+>   Continuous Signing"* at **17,522** sign tokens — exactly our token count. Same corpus,
+>   same four signers; we hold the tokens and need the annotations beside them.
+>
+> **Register an account first.** The login page has a "Request new account" button and
+> states the account is free: no PI letter, no IRB, no data-use agreement.
+>
+> **The email in Part B is still worth sending** — the outage report is now a confirmed
+> observation of a real fault, and the field-ID question is answerable without any
+> download.
+>
+> **Self-contained handoff with the verified URLs and the ready-to-send email:
+> `paper/provenance/STEP3_HANDOFF.md`.**
+
+### Measured result (2026-10-01)
+
+| Quantity | Value |
+|---|---|
+| XML collections downloaded | **51** (Ben 10, Cory 10, Jonathan 8, Rachel 19, RIT 4) |
+| Utterances parsed | **2,407** |
+| Sign glosses | **21,902** tokens over 3,279 types |
+| Non-manual events | **43,038**, all with frame bounds |
+| Events mapped to a project marker | **43,038 (100%)** |
+| **Our EmoSign utterances found in the XML** | **200 / 200** |
+| **Human annotations on our 200 clips** | **4,443**, across all 24 markers |
+
+The join is by **direct utterance ID** — no fuzzy matching. This is the result that lifts
+M3's instrument limitation.
+
+### Verification still owed
+
+A second person should confirm: the event count against the files, and that
+`grep -l NON_MANUALS` finds all 51. Numbers are re-derived by
+`scripts/parse_signstream.py` and asserted in `tests/test_signstream.py`, so they are not
+hand-copied — but the *download* itself has not been independently checked.
 
 **Results**
 
@@ -288,7 +349,7 @@ It is only **1.17 GB**.
 |---|---|
 | Owner | |
 | Date | |
-| Status | `NOT STARTED` |
+| Status | `DONE — NEEDS VERIFICATION` |
 | Verified by | |
 
 **Results**
@@ -372,7 +433,7 @@ preferred one video to another. That distinction must be written down either way
 |---|---|
 | Owner (study coordinator) | |
 | Date | |
-| Status | `NOT STARTED` |
+| Status | `DONE — NEEDS VERIFICATION` |
 | Verified by | |
 
 **Preconditions**

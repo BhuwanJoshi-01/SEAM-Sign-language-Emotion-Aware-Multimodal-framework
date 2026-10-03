@@ -223,7 +223,30 @@ fails above the ceiling.
 
 ### M3 — Linguistic-marker supervision (`L` labels)
 
-**Status: gate met on labels, blocked on the visual instrument.**
+**Status: gate met on labels, and the visual instrument ARRIVED 2026-10-01 — this line is
+stale and superseded by the entry below.**
+
+### M3 instrument status — resolved 2026-10-01
+
+The SignStream non-manual XML was downloaded (51 collections) and every one of the 200
+EmoSign utterances joins it directly by ID, carrying 4,443 human non-manual annotations.
+The pseudo-label limitation is lifted for these clips.
+
+**But measuring the old pseudo-labels against the human ones found most of them
+unusable** (`artifacts/m3/label_agreement.json`, Cohen's kappa):
+
+| category | kappa | verdict |
+|---|---|---|
+| interrogative ~ rhetorical question | +0.734 | usable |
+| negation | +0.639 | usable |
+| topicalization ~ topic/focus | +0.141 | weak |
+| interrogative (wh + yes/no) | +0.028 | **chance** |
+| reference-establishment ~ conditional/when | +0.038 | **chance** (`reference_establishment` over-fires: 93 heuristic positives vs 37 human) |
+
+So M3 is now on human labels rather than guesses, and separately has a published result
+about how unreliable the pseudo-labels were. The earlier duration-controlled finding
+(r = 0.554 for negation ↔ head shake) is consistent with this: negation was the one
+heuristic label with genuine signal to detect.
 
 - **The syntactic track now has a real input.** `asllrp_utterance_map` and
   `asllrp_gloss_tokens` were declared in `sources.py` but never fetched and marked
@@ -305,7 +328,61 @@ fails above the ceiling.
 
 ### M4 — Factorized non-manual encoder + EmoSign LOSO ★ CORE CONTRIBUTION
 
-**Status: GATE NOT MET.** All the instruments exist and are falsifiable; the model does
+**Status: GATE NOT MET, AND THE NEGATIVE RESULT IS CONFIRMED — decision taken 2026-10-01: report as a refuted hypothesis (option (a)), not a deferred gate.**
+
+**Why this is now a finding rather than a failure.** Two things had to be excluded before
+"the factorisation does not hold" was a claim anyone could act on, and both are now
+excluded:
+
+1. **The labels were not the cause.** Three of M4's four linguistic labels come from
+   `seam.features.syntactic` heuristic pseudo-labels. Those were measured against the
+   human ASLLRP annotations downloaded 2026-10-01, on the same 200 clips
+   (`artifacts/m3/label_agreement.json`, Cohen's kappa):
+
+   | category | human + | heuristic + | kappa | verdict |
+   |---|---|---|---|---|
+   | negation | 39 | 27 | **+0.639** | usable |
+   | interrogative ~ rhetorical question | 40 | 46 | **+0.734** | usable |
+   | topicalization ~ topic/focus | 86 | 84 | +0.141 | weak |
+   | interrogative (wh + yes/no) | 31 | 46 | **+0.028** | chance |
+   | reference-establishment ~ conditional/when | 37 | 93 | **+0.038** | chance |
+
+   Three of the four are at or near chance, and `reference_establishment` over-fires on
+   93 clips against 37 human positives. That is a plausible cause of leakage on its own:
+   z_L fitted to noise, where the noise happens to correlate with a human affect rating of
+   the same video.
+
+   **It is not the cause.** Re-running the whole experiment with the *human* labels in the
+   same four slots, same folds, same features (`artifacts/m4/factorizer_human_labels.json`):
+
+   | | heuristic `y_L` | human `y_L` |
+   |---|---|---|
+   | worst-fold cross-AUC | 0.7276 | **0.7031** |
+   | cross L→A | 0.6911 | 0.7004 |
+   | cross A→L | 0.5048 | **0.6174** |
+   | GRL head accuracy | 0.500 | 0.507 |
+   | signer control | 0.9729 | 0.9731 |
+   | gate | FAIL | FAIL |
+
+   Marginal improvement in the worst fold, and the *other* direction got worse. The gate
+   is not missed because the target was noise.
+
+2. **The instrument works.** The signer control sits at 0.973 against a ≥0.80 floor in
+   both arms, so the pipeline detects signer identity far better than chance. A negative
+   result from an instrument that cannot see anything would be worthless.
+
+**What is therefore claimed.** On EmoSign, with a validated instrument, linguistic and
+affect information do not separate under an adversarially-separated representation: the
+worst fold admits affect into the linguistic factor at AUC 0.70 against a ≤0.60 target,
+with leakage asymmetric (L→A strong, A→L at or above chance). The confound that would
+have made this uninterpretable — heuristic target labels — is measured and ruled out.
+
+**Cost of the decision.** The core contribution as originally framed is withdrawn. What
+replaces it: two refuted hypotheses with sound instruments (M1's C1, and this), a measured
+result about pseudo-label reliability in sign-language affect work, and a reusable
+adversarial/probe harness that passes its own positive control.
+
+**Status detail follows.** All the instruments exist and are falsifiable; the model does
 not separate the factors and does not learn either task.
 
 **Gate:** cross-prediction AUC ≤ 0.60 **with no drop** in affect wF1, under LOSO, positive control passing.

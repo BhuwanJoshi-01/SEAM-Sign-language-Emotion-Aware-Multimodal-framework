@@ -415,21 +415,39 @@ and publish analyses rather than data.
 
 ## 4. Download the DWPose pose corpus (20 minutes)
 
-### Why
+### CORRECTED 2026-10-03 — this step was wrong in two ways, and the tar does NOT contain the pose
 
-M5a was run and the result is **negative**: a pose recogniser scored WER 0.916 against a
-most-frequent baseline of 0.916 — indistinguishable from always predicting the most
-common gloss. That is a *data-scale* verdict, not proof that pose is uninformative. The
-test corpus had **1,563 usable tokens over 499 glosses — 3.1 tokens per gloss, with 284
-of the 499 glosses appearing exactly once.** A third of one signer's tokens used a gloss
-the other three signers never used.
+Run and verified. Findings:
 
-The corpus available fixes exactly that problem: it contains **49,083 DWPose pose
-files, frame-aligned to the utterance crops by construction**, across ~100× more
-utterances. That is the fair test of whether signing-space pose carries lexical signal.
+1. **The 1.17 GB tar contains no DWPose pose at all.** It extracts to **1,355 utterance
+   directories holding 149,852 crop-frame JPEGs and 1,354 `crop_original_video.mp4`
+   files — zero `.npz`**. The repository *listing* advertises
+   `<id>/results_dwpose/npz/*.npz` (about 49,000 of them), but the tar bundle does not
+   ship them. A `find` for `results_dwpose` in the extracted tree returns nothing.
+   Anyone following the original instructions would have downloaded 1.2 GB of video and
+   concluded they had the pose.
 
-**This is much smaller than it sounds: the whole download is about 1.2 GB** and you have
-36 GB free. It is the cheapest high-value task in this list.
+2. **Fetching the pose separately is impractical here.** `snapshot_download` over the
+   npz subset wants **115,457 files** and ran at 3–5 files/second — roughly **8 hours** for
+   ~1–2 GB. Stopped deliberately rather than left running: per-file HTTP latency, not
+   bandwidth, is the cost, and no amount of waiting makes that a 20-minute task.
+
+3. **What the tar actually gives, which may be enough.** 1,354 videos at **256×256**,
+   and **all 1,355 ids intersect the gloss token table.** Only **138 of our existing 200**
+   EmoSign clips are among them, so this is a largely different set — about 6.8× our
+   current corpus in utterance count.
+
+### What to do, in order of value per unit of effort
+
+1. **Run our own perception on the 1,354 crop videos** rather than downloading someone
+   else's pose. It is the pipeline we already trust and gate, it costs no network, and
+   it yields MediaPipe landmarks directly usable by `features/signpose.py`. Verify a
+   sample decodes and note the resolution — 256×256 is small, and pose quality at that
+   size is the first thing to check before scaling.
+2. **Only then** consider the DWPose route, and budget it as a multi-hour job rather than
+   a download step.
+3. Note that the crops are **utterance-local**, so the offset mapping in
+   `data/asllrp.crop_frame_index` applies to them exactly as it does to the EmoSign clips.
 
 ### Steps
 

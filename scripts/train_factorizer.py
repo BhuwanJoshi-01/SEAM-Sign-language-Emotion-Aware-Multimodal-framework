@@ -194,9 +194,26 @@ def clip_windows(
 
 
 def build_dataset(
-    landmark_dir: Path, *, limit: int | None = None
+    landmark_dir: Path,
+    *,
+    limit: int | None = None,
+    label_source: str = "heuristic",
+    xml_dir: Path | None = None,
 ) -> tuple[list[Window], dict[str, object]]:
-    """Assemble the windowed dataset with its labels and provenance."""
+    """Assemble the windowed dataset with its labels and provenance.
+
+    `label_source` selects where the linguistic labels `y_pos/y_neg/y_top/y_ref` come from:
+    `heuristic` (the original `seam.features.syntactic` pseudo-labels) or `human` (the
+    ASLLRP SignStream annotations downloaded 2026-10-01).
+
+    Why the switch exists: three of the four heuristic labels agree with the human ones at
+    or near chance (kappa 0.028, 0.038 and 0.141), measured in
+    `artifacts/m3/label_agreement.json`. A factorisation gate that fails is uninterpretable
+    while its linguistic target is noise, because z_L then fits whatever in the video
+    correlates with the noise - and since y_A is a human affect rating of the *same* video,
+    that correlation leaks affect into z_L. The prediction is specific: swapping only the
+    labels, with folds and features held fixed, should reduce measured L->A leakage.
+    """
     ds = load_emosign(default_data_root())
     gm = SY.load_gloss_map()
     cue_map = None
@@ -206,6 +223,19 @@ def build_dataset(
         cue_map = C.clip_cues()
     except Exception as exc:  # pragma: no cover
         log.warning("annotator cues unavailable: %s", exc)
+
+    human_by_id: dict[str, set[str]] = {}
+    if label_source == "human":
+        if not xml_dir.is_dir():
+            raise FileNotFoundError(
+                f"--labels human needs the SignStream XML, not found at {xml_dir}. "
+                "Run scripts/parse_signstream.py first."
+            )
+        from seam.data.signstream import parse_directory
+
+        utterances, _ = parse_directory(xml_dir)
+        human_by_id = {u.utterance_id: u.markers_present for u in utterances}
+        print(f"  linguistic labels: HUMAN, from {len(human_by_id)} annotated utterances")
 
     windows: list[Window] = []
     used = 0
@@ -218,19 +248,34 @@ def build_dataset(
             continue
         meta = json.loads(meta_path.read_text())
         syn = SY.classify(rec.utterance_id, gm)
+        if label_source == "human":
+            hm = human_by_id.get(rec.utterance_id, set())
+            # The same four slots, filled from human annotations. Comparability with the
+            # heuristic arm is the whole point: identical slots, identical folds, identical
+            # features, so any change in separation is attributable to the labels alone.
+            y_pos = int(("question_wh" in hm) or ("question_yn" in hm))
+            y_neg = int("negation" in hm)
+            y_top = int("topic" in hm)
+            y_ref = int("conditional" in hm)
+        else:
+            y_pos = int(syn.labels["interrogative"].present)
+            y_neg = int(syn.labels["negation"].present)
+            y_top = int(syn.labels["topicalization"].present)
+            y_ref = int(syn.labels["reference_establishment"].present)
         labels = {
             "signer": rec.signer,
             "y_affect": _affect_targets(rec),
-            "y_pos": int(syn.labels["interrogative"].present),
-            "y_neg": int(syn.labels["negation"].present),
-            "y_top": int(syn.labels["topicalization"].present),
-            "y_ref": int(syn.labels["reference_establishment"].present),
+            "y_pos": y_pos,
+            "y_neg": y_neg,
+            "y_top": y_top,
+            "y_ref": y_ref,
         }
         got = clip_windows(shard, meta, syn, labels)
         if got:
             windows.extend(got)
             used += 1
     info = {
+        "label_source": label_source,
         "n_clips": used,
         "n_windows": len(windows),
         "linguistic_task": LINGUISTIC_TASK,
@@ -636,14 +681,40 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--landmark-dir", default=str(default_data_root() / "emosign" / "landmarks"))
     ap.add_argument("--limit", type=int, help="clips to use (debugging)")
+    ap.add_argument(
+        "--labels",
+        default="heuristic",
+        choices=["heuristic", "human"],
+        help="source of the linguistic labels y_pos/y_neg/y_top/y_ref",
+    )
+    ap.add_argument(
+        "--xml-dir",
+        default=str(default_data_root() / "asllrp_signstream_xml" / "raw"),
+        help="SignStream XML, required by --labels human",
+    )
+    ap.add_argument("--tag", default=None, help="artifact suffix, e.g. 'human-labels'")
     ap.add_argument("--epochs", type=int, default=30)
     ap.add_argument("--seeds", type=int, nargs="*", default=[0])
     ap.add_argument("--ablate", action="store_true", help="run the full lambda grid")
-    ap.add_argument("--out", default=str(artifacts_root() / "m4" / "factorizer.json"))
+    ap.add_argument("--out", default=None, help="artifact path; defaults by label source")
     args = ap.parse_args()
     setup("INFO")
+    if args.out is None:
+        name = (
+            "factorizer_multilabel.json"
+            if args.labels == "heuristic"
+            else "factorizer_human_labels.json"
+        )
+        if args.tag:
+            name = name.replace(".json", f"_{args.tag}.json")
+        args.out = str(artifacts_root() / "m4" / name)
 
-    windows, info = build_dataset(Path(args.landmark_dir), limit=args.limit)
+    windows, info = build_dataset(
+        Path(args.landmark_dir),
+        limit=args.limit,
+        label_source=args.labels,
+        xml_dir=Path(args.xml_dir),
+    )
     if not windows:
         print("no windows built; check the landmark directory")
         return 2
