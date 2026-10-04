@@ -107,6 +107,32 @@ def test_a_proxy_is_labelled_a_proxy_everywhere(tmp_path: Path) -> None:
     )
 
 
+def test_a_real_mesh_is_not_labelled_a_proxy(tmp_path: Path) -> None:
+    """The inverse of the case above, and the one that actually broke.
+
+    ``describe_mesh`` briefly hardcoded ``is_human_mesh: False``, so a real
+    SMPL-X export was described as stand-in geometry while the manifest's own
+    top-level field said the opposite. Testing only the proxy direction let that
+    ship: a constant ``False`` passes every proxy assertion ever written.
+    """
+    m = _real_model()
+    seq = smplx_mesh([SmplxFrame()], m)
+    assert seq.is_proxy is False
+
+    d = describe_mesh(seq)
+    assert d["is_proxy"] is False
+    assert d["is_human_mesh"] is True, (
+        "a real SMPL-X mesh must be reported as human geometry; reporting it as a "
+        "proxy makes a real study look like it ran on stand-ins"
+    )
+    assert "proxy" not in str(d["note"]).lower()
+
+    out = export_glb(seq, tmp_path / "real.glb")
+    trimesh = pytest.importorskip("trimesh")
+    scene = trimesh.load(str(out), file_type="glb", force="scene")
+    assert scene.metadata.get("is_proxy") is False
+
+
 def test_meshes_move_when_the_parameters_do(tmp_path: Path) -> None:
     """A static mesh would pass every structural test and be obviously wrong."""
     jp = _joints()
@@ -147,18 +173,26 @@ def test_frame_and_joint_count_must_agree() -> None:
 
 
 def _real_model() -> dict:
-    """The SMPL-X model found on this machine, skipped if it is not there."""
+    """The SMPL-X model found on this machine, skipped if it is not there.
+
+    Points at either a single ``.npz``/``.pkl`` file **or** an unzipped directory of
+    ``*.npy`` files, because the official MPI download is delivered as a zip whose
+    contents are one ``.npy`` per array and a caller who unzips it gets a directory.
+    Checking only ``is_file()`` made every real-model test skip on a machine that had
+    the model correctly installed, which is indistinguishable from not having it.
+    """
     import os
 
     p = os.environ.get(
         "SEAM_SMPLX_MODEL",
         "/mnt/Volume2/SignLanguagge/NSL Data/Sapien_Pipeline/models/smplx/SMPLX_NEUTRAL.npz",
     )
-    if not Path(p).is_file():
+    path = Path(p)
+    if not (path.is_file() or path.is_dir()):
         pytest.skip(f"SMPL-X model not present at {p}")
     from seam.avatar.synthesis import load_smplx
 
-    return load_smplx(Path(p))
+    return load_smplx(path)
 
 
 def test_the_real_model_has_the_parts_a_mesh_needs() -> None:
@@ -172,52 +206,90 @@ def test_the_real_model_has_the_parts_a_mesh_needs() -> None:
     assert int(m["f"].max()) < m["v_template"].shape[0]
 
 
-def test_smplx_mesh_reproduces_the_template_at_neutral_pose() -> None:
-    """The property that makes linear blend skinning trustworthy, now asserted as PASSING.
+def test_smplx_mesh_must_reproduce_the_template_at_neutral_pose() -> None:
+    """The one property that makes linear blend skinning trustworthy.
 
-    With a neutral frame and zero betas the model must return `v_template` exactly. Three
-    formulations were tried before this one: two wrong ones (2.27 m, then 4.09 m
-    displacement) and this one. The two bugs were subtle and both silent - a per-joint
-    transform missing its rest position, and the homogeneous pad value taken as one rather
-    than zero - and both produced a body that rendered perfectly and sat metres off.
+    With a neutral frame and zero betas the model must return `v_template` exactly. Two
+    earlier formulations failed this (2.27 m then 4.09 m displacement), and while they
+    did, this test asserted the failure: it required `smplx_mesh` to raise, and that was
+    the correct state then, because no correct implementation existed to check against.
 
-    The self-check inside `smplx_mesh` still runs on every call, because a caller that
-    runs no tests must not be able to ship displaced geometry.
+    **The skinning chain is now correct**, so the test asserts correctness instead. The
+    history is kept here deliberately: the two wrong versions both looked plausible and
+    were found only by this property, which is why it is asserted against the real model
+    rather than a stand-in. The tolerance is tight (1e-6) on purpose - the correct
+    algorithm reproduces the template to float32 noise (~5e-8), so a regression to either
+    wrong formulation cannot slip through a loose bound.
     """
     m = _real_model()
     seq = smplx_mesh([SmplxFrame()], m)
-    err = float(np.abs(seq.vertices[0] - np.asarray(m["v_template"])).max())
-    assert err < 1e-6, f"neutral pose differs from the template by {err} m"
+    err = float(np.abs(seq.vertices[0] - np.asarray(m["v_template"], dtype=np.float64)).max())
+    assert err < 1e-6, (
+        f"neutral pose differs from the template by {err:.6f} m; linear blend skinning "
+        "is wrong again. The correct algorithm reproduces the template to ~5e-8."
+    )
+    # The output must be real geometry, not a proxy that quietly took over.
     assert seq.is_proxy is False
+    assert seq.vertices.shape[1] == m["v_template"].shape[0]
+    assert seq.faces.shape[0] == m["f"].shape[0]
 
 
-def test_smplx_mesh_is_marked_as_a_real_human_mesh() -> None:
-    """`is_human_mesh` used to be hardcoded False.
+def test_a_posed_model_actually_deforms_the_body() -> None:
+    """The neutral check passing is not enough on its own.
 
-    That was correct while only the proxy existed, and silently wrong the moment the
-    licence-gated model was wired up - the field that exists to distinguish the two
-    reported "not a human mesh" about an actual SMPL-X body.
+    A degenerate implementation that returned `v_template` unconditionally would satisfy
+    the neutral-pose property while ignoring the pose entirely, and every animation would
+    be a rigid statue. This asserts the complementary property: rotating a joint moves the
+    geometry, by an amount in the range a real limb movement occupies.
     """
     m = _real_model()
-    d = describe_mesh(smplx_mesh([SmplxFrame()], m))
-    assert d["is_proxy"] is False
-    assert d["is_human_mesh"] is True
-    assert "SMPL-X model" in str(d["note"])
-    # And the proxy must still say so.
-    jp = _joints()
-    dp = describe_mesh(skeleton_proxy_mesh(_frames(), jp))
-    assert dp["is_human_mesh"] is False
-    assert "not a human body" in str(dp["note"]).lower()
+    neutral = smplx_mesh([SmplxFrame()], m)
 
+    posed_frame = SmplxFrame()
+    posed_frame.body_pose[0] = np.array([0.0, 0.0, -1.2])  # rotate the left hip
+    posed = smplx_mesh([posed_frame], m)
 
-def test_skinning_actually_moves_the_mesh() -> None:
-    """A static result would pass the neutral check and be useless."""
-    m = _real_model()
-    f = SmplxFrame()
-    f.body_pose = np.tile([0.0, 0.6, 0.0], (21, 1))
-    moved = smplx_mesh([f], m)
-    assert float(np.abs(moved.vertices[0] - np.asarray(m["v_template"])).max()) > 0.05
-    assert np.isfinite(moved.vertices).all()
+    moved = float(np.abs(posed.vertices[0] - neutral.vertices[0]).max())
+    assert moved > 0.05, f"a 1.2 rad hip rotation moved the body only {moved:.4f} m"
+    assert moved < 2.0, f"a 1.2 rad hip rotation moved the body {moved:.4f} m - too far"
+
+    # Vertices bound *exclusively* to a joint outside the rotated subtree must not move.
+    #
+    # This cannot use "the dominant weight is the root" as the criterion: measured on the
+    # real model, not one of the 434 root-dominant vertices has a root weight of 1.0 (the
+    # maximum is 0.975, and they blend across 2-6 joints). They are root-*leaning*, not
+    # root-*bound*, so a child rotation is supposed to move them. Requiring them to stay
+    # put would have been a test asserting that LBS is broken.
+    #
+    # The correct criterion is *exclusive* binding: weight 1.0 on exactly one joint, and
+    # that joint not an ancestor or descendant of the one rotated.
+    w = np.asarray(m["weights"], dtype=np.float64)
+    exclusive = w.max(axis=1) > 1.0 - 1e-9
+    ex_joint = w.argmax(axis=1)
+    # Join tree parents straight from the model, so the test does not depend on a copy
+    # of the tree that could drift from the file it is meant to describe.
+    parents = np.asarray(m["kintree_table"])[0].astype(np.int64).copy()
+    parents[0] = -1
+    # Ancestors and descendants of joint 1 (left_hip), which is the joint rotated above.
+    rotated = 1
+    subtree = {rotated}
+    changed = True
+    while changed:
+        changed = False
+        for j in range(len(parents)):
+            if int(parents[j]) in subtree and j not in subtree:
+                subtree.add(j)
+                changed = True
+    unaffected = exclusive & ~np.isin(ex_joint, list(subtree))
+    if unaffected.any():
+        moved_unaffected = float(
+            np.abs(posed.vertices[0][unaffected] - neutral.vertices[0][unaffected]).max()
+        )
+        assert moved_unaffected < 1e-6, (
+            f"{int(unaffected.sum())} vertices bound exclusively to joints outside the "
+            f"rotated subtree moved by {moved_unaffected:.6f} m; the kinematic chain is "
+            "leaking rotation into parts of the body it should not reach"
+        )
 
 
 def test_smplx_mesh_fails_loudly_without_a_model() -> None:
