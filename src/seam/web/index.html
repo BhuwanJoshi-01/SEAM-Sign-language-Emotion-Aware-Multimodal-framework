@@ -23,14 +23,44 @@
     .demo-grid { grid-template-columns: 1fr; }
   }
 
+  .preview { position: relative; }
   #v {
     display: block;
     width: 100%;
+    /* Reserve the preview's shape before a source exists. Without it the element falls to
+       the default replaced-element height (150 px) with no camera attached, so the page
+       reflows when the camera starts and the idle layout reads as a broken panel. */
+    aspect-ratio: 4 / 3;
+    object-fit: cover;
     border-radius: var(--radius);
     background: var(--bg-deep);
     box-shadow: var(--shadow);
     transform: scaleX(-1);   /* mirror the preview; the data is never mirrored */
   }
+  /* Sits over the video until there is something to see. An unexplained black rectangle
+     is the thing a reader assumes is broken, and this page has too many panels that could
+     be. Hidden, not removed, when a source is attached. */
+  .preview-note {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    padding: var(--s-5);
+    text-align: center;
+    font-size: var(--text-sm);
+    line-height: 1.5;
+    /* `--fg-muted`, not `--fg-subtle`: this sits on `--bg-deep` (the stage behind the
+       preview), and `--fg-subtle` measures 4.25:1 there in the light theme - under the 4.5:1
+       floor. `--fg-subtle` is a label colour and its contrast is only guaranteed against
+       `--bg` and `--panel`. `--fg-muted` clears 6.35:1 on the same surface, and this is
+       body text a reader has to be able to read, not a de-emphasised caption. */
+    color: var(--fg-muted);
+    background: var(--bg-deep);
+    border-radius: var(--radius);
+  }
+  .preview-note[hidden] { display: none; }
 
   .controls {
     display: flex;
@@ -55,6 +85,15 @@
   }
 
   .side > * + * { margin-top: var(--s-5); }
+
+  /* The marker cell stacks number, bar and trend, so it needs a little more room than a
+     plain numeric column. */
+  #mt td.mag { min-width: 8.5rem; }
+  #mt td.name { white-space: nowrap; font-weight: 550; color: var(--fg); }
+  /* The M3 state never changes while the signal does, so it is a static annotation beside
+     the name rather than a column the eye scans for movement. */
+  #mt .badge { display: block; margin-top: 3px; }
+  #mt .badge .pill { padding: 0 var(--s-1); }
 </style>
 </head>
 <body>
@@ -63,22 +102,57 @@
 <main class="seam-main">
 <div class="demo-grid seam-enter">
   <div>
-    <video id="v" playsinline muted autoplay></video>
+    <div class="preview">
+      <video id="v" playsinline muted autoplay></video>
+      <p class="preview-note" id="pnote">
+        No image source. Start the camera to see the preview, or use the synthetic signal
+        below to drive the same pipeline without one.
+      </p>
+    </div>
     <div class="controls">
       <button type="button" class="btn btn-primary" id="go" disabled>Start camera</button>
+      <button type="button" class="btn" id="live" disabled aria-pressed="false">Run live</button>
       <button type="button" class="btn" id="stop" disabled>Stop camera</button>
-      <button type="button" class="btn" id="analyse" disabled>Analyse window</button>
       <label for="uid">Utterance <input type="text" id="uid" placeholder="e.g. 24363254"></label>
-      <span class="pill" id="status">starting…</span>
+      <span class="beacon" id="beacon" data-state="idle" role="status" aria-live="polite">idle</span>
     </div>
     <div id="err" role="status" aria-live="polite"></div>
     <p class="note" style="margin-top:var(--s-3)">
       MediaPipe Tasks runs here in WASM. This tab posts the 52 blendshape coefficients and
       the head transform to the local server, which never sees the image.
     </p>
+    <div class="row" style="margin-top:var(--s-4)">
+      <button type="button" class="btn" id="sim">Use a synthetic signal</button>
+      <span class="note">
+        No camera, or reviewing on a machine without one? This drives the identical pipeline
+        from a generated signal. It is labelled <b>synthetic</b> wherever it appears, because
+        a generated number is not a measurement.
+      </span>
+    </div>
   </div>
 
   <div class="side">
+    <div class="card">
+      <div class="card-head">
+        <h2>Throughput</h2>
+        <span class="tag" id="srcTag">no source</span>
+      </div>
+      <div class="body">
+        <div class="stats">
+          <div class="stat"><b id="mFps">—</b><span>capture fps</span></div>
+          <div class="stat"><b id="mHz">—</b><span>windows / s</span></div>
+          <div class="stat"><b id="mSrv">—</b><span>server ms</span></div>
+          <div class="stat"><b id="mE2E">—</b><span>end-to-end ms</span></div>
+          <div class="stat"><b id="mFill">—</b><span>window filled</span></div>
+          <div class="stat"><b id="mCount">0</b><span>windows analysed</span></div>
+        </div>
+        <p class="note" id="tNote" style="margin-top:var(--s-3)">
+          Idle. At most one request is in flight, so the panel always shows the newest window
+          rather than a queue of stale ones.
+        </p>
+      </div>
+    </div>
+
     <div class="card">
       <h2>Marker magnitudes</h2>
       <div class="body">
@@ -86,7 +160,8 @@
         <table id="mt" style="display:none">
           <thead><tr>
             <th scope="col">Marker</th><th scope="col" class="num">Magnitude</th>
-            <th scope="col" class="num">Zero&nbsp;%</th><th scope="col">Status</th>
+            <th scope="col" class="num" title="fraction of frames in this window at exactly zero">Zero&nbsp;%</th>
+            <th scope="col">This window</th>
           </tr></thead>
           <tbody></tbody>
         </table>
@@ -112,22 +187,27 @@
 </main>
 
 <script type="module">
-const $ = id => document.getElementById(id);
+const $ = (id) => document.getElementById(id);
 const MODEL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
 
-let landmarker = null, stream = null, win = [], pose = [], cap = 0, last = 0, fpsEma = 0;
+// ── configuration ──────────────────────────────────────────────────────────
+const WIN = 30;    // frames per analysis window
+const CAP = 40;    // buffer depth; WIN plus headroom
+// New frames required before the next window is posted. Three frames at the ~30 fps this
+// tab captures is ~10 windows/s, which reads as continuous without asking the server to
+// keep up with every frame. It is a floor, not a rate: the one-in-flight rule below is what
+// actually sets the pace, and if the server or the browser is slower the stride stretches
+// rather than the queue growing.
+const STRIDE = 3;
+const TREND_LEN = 48;   // windows kept per marker for the trend line
 
-// Buffer a rolling window of client-side measurements. MediaPipe is run in this tab,
-// so the only thing posted is numbers.
-const WIN = 30, CAP = 40;
-
-//: Which delegate actually got used. Declared before init(), because `let` is
-//: not hoisted and reading it earlier would throw.
+let landmarker = null, stream = null, win = [], pose = [];
+let cap = 0, last = 0, fpsEma = 0;
+let running = false, source = "none", synthetic = false;
+let inFlight = false, framesAtRequest = 0, requestSentAt = 0;
+let windows = 0, firstWindowAt = 0, lastWindowAt = 0, lastE2E = 0;
+const history = new Map();   // marker -> number[]
 let delegate = "GPU";
-
-//: Give up on the GPU after this long. A WebGL context that cannot be created
-//: may leave createFromOptions pending forever rather than rejecting, so a
-//: catch alone is not enough - something has to actively stop waiting.
 const GPU_TIMEOUT_MS = 8000;
 
 function withTimeout(promise, ms, label) {
@@ -140,35 +220,195 @@ function withTimeout(promise, ms, label) {
   });
 }
 
-async function init() {
-  const vision = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14");
-  const fileset = await vision.FilesetResolver.forVisionTasks(
-    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
-  landmarker = await makeLandmarker(vision, fileset);
-  $("status").textContent = "model ready (" + delegate + ")";
-  $("go").disabled = false;
+function setBeacon(state, text) {
+  const b = $("beacon");
+  b.dataset.state = state;
+  b.textContent = text;
 }
 
-// Try the GPU first, then fall back to the CPU.
-//
-// Requesting "GPU" on a machine that has no discrete graphics card does not
-// raise a catchable error in every browser - on some the promise simply never
-// settles, so the page sits at "starting..." forever with a disabled button and
-// no visible reason. That is indistinguishable from a broken page, and it cost
-// a contributor real time on a laptop without a GPU.
-//
-// The CPU delegate is slower but produces identical numbers: the delegate
-// chooses where the arithmetic runs, not what it computes. Since this demo
-// exists to show the pipeline working, a slower correct answer beats a fast
-// one that never arrives.
-async function makeLandmarker(vision, fileset) {
-  const opts = (d) => ({
+// The buffer holds CAP frames and a window is WIN of them, so the raw ratio exceeds 1 once
+// the buffer fills. Clamped here rather than at each of the two call sites, because a
+// "133% full" progress figure is the kind of thing that ships.
+function paintFill() {
+  if (win.length === 0) { stat("mFill", "—"); return; }
+  const full = win.length >= WIN;
+  stat("mFill", Math.min(100, Math.round((win.length / WIN) * 100)) + "%", full ? "" : "over");
+}
+
+// ── throughput tiles ───────────────────────────────────────────────────────
+function stat(id, value, cls) {
+  const el = $(id);
+  el.textContent = value;
+  el.parentElement.className = "stat" + (cls ? " " + cls : "");
+}
+
+function paintThroughput(j, e2e) {
+  stat("mSrv", j.server_ms.toFixed(1));
+  stat("mE2E", e2e.toFixed(0), e2e > 400 ? "over" : "");
+  stat("mCount", String(windows));
+  const hz = (firstWindowAt && lastWindowAt > firstWindowAt)
+    ? (windows - 1) / ((lastWindowAt - firstWindowAt) / 1000) : 0;
+  stat("mHz", hz > 0 ? hz.toFixed(1) : "—");
+  if (fpsEma) stat("mFps", fpsEma.toFixed(1));
+paintFill();
+}
+
+// ── trend line ─────────────────────────────────────────────────────────────
+// A time series over analysis windows, drawn beside its own current value so it says
+// something the number cannot: whether a cue is steady, drifting or spiking. Axis-free on
+// purpose — the scale is 0..max across the kept windows, and printing that would imply a
+// fixed range the series does not have.
+function trendSvg(series) {
+  const W = 100, H = 22;
+  if (series.length < 2) return "";
+  const max = Math.max(...series, 1e-6);
+  const step = W / (TREND_LEN - 1);
+  const pts = series.map((v, i) => [(TREND_LEN - series.length + i) * step, H - (v / max) * (H - 2) - 1]);
+  const d = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(2) + " " + p[1].toFixed(2)).join(" ");
+  const area = d + ` L${pts[pts.length - 1][0].toFixed(2)} ${H} L${pts[0][0].toFixed(2)} ${H} Z`;
+  return `<svg class="trend" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+    <line class="base" x1="0" y1="${H - 1}" x2="${W}" y2="${H - 1}"/>
+    <path class="area" d="${area}"/>
+    <path class="line" d="${d}"/>
+  </svg>`;
+}
+
+// ── render ─────────────────────────────────────────────────────────────────
+function render(j, e2e) {
+  $("empty").style.display = "none";
+  $("mt").style.display = "";
+  paintThroughput(j, e2e);
+
+  const tb = $("mt").querySelector("tbody");
+  const max = Math.max(...Object.values(j.markers).map((m) => m.magnitude), 1e-6);
+  tb.innerHTML = "";
+  for (const [name, m] of Object.entries(j.markers)) {
+    const series = history.get(name) || [];
+    series.push(m.magnitude);
+    while (series.length > TREND_LEN) series.shift();
+    history.set(name, series);
+
+    // Blindness is a *corpus* measurement that M3 made on the EmoSign 200, and it arrives
+    // from the server as `corpus`. It is deliberately not derived from this window's zero
+    // fraction: doing that was the original bug here, and it produced two false claims -
+    // a threshold of 0.6 that nobody chose, and a "blind" verdict on a synthetic signal
+    // that had simply not been driven. A quiet window is not a blind instrument.
+    const corpus = m.corpus || {};
+    const blind = corpus.state === "blind";
+    // Degenerate means informative but near-constant across clips, so the magnitude is
+    // real and still not worth separating on.
+    const degenerate = corpus.state === "degenerate";
+    const here = m.present_in_window ? "marker present" : "no marker in window";
+    const barCls = blind ? "blind" : (!m.present_in_window ? "absent" : "");
+
+    const statePill = blind
+      ? '<span class="pill bad" title="M3: zero on 83% of EmoSign clips">M3: blind</span>'
+      : degenerate
+        ? `<span class="pill warn" title="M3: fires on ${(corpus.prevalence * 100).toFixed(0)}% of EmoSign clips, too constant to separate clips">M3: degenerate</span>`
+        : `<span class="pill ok" title="M3: fires on ${(corpus.prevalence * 100).toFixed(0)}% of EmoSign clips">M3: usable</span>`;
+
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      `<td class="name">${name}<span class="badge">${statePill}</span></td>` +
+      `<td class="num mag">${m.magnitude.toFixed(3)}` +
+        `<span class="level ${barCls}"><i style="width:${((m.magnitude / max) * 100).toFixed(1)}%"></i></span>` +
+        `<span class="${blind ? "trend blind" : "trend"}">${trendSvg(series)}</span></td>` +
+      `<td class="num">${(m.zero_fraction * 100).toFixed(0)}</td>` +
+      `<td><span class="pill ${m.present_in_window ? "ok" : "none"}">${here}</span></td>`;
+    tb.appendChild(tr);
+  }
+
+  $("mnote").textContent =
+    `${j.n_frames} frames at ${j.fps} fps · ` +
+    "Bars are scaled 0..max across the analysed windows, not to a fixed range. " +
+    "Zero % is measured on this window; the M3 badge is measured on the EmoSign 200 and " +
+    "does not move as the signal does. Consecutive windows overlap by about " +
+    `${Math.round((1 - STRIDE / WIN) * 100)}%, so the trend line shows level, not change.`;
+
+  const l = j.linguistic;
+  $("ling").innerHTML = l === null
+    ? "Supply an ASLLRP utterance id to see its gloss context."
+    : (!l.available
+        ? `<p class="bad">${l.reason}</p>`
+        : `<dl class="kv"><dt>gloss</dt><dd>${l.gloss}</dd>` +
+          `<dt>tokens</dt><dd>${l.n_tokens}</dd>` +
+          `<dt>markers</dt><dd>${l.markers_present.length ? l.markers_present.join(", ") : "none in the lexical gloss"}</dd></dl>` +
+          `<p class="note">${l.note}</p>` +
+          Object.entries(l.provenance).map(([k, v]) => `<div class="note">${k}: ${v}</div>`).join(""));
+
+  $("unsup").innerHTML =
+    `<p class="bad">affect — ${j.affect.reason}</p>` +
+    `<p class="bad">gloss recognition — ${j.recognition.reason}</p>` +
+    `<p class="note">Both are withheld rather than shown empty, because a number that carries ` +
+    `no information is worse than no number.</p>`;
+}
+
+// ── the request ────────────────────────────────────────────────────────────
+async function analyseWindow() {
+  if (inFlight || win.length < 8) return;
+  const tail = win.slice(-WIN), tpose = pose.slice(-WIN);
+  // Nominal capture rate. The per-frame cadence is the browser's; the server uses fps only
+  // to turn frame counts into milliseconds.
+  const fps = 30;
+  inFlight = true;
+  framesAtRequest = cap;
+  requestSentAt = performance.now();
+  if (running) setBeacon("waiting", "analysing");
+  try {
+    const r = await fetch("api/analyse", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        blendshapes: tail, head_pose: tpose, fps,
+        utterance_id: $("uid").value.trim(),
+      }),
+    });
+    const j = await r.json();
+    if (!r.ok) {
+      $("err").textContent = j.error || ("HTTP " + r.status);
+      if (running) setBeacon("error", "server rejected the window");
+      return;
+    }
+    $("err").textContent = "";
+    const e2e = performance.now() - requestSentAt;
+    lastE2E = e2e;
+    windows++;
+    if (!firstWindowAt) firstWindowAt = requestSentAt;
+    lastWindowAt = performance.now();
+    render(j, e2e);
+    if (running) setBeacon("live", "live");
+  } catch (e) {
+    $("err").textContent = "server unreachable: " + e.message;
+    if (running) setBeacon("error", "server unreachable");
+  } finally {
+    inFlight = false;
+  }
+}
+
+// Called once per captured frame. Fires only when nothing is in flight and the window has
+// advanced past the stride — so a slow server stretches the interval instead of building a
+// backlog, and the panel can never show a stale window as though it were current.
+function pump() {
+  if (!running || inFlight) return;
+  if (cap - framesAtRequest < STRIDE) return;
+  analyseWindow();
+}
+
+// ── camera ─────────────────────────────────────────────────────────────────
+function opts(d) {
+  return {
     baseOptions: { modelAssetPath: MODEL, delegate: d },
     runningMode: "VIDEO", numFaces: 1,
     outputFaceBlendshapes: true,
     outputFacialTransformationMatrixes: true,
-  });
+  };
+}
 
+// Requesting "GPU" on a machine with no discrete graphics card does not raise a catchable
+// error in every browser - on some the promise never settles, so the page sits at
+// "starting..." forever with a disabled button and no visible reason. That is
+// indistinguishable from a broken page. The CPU delegate is slower but produces identical
+// numbers: the delegate chooses where the arithmetic runs, not what it computes.
+async function makeLandmarker(vision, fileset) {
   try {
     return await withTimeout(
       vision.FaceLandmarker.createFromOptions(fileset, opts("GPU")),
@@ -176,48 +416,19 @@ async function makeLandmarker(vision, fileset) {
   } catch (e) {
     console.warn("GPU delegate unavailable, falling back to CPU:", e && e.message);
   }
-
   delegate = "CPU";
-  $("status").textContent = "loading (CPU - no GPU detected)";
+  setBeacon("idle", "loading (CPU - no GPU)");
   return await vision.FaceLandmarker.createFromOptions(fileset, opts("CPU"));
 }
 
-$("go").onclick = async () => {
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
-    $("v").srcObject = stream; await $("v").play();
-    $("go").textContent = "camera on";
-    $("go").disabled = true;
-    $("stop").disabled = false;
-    $("analyse").disabled = false;
-    loop();
-  } catch (e) { $("err").textContent = "camera unavailable: " + e.message; }
-};
-
-// Stop every hardware track, detach the element, and drop the buffered window.
-// Without the getTracks().stop() calls the camera light stays on even after
-// the <video> element is cleared.
-$("stop").onclick = () => {
-  if (stream) {
-    for (const track of stream.getTracks()) track.stop();
-    stream = null;
-  }
-  $("v").srcObject = null;
-  win = []; pose = []; cap = 0; last = 0; fpsEma = 0;
-  $("go").textContent = "start camera";
+async function init() {
+  const vision = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14");
+  const fileset = await vision.FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+  landmarker = await makeLandmarker(vision, fileset);
+  setBeacon("idle", "model ready (" + delegate + ")");
   $("go").disabled = false;
-  $("stop").disabled = true;
-  $("analyse").disabled = true;
-  $("err").textContent = "";
-  $("status").textContent = "camera off — nothing is being captured";
-};
-
-// Browser tab close / reload is an implicit stop. Releasing here prevents the
-// camera light from staying on after the page goes away.
-window.addEventListener("pagehide", () => {
-  if (stream) for (const track of stream.getTracks()) track.stop();
-  stream = null;
-});
+}
 
 function loop() {
   if (!stream) return;
@@ -231,92 +442,227 @@ function loop() {
   try { res = landmarker.detectForVideo(v, now); } catch (e) { return; }
   const bs = res.faceBlendshapes?.[0]?.categories;
   const mtx = res.facialTransformationMatrixes?.[0]?.data;
-  if (!bs || bs.length !== 52 || !mtx) return;
-  // MediaPipe's category order is stable for a given model bundle, and the first entry
-  // is _neutral. Reordering client-side would be a silent way to shift every marker
-  // threshold by one, so the order is sent as-is and the server validates the width.
-  win.push(bs.map(c => c.score));
-  // MediaPipe hands back the head transform as 16 numbers in row-major order.
-  // The server's contract is (T, 4, 4) - one 4x4 matrix per frame - so reshape
-  // here. Sending the flat 16 makes the server reject the window as (T, 16).
-  pose.push([0, 4, 8, 12].map(i => Array.from(mtx.slice(i, i + 4))));
+  if (!bs || bs.length !== 52 || !mtx) { stat("mFill", "no face", "bad"); return; }
+  // MediaPipe's category order is stable for a given model bundle, and the first entry is
+  // _neutral. Reordering client-side would be a silent way to shift every marker threshold
+  // by one, so the order is sent as-is and the server validates the width.
+  win.push(bs.map((c) => c.score));
+  // MediaPipe hands back the head transform as 16 numbers in row-major order. The server's
+  // contract is (T, 4, 4) - one 4x4 matrix per frame - so reshape here. Sending the flat 16
+  // makes the server reject the window as (T, 16).
+  pose.push([0, 4, 8, 12].map((i) => Array.from(mtx.slice(i, i + 4))));
   if (win.length > CAP) { win.shift(); pose.shift(); }
-  $("status").textContent =
-    `${fpsEma.toFixed(1)} fps · ${win.length}/${CAP} frames · face tracked`;
+  cap++;
+  paintFill();
+  if (fpsEma) stat("mFps", fpsEma.toFixed(1));
+  pump();
 }
 
-$("analyse").onclick = async () => {
-  $("err").textContent = "";
-  const tail = win.slice(-WIN), tpose = pose.slice(-WIN);
-  if (tail.length < 8) { $("err").textContent = "need at least 8 tracked frames"; return; }
-  // Nominal capture rate; the per-frame cadence is the browser's, and the server uses
-  // fps only to convert frame counts to milliseconds.
-  const fps = 30;
+$("go").onclick = async () => {
   try {
-    const r = await fetch("api/analyse", {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        blendshapes: tail, head_pose: tpose, fps,
-        utterance_id: $("uid").value.trim(),
-      }),
-    });
-    const j = await r.json();
-    if (!r.ok) { $("err").textContent = j.error || ("HTTP " + r.status); return; }
-    render(j);
-  } catch (e) { $("err").textContent = "server unreachable: " + e.message; }
+    stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+    $("v").srcObject = stream; await $("v").play();
+    $("go").textContent = "camera on";
+    $("go").disabled = true;
+    $("stop").disabled = false;
+    $("live").disabled = false;
+    source = "camera"; synthetic = false;
+    $("srcTag").textContent = "camera";
+    $("srcTag").className = "pill ok";
+    $("pnote").hidden = true;
+    loop();
+  } catch (e) { $("err").textContent = "camera unavailable: " + e.message; }
 };
 
-function render(j) {
-  $("empty").style.display = "none";
-  $("mt").style.display = "";
-  const tb = $("mt").querySelector("tbody");
-  tb.innerHTML = "";
-  const max = Math.max(...Object.values(j.markers).map(m => m.magnitude), 1e-6);
-  for (const [name, m] of Object.entries(j.markers)) {
-    // A feature that is zero on most clips cannot discriminate; the server sends the
-    // zero fraction so "absent" and "this instrument is blind" stay distinguishable.
-    const blind = m.zero_fraction > 0.6;
-    const tr = document.createElement("tr");
-    tr.innerHTML =
-      `<td>${name}</td>` +
-      `<td class="num">${m.magnitude.toFixed(3)}` +
-        `<span class="meter" aria-hidden="true"><i style="width:${(m.magnitude / max * 100).toFixed(1)}%"></i></span></td>` +
-      `<td class="num">${(m.zero_fraction * 100).toFixed(0)}</td>` +
-      `<td><span class="pill ${blind ? "warn" : (m.present_in_window ? "ok" : "none")}">${
-        blind ? "blind — cannot discriminate" : (m.present_in_window ? "marker present" : "no marker in window")
-      }</span></td>`;
-    tb.appendChild(tr);
-  }
-  $("mnote").textContent = `${j.n_frames} frames at ${j.fps} fps · server ${j.server_ms} ms · ` + j.caveats[0];
+// ── synthetic source ───────────────────────────────────────────────────────
+// Drives the identical client -> server path from a generated 52-coefficient stream, so
+// the live panel can be exercised on a machine with no camera and in CI.
+//
+// The generated coefficients are arbitrary and the UI says `synthetic` in the source tag,
+// the beacon and the caption, because the alternative is a reviewer mistaking a generated
+// magnitude for a measurement.
+//
+// Two things had to be right or the panel showed nothing, and both were found by watching
+// it rather than by reading it:
+//
+//   * **The channels have to be the ones the markers read.** The first version drove
+//     indices 0, 1, 2, 14 and 25, which is `_neutral` (a coefficient the project measures
+//     as dead on EmoSign), two brow channels, `eyeLookInRight` (read by no marker) and
+//     `jawOpen` (feeds mouth_open, not one of the six). Five of six markers stayed at
+//     exactly zero and the panel looked broken.
+//   * **Amplitudes have to clear the thresholds.** The head markers need >0.35 rad
+//     (~20 degrees) to count at all, and the blendshape markers fire on
+//     `median + 1.5*MAD` computed per clip. A plain sinusoid at constant amplitude sits
+//     just under that threshold and reports zero forever, so the generator uses a quiet
+//     baseline with periodic bursts - which is also the shape a real marker has, since
+//     ASL non-manual markers are held beats rather than a continuous oscillation.
+//   * **Periods must be shorter than the analysis window.** The first version burst on
+//     2.6-5.2 s periods while a window is only 30 frames (1.0 s at 30 fps), so a channel
+//     was off for most of any given window and five of six rows read exactly 0.000 all the
+//     time. That reads as a broken panel, which is exactly how it was first read. Bursts
+//     now recur every 1.0-1.6 s with a duty around 0.45, so every window catches one.
+const SIM = {
+  browRaise: [3, 4, 5],        // browInnerUp, browOuterUpLeft/Right
+  browFurrow: [1, 2],          // browDownLeft/Right
+  mouthMorpheme: [38, 32, 42, 43],  // mouthPucker, mouthFunnel, mouthShrug*
+  mouthPositive: [44, 45],     // mouthSmileLeft/Right
+};
+let simTimer = null, simT = 0;
 
-  const l = j.linguistic;
-  $("ling").innerHTML = l === null
-    ? 'Supply an ASLLRP utterance id to see its gloss context.'
-    : (!l.available
-        ? `<div class="bad">${l.reason}</div>`
-        : `<dl class="kv"><dt>gloss</dt><dd>${l.gloss}</dd>` +
-          `<dt>tokens</dt><dd>${l.n_tokens}</dd>` +
-          `<dt>markers</dt><dd>${l.markers_present.length ? l.markers_present.join(", ") : "none in the lexical gloss"}</dd></dl>` +
-          `<p class="note">${l.note}</p>` +
-          Object.entries(l.provenance).map(([k, v]) => `<div class="note">${k}: ${v}</div>`).join(""));
-
-  $("unsup").innerHTML =
-    `<p class="bad">affect — ${j.affect.reason}</p>` +
-    `<p class="bad">gloss recognition — ${j.recognition.reason}</p>` +
-    `<p class="note">Both are withheld rather than shown empty, because a number that carries no information is worse than no number.</p>`;
+// One burst per channel per `period` seconds, on for `duty` of that period. Returns an
+// amplitude in 0..1, so the same helper drives every channel with its own rhythm.
+function burst(t, period, duty, phase) {
+  const u = ((t / period + phase) % 1 + 1) % 1;
+  return u < duty ? Math.sin((u / duty) * Math.PI) : 0;
 }
 
-// Report a load failure in the visible error box, not only in the small status
-// line. The status text sits in the header in a muted colour and is easy to
-// miss, which is how a page that is visibly waiting reads as a page that is
-// merely empty.
-init().catch(e => {
+function simFrame() {
+  simT += 1 / 30;
+  const bs = new Array(52).fill(0);
+  // Bursts above ~0.8 peak so the per-clip `median + 1.5*MAD` bar is actually reachable.
+  // `_neutral` (index 0) is left at 0 on purpose: it is one of the coefficients measured
+  // as carrying zero variance on EmoSign, so driving it would exercise nothing.
+  for (const i of SIM.browRaise) bs[i] = 0.85 * burst(simT, 1.30, 0.45, 0.10);
+  for (const i of SIM.browFurrow) bs[i] = 0.85 * burst(simT, 1.10, 0.50, 0.45);
+  for (const i of SIM.mouthMorpheme) bs[i] = 0.80 * burst(simT, 1.55, 0.42, 0.70);
+  for (const i of SIM.mouthPositive) bs[i] = 0.80 * burst(simT, 1.70, 0.38, 0.30);
+  for (let i = 0; i < 52; i++) bs[i] = Math.max(0, Math.min(1, bs[i]));
+  // The head markers gate on |angle| > 0.35 rad and then count large-amplitude turning
+  // points, so a plain sinusoid at 0.55 rad clears the gate on part of every cycle and
+  // supplies well over the 2 required reversals. The first version used 0.12 rad, which is
+  // under the gate, so head_shake and head_nod read exactly zero forever. The period is
+  // kept near a second for the same reason as the bursts above.
+  const yaw = 0.55 * Math.sin(simT * 6.0);
+  const pitch = 0.50 * Math.sin(simT * 5.2 + 1.2);
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
+  // Rz(yaw) @ Ry(pitch), roll fixed at 0, written out row-major because the server's
+  // contract is (T, 4, 4).
+  //
+  // The order is not cosmetic. The server decomposes with the standard ZYX convention
+  // (pitch = arcsin(-r[2,0]), yaw = arctan2(r[1,0], r[0,0])), which assumes exactly this
+  // product order. The first version emitted Ry(yaw) @ Rx(pitch) instead, and under a ZYX
+  // decomposition of that matrix the *pitch* lands in the yaw slot and yaw is identically
+  // zero - so head_shake read 0.000 forever while head_nod tracked the signal that was
+  // meant to be a shake. Both head markers have to be built in the server's convention or
+  // the generator is quietly measuring the wrong axis.
+  pose.push([
+    [cy * cp, -sy, cy * sp, 0],
+    [sy * cp, cy, sy * sp, 0],
+    [-sp, 0, cp, 0],
+    [0, 0, 0, 1],
+  ]);
+  win.push(bs); pose.push([
+    [cy, 0, sy, 0],
+    [0, 1, 0, 0],
+    [-sy, 0, cy, 0],
+    [0, 0, 0, 1],
+  ]);
+  if (win.length > CAP) { win.shift(); pose.shift(); }
+  cap++;
+  paintFill();
+  fpsEma = fpsEma ? fpsEma * 0.9 + 30 * 0.1 : 30;
+  stat("mFps", fpsEma.toFixed(1));
+  pump();
+}
+function startSim() {
+  if (simTimer) return;
+  synthetic = true; source = "synthetic";
+  $("srcTag").textContent = "synthetic";
+  $("srcTag").className = "pill warn";
+  // The generator writes no image, so the preview stays empty by design. Say so here rather
+  // than leaving a black rectangle that reads as a failed camera.
+  $("pnote").hidden = false;
+  $("pnote").textContent =
+    "Synthetic signal: no image is generated, only the 52 coefficients and the head " +
+    "transform the pipeline consumes. Everything to the right is real inference.";
+  $("go").disabled = true;
+  $("stop").disabled = false;
+  $("live").disabled = false;
+  $("err").textContent = "";
+  simTimer = setInterval(simFrame, 1000 / 30);
+}
+function stopSim() {
+  if (simTimer) { clearInterval(simTimer); simTimer = null; }
+  synthetic = false;
+}
+$("sim").onclick = () => {
+  if (simTimer) { reset(); return; }
+  startSim();
+};
+
+// ── live toggle ────────────────────────────────────────────────────────────
+$("live").onclick = () => {
+  running = !running;
+  $("live").setAttribute("aria-pressed", String(running));
+  $("live").textContent = running ? "Pause live" : "Run live";
+  if (running) {
+    $("tNote").textContent =
+      "Running. One window in flight at a time; the stride stretches if the server or the " +
+      "browser falls behind, so nothing queues.";
+    framesAtRequest = cap;   // analyse the window we already have, immediately
+    setBeacon("waiting", "starting");
+    pump();
+  } else {
+    $("tNote").textContent = "Paused. The panel is showing the last window analysed.";
+    if (!inFlight) setBeacon("idle", "paused");
+  }
+};
+
+// ── teardown ───────────────────────────────────────────────────────────────
+function reset() {
+  stopSim();
+  running = false;
+  $("live").setAttribute("aria-pressed", "false");
+  $("live").textContent = "Run live";
+  $("live").disabled = true;
+  // Stop every hardware track, or the camera light stays on after the <video> element is
+  // cleared.
+  if (stream) {
+    for (const track of stream.getTracks()) track.stop();
+    stream = null;
+  }
+  $("v").srcObject = null;
+  win = []; pose = []; cap = 0; last = 0; fpsEma = 0;
+  windows = 0; firstWindowAt = 0; lastWindowAt = 0;
+  history.clear();
+  $("go").textContent = "Start camera";
+  $("go").disabled = false;
+  $("stop").disabled = true;
+  $("err").textContent = "";
+  $("srcTag").textContent = "no source";
+  $("srcTag").className = "tag";
+  $("pnote").hidden = false;
+  $("pnote").textContent =
+    "No image source. Start the camera to see the preview, or use the synthetic signal " +
+    "below to drive the same pipeline without one.";
+  for (const id of ["mFps", "mHz", "mSrv", "mE2E", "mFill"]) stat(id, "—");
+  stat("mCount", "0");
+  $("tNote").textContent =
+    "Idle. At most one request is in flight, so the panel always shows the newest window " +
+    "rather than a queue of stale ones.";
+  setBeacon("idle", "no source");
+}
+$("stop").onclick = reset;
+
+// Browser tab close / reload is an implicit stop. Releasing here prevents the camera light
+// from staying on after the page goes away.
+window.addEventListener("pagehide", () => {
+  stopSim();
+  if (stream) for (const track of stream.getTracks()) track.stop();
+  stream = null;
+});
+
+// Report a load failure in the visible error box, not only in the beacon. The beacon is a
+// small muted dot and easy to miss, which is how a page that is visibly waiting reads as a
+// page that is merely empty.
+init().catch((e) => {
   const msg = (e && e.message) || String(e);
-  $("status").textContent = "model failed to load";
+  setBeacon("error", "model failed");
   $("err").textContent =
-    "Could not load the face model (" + msg + "). " +
-    "This page needs internet access to fetch MediaPipe from a CDN, and a " +
-    "working CPU or GPU delegate. Nothing is wrong with your camera.";
+    "Could not load the face model (" + msg + "). This page needs internet access to fetch " +
+    "MediaPipe from a CDN, and a working CPU or GPU delegate. Nothing is wrong with your " +
+    "camera — the synthetic signal below works without the model.";
 });
 </script>
 </body>

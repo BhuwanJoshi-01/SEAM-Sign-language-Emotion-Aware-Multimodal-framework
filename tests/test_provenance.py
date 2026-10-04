@@ -168,19 +168,53 @@ def values() -> set[str]:
 
 
 def _exempt_lines(doc: str) -> dict[int, str]:
-    """Line numbers waived by `paper/provenance_exemptions.json`, with their reason."""
+    """Line numbers waived by `paper/provenance_exemptions.json`, with their reason.
+
+    Waivers are keyed on the *text* of the waived line, not its number. Line numbers are
+    only valid until the next edit above them: when a section is inserted, every waiver
+    below it silently moves onto whatever text took its place, so the ratchet stops
+    applying where it was written and starts complaining about unrelated lines instead.
+    That is a worse failure than a missing waiver, because it looks like the document grew
+    an untraced number when it did not.
+
+    An anchor that matches nothing is an error rather than a silent skip - a stale anchor
+    means the claim it was covering has been reworded or deleted, and a reviewer needs to
+    decide whether the waiver still applies.
+    """
     path = PAPER / "provenance_exemptions.json"
     if not path.exists():
         return {}
     raw = json.loads(path.read_text())
+    # Groups are written against one document by default; a group may widen itself with an
+    # explicit "doc". Without this, an EXPERIMENT_LOG waiver is checked against
+    # CLAIMS_LEDGER.md and every anchor there is reported as stale.
+    scope = raw.get("_scope")
+    lines = (PAPER / doc).read_text().splitlines()
     out: dict[int, str] = {}
     for group, entry in raw.items():
-        if not isinstance(entry, dict) or "lines" not in entry:
+        if not isinstance(entry, dict) or "anchors" not in entry:
+            continue
+        if not (group.startswith("_") or scope is None or entry.get("doc", scope) == doc):
             continue
         if not entry.get("reason", "").strip():
             raise AssertionError(f"exemption group {group!r} has no stated reason")
-        for ln in entry["lines"]:
-            out[int(ln)] = group
+        for anchor in entry["anchors"]:
+            hits = [i for i, line in enumerate(lines, 1) if anchor in line]
+            if not hits:
+                raise AssertionError(
+                    f"exemption group {group!r} has an anchor matching no line of {doc}:\n"
+                    f"  {anchor!r}\n"
+                    "The waived text has been reworded or removed. Either delete the waiver or "
+                    "update it with a reason that still applies - do not re-point it at whatever "
+                    "line happens to be nearby."
+                )
+            if len(hits) > 1:
+                raise AssertionError(
+                    f"exemption group {group!r} anchor is ambiguous in {doc} "
+                    f"({len(hits)} lines match):\n  {anchor!r}\n"
+                    "Anchors must be unique enough to identify one line."
+                )
+            out[hits[0]] = group
     return out
 
 

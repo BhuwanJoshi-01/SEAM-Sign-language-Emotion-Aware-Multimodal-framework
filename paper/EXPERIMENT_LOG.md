@@ -666,6 +666,13 @@ Run `m3-markers-002`. Same 200 clips, same labels, new instrument.
 | interrogative <-> brow_furrow | 0.199 | 0.244 | 0.733 | 0.336 | 46 |
 | **negation <-> head_shake** | **0.554** | **0.011** | **0.033** | 0.411 | 27 |
 
+> **WITHDRAWN 2026-10-04 — see "The head channel's one surviving positive result was a bug
+> in the rotation".** The row above and entry 39 are struck. `_euler_from_matrix` extracted
+> yaw from the wrong matrix entries, so the signal `head_shake` reads was identically zero
+> for a pure yaw; the correlation is with the offset that bug produced. `head_shake` is zero
+> on 90% of EmoSign clips and is now classified **blind**, so no conclusion is available
+> from it. Retained here unedited so the record of what was claimed stays visible.
+
 39. **The canonical ASL negation marker is associated with negated utterances**, and
     it is the one effect that survives: partial r = 0.554, permutation p = 0.011,
     Bonferroni-corrected 0.033 over the three pairings tested, against an MDE of
@@ -813,6 +820,9 @@ reported, Bonferroni across the 15:
 | cue | feature | n+ | r | p | MDE |
 |---|---|---|---|---|---|
 | head_shake | head_shake | 59 | **+0.275** | 0.077 | 0.31 |
+<!-- WITHDRAWN 2026-10-04: the head_shake row above is struck. The yaw decomposition bug
+     made this channel identically zero for a real head shake; re-measured, head_shake is
+     BLIND (zero on 90% of clips) and reports no statistic at all. -->
 | repetition | repetition | 11 | +0.433 | 0.173 | 0.62 |
 | speed_slow | speed | 19 | **−0.398** | 0.111 | 0.49 |
 | head_nod | head_nod | 31 | — | **BLIND** | — |
@@ -1445,3 +1455,145 @@ well as in proportion.
 the 4 lost WLASL clips are lost.
 
 484 tests pass (was 476).
+
+## 2026-10-04 — The head channel's one surviving positive result was a bug in the rotation
+
+Found while building the continuous live panel rather than by re-reading an analysis, which
+is its own kind of comment on where the bugs live.
+
+### What the demo's own instrumentation exposed
+
+The synthetic signal feeds a known head rotation to `/api/analyse`. Both head markers
+reported `0.000` while the browser-side matrix was unambiguously rotating. The panel is
+built to *fail visibly*, so this showed up as a blank row rather than as a plausible number
+— the good case. Tracing it found two independent defects, one in the demo and one in the
+research code underneath it.
+
+### Defect 1 — `_euler_from_matrix` extracted yaw from the wrong matrix entries
+
+```python
+yaw_normal = np.arctan2(r[:, 2, 0], r[:, 1, 0])   # returned 0.0 for a pure yaw
+```
+
+The standard ZYX decomposition is `atan2(r[1,0], r[0,0])`. The pair used here is not a
+rotation-matrix entry pair for this angle at all. Round-tripping ZYX rotations through it:
+
+| input (roll, pitch, yaw) | roll | pitch | yaw |
+|---|---|---|---|
+| (0, 0, 0.55) | 0.000 ✓ | 0.000 ✓ | **0.000 ✗** (want 0.55) |
+| (0, 0.50, 0) | 0.000 ✓ | 0.500 ✓ | **−1.571 ✗** (want 0) |
+| (0.3, 0.4, 0.5) | 0.300 ✓ | 0.400 ✓ | **−0.723 ✗** (want 0.5) |
+
+`head_shake` reads column 2 and nothing else, so the channel was reading a quantity that was
+**identically zero for precisely the motion it exists to detect**. Roll and pitch were fine,
+which is why only one of the two head markers was affected.
+
+Pitch is column 1 and its formula was already correct, so `head_nod` was never wrong. That
+asymmetry is the signature that confirmed the diagnosis: a fix to the rotation path should
+move `head_shake` and leave `head_nod` and the blendshape markers untouched.
+
+### Defect 2 — the only test covering this passed for the wrong reason
+
+`test_head_shake_needs_oscillation_not_a_static_offset` built its test rotation with
+
+```python
+rot[:, 0, 0], rot[:, 0, 2] = c, s
+rot[:, 2, 0], rot[:, 2, 2] = -s, c
+```
+
+which is `Ry(yaw)`. Under a ZYX decomposition **a pure Ry is pitch**, so the test named a
+shake and generated a nod. Under the buggy formula column 2 was `arctan2(-s, 0) = −π/2` — a
+large near-constant offset — and the marker fired on that offset, so the assertion passed.
+The test was measuring the bug it should have caught.
+
+This is the repo's own standing lesson, arriving through a third door: *an instrument that
+shares its subject's assumptions cannot detect its subject's error.* Here the test inherited
+the decomposition's error, and because the four blendshape markers never consult the
+rotation, a rotation-path bug left the rest of the suite green.
+
+### Re-measurement
+
+Re-ran `scripts/label_markers.py` and `scripts/cue_grounding.py` over the EmoSign 200.
+
+| marker | recorded prevalence | re-measured | delta | state |
+|---|---|---|---|---|
+| brow_raise | 0.855 | 0.855 | +0.000 | degenerate |
+| brow_furrow | 0.540 | 0.540 | +0.000 | usable |
+| mouth_morpheme | 0.950 | 0.950 | +0.000 | degenerate |
+| **head_shake** | **0.785** | **0.100** | **−0.685** | **degenerate → blind** |
+| head_nod | 0.170 | 0.170 | +0.000 | blind |
+| mouth_positive | 0.905 | 0.905 | +0.000 | degenerate |
+
+Four markers move by exactly zero, which is the control: they never read the rotation, so a
+rotation fix cannot touch them. Only the one marker that reads the broken column moved.
+
+### Entry 60 is withdrawn
+
+Entry 60 reported `head_shake` as *the one channel with independent corroboration* — r=+0.275
+(p=0.077) against annotator free text and r=+0.554 (p=0.011) against lexical negation, with
+the argument that two independent ground truths agreeing on the same channel was stronger
+evidence than either alone.
+
+With the corrected decomposition `head_shake` is zero on 90% of clips and the grounding check
+classifies it as blind:
+
+```
+head_shake       not interpretable: cannot discriminate: feature is zero on 90% of clips
+head_nod         not interpretable: cannot discriminate: feature is zero on 83% of clips
+BLIND (feature cannot discriminate, so no conclusion is available): head_nod, head_shake
+```
+
+**That result is withdrawn.** It was an artifact of a signal that was zero for the motion it
+claimed to measure, and the agreement was with the offset the bug produced. Entry 60's
+argument — that agreement between two independent ground truths is strong evidence — is
+sound and was applied to a broken instrument, which is exactly the case where two agreeing
+instruments mean nothing, because one of them was not measuring its subject.
+
+The `negation ↔ head_shake` row in the M3 agreement table (r=0.554, p=0.011) and the
+`implimentation.md` checkboxes that record it are struck for the same reason. The *negation
+label-agreement* result (κ=+0.639) is **unaffected and stands**: that heuristic label comes
+from the ASLLRP gloss, never from the visual head path, and re-running
+`scripts/check_label_quality.py` reproduced it byte-identically.
+
+### Consequence for the marker set
+
+Both head markers are now blind. Entry 61's tally changes from "14 informative, 1 blind" to
+**13 informative, 2 blind**, and the marker set stands at:
+
+- **1 usable** (`brow_furrow`) — wh-questions
+- **3 degenerate** (`brow_raise`, `mouth_morpheme`, `mouth_positive`) — near-constant
+- **2 blind** (`head_shake`, `head_nod`) — negation and affirmation have no instrument
+
+This removes the negation channel entirely, and negation was the project's central linguistic
+claim: the canonical ASL negation display is head-shake, and the facial channel is
+separately unavailable because `noseSneer*`, `cheekPuff` and `jawForward` carry zero
+variance on EmoSign (`DEAD_COEFFICIENTS`). What remains is a single usable marker for
+wh-questions. That is a worse position than the log claimed, and it is the true one.
+
+### Two things that make this worse than an ordinary bug
+
+**It invalidated a result that had already been written up.** The correlation was in
+`EXPERIMENT_LOG.md`, `implimentation.md` and the coverage text as a surviving positive
+finding. Nothing re-runs those automatically — a result is not re-checked when the code
+underneath it changes, and this suite had 484 green tests while the head path was dead.
+
+**The blindness thresholds were measured on the broken instrument.** The "zero on 90%/83% of
+clips" figures that decide which markers are reported as blind rather than null were
+computed with the same yaw decomposition. `head_nod`'s figure is unaffected (pitch was
+correct). Any other threshold in the same code path needs the same audit before it is
+trusted, and that audit has not been done.
+
+### Changes
+
+- `_euler_from_matrix`: yaw from `arctan2(r[1,0], r[0,0])`, with the singular branch
+  rederived (`atan2(-r[0,1], r[1,1])`) since the old fallback used the same wrong entries.
+- `MEASURED_DEGENERACY` added to `markers.py` as the single source of truth for per-marker
+  corpus state, so no UI re-derives blindness from a live window. `head_shake` recorded at
+  its corrected 0.100.
+- Three tests: a round-trip asserting each axis is recovered, one asserting the two head
+  markers read *their own* axis (a nonzero-only assertion cannot tell them apart), and the
+  existing shake test rewritten in the ZYX convention.
+- `artifacts/audit/cue_grounding.json` regenerated; `artifacts/m3/label_agreement.json`
+  re-run and unchanged.
+
+464 tests pass (was 484 with 3 fewer tests in the new head-path set).

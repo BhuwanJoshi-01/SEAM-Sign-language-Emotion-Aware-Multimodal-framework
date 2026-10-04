@@ -83,6 +83,72 @@ MARKERS = (
     "mouth_positive",  # control: should not read as negative
 )
 
+#: What M3 measured about each marker **on the EmoSign 200**, recorded per marker so it
+#: cannot be re-guessed at display time.
+#:
+#: Two properties, both measured, and they are not the same property:
+#:
+#: ``prevalence``
+#:     Fraction of corpus clips on which the clip-level presence criterion fires. A
+#:     marker present on ~90% of clips cannot discriminate *between* clips.
+#: ``zero_fraction``
+#:     Fraction of corpus clips on which the marker is identically zero, which makes it
+#:     **blind**: no conclusion is available from it, and its non-separation from a
+#:     label is not evidence about the label.
+#:
+#: ``state`` is the label the project uses for each, and only three words are allowed:
+#:
+#: ``blind``
+#:     Cannot discriminate at all. Both head markers. Report as unavailable, never as a
+#:     null.
+#: ``degenerate``
+#:     Informative but near-constant across clips, so any agreement statistic sits near
+#:     the base rate. Three of six, including ``mouth_positive`` - which is supposed to be
+#:     the control, and a control present on 90% of clips is not a control.
+#: ``usable``
+#:     Fires on a minority of clips and can separate them. ``brow_furrow`` only.
+#:
+#: **These are properties of a corpus, not of any window.** A live window's own zero
+#: fraction is a different measurement and must never be substituted for these. Doing so
+#: is the bug this table exists to prevent: the demo originally decided blindness in the
+#: browser by testing ``zero_fraction > 0.6``, a threshold nobody chose and nobody
+#: justified, which made a generated test signal report the corpus's blindness back to
+#: the reader as though the instrument had measured it.
+#:
+#: ``head_shake`` was **re-measured** and its recorded value was wrong. See
+#: ``paper/EXPERIMENT_LOG.md`` for the entry that withdrew the negation/head-shake
+#: correlation; the short version is that ``_euler_from_matrix`` extracted yaw from the
+#: wrong matrix entries, so the channel ``head_shake`` reads was identically zero for a
+#: pure yaw. The recorded 0.785 was an artifact of that and the correct figure is 0.100.
+#: Every other row is unchanged by the fix, which is the check that it moved the rotation
+#: path and nothing else.
+#:
+#: Source: ``paper/EXPERIMENT_LOG.md`` entries 27 (prevalence) and 61 (blind), plus the
+#: re-measurement after the yaw fix.
+MEASURED_DEGENERACY: dict[str, dict[str, object]] = {
+    "brow_raise": {"prevalence": 0.855, "zero_fraction": 0.145, "state": "degenerate"},
+    "brow_furrow": {"prevalence": 0.540, "zero_fraction": 0.460, "state": "usable"},
+    "mouth_morpheme": {"prevalence": 0.950, "zero_fraction": 0.050, "state": "degenerate"},
+    "head_shake": {"prevalence": 0.100, "zero_fraction": 0.900, "state": "blind"},
+    "head_nod": {"prevalence": 0.170, "zero_fraction": 0.830, "state": "blind"},
+    "mouth_positive": {"prevalence": 0.905, "zero_fraction": 0.095, "state": "degenerate"},
+}
+
+#: A marker is blind when no conclusion is available from it. Named as a predicate rather
+#: than re-tested at each call site so the threshold lives with the measurement.
+BLIND_STATE = "blind"
+
+
+def is_blind(name: str) -> bool:
+    """Whether M3 measured this marker as unable to discriminate.
+
+    Reads :data:`MEASURED_DEGENERACY`, never a live signal: a window with no energy in a
+    channel says the window is quiet, not that the instrument is blind.
+    """
+    row = MEASURED_DEGENERACY.get(name)
+    return row is not None and row["state"] == BLIND_STATE
+
+
 _IDX = BLENDSHAPE_INDEX
 
 
@@ -242,7 +308,17 @@ def _euler_from_matrix(rot: np.ndarray) -> np.ndarray:
     singular = np.abs(cos_pitch) < 1e-6
 
     roll_normal = np.arctan2(r[:, 2, 1], r[:, 2, 2])
-    yaw_normal = np.arctan2(r[:, 2, 0], r[:, 1, 0])
+    # Yaw is atan2(r[1,0], r[0,0]). The previous pair, atan2(r[2,0], r[1,0]), is not a
+    # rotation-matrix entry pair for this angle at all: for a pure yaw of any size it
+    # returned exactly 0.0, and for a pure pitch it returned +/-pi/2. That is the one
+    # component `head_shake` reads, so the marker was measured against a quantity that was
+    # identically zero for precisely the motion it exists to detect, and no test covered
+    # the decomposition - only the downstream markers, which all read zero and so passed.
+    yaw_normal = np.arctan2(r[:, 1, 0], r[:, 0, 0])
+    # At pitch = +/-pi/2, r[1,0] and r[0,0] both vanish, so yaw is recovered from the
+    # column that survives: substituting p = +/-pi/2 into Rz(y)Ry(p)Rx(r) gives
+    # r[0,1] = -sin(yaw) and r[1,1] = cos(yaw) for either sign of p. Roll is genuinely
+    # unrecoverable there and is set to 0 below.
     yaw_singular = np.arctan2(-r[:, 0, 1], r[:, 1, 1])
 
     roll = np.where(singular, 0.0, roll_normal)
@@ -589,6 +665,11 @@ def describe() -> dict[str, object]:
             "rule": "score > median + k * MAD, computed per clip",
         },
         "dead_coefficients": list(DEAD_COEFFICIENTS),
+        "measured_degeneracy": {k: dict(v) for k, v in MEASURED_DEGENERACY.items()},
+        "degeneracy_source": (
+            "EmoSign 200 (M3): paper/EXPERIMENT_LOG.md entries 27 and 61. Corpus "
+            "properties, not per-window measurements."
+        ),
         "unavailable_markers": {
             "facial_negation": (
                 "the canonical nose-wrinkle + tongue-out negation display is not "

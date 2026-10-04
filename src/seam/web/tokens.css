@@ -681,6 +681,144 @@ tbody tr:hover td {
   padding-left: var(--s-2);
 }
 
+/* ── live instrumentation ───────────────────────────────────────────────────
+ * Components for a panel that updates continuously. Two rules govern all of them:
+ * a bar never appears without its number beside it, and a synthetic input is never
+ * rendered in the same style as a measurement. */
+
+/* Stat tile: a label and a value, nothing else. The hero-metric template — big number,
+   small label, supporting stats, accent — is the category default and carries nothing
+   here that the number alone does not. */
+/* Stat tile grid. Six tiles at a fixed 3x2 rather than `auto-fit`: auto-fit produced five
+   columns at panel width and left the sixth alone in a second row beside a large empty
+   cell, because a partial row has to fill the remaining track with the gap colour. An even
+   divisor has no orphan row by construction. */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+@media (max-width: 420px) {
+  .stats { grid-template-columns: repeat(2, 1fr); }
+}
+.stat {
+  background: var(--panel);
+  padding: var(--s-3);
+}
+.stat b {
+  display: block;
+  font-size: var(--text-md);
+  font-weight: 640;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--tracking-tight);
+  line-height: 1.25;
+}
+.stat span {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+  letter-spacing: 0.02em;
+  margin-top: 1px;
+}
+/* Over budget is a state, not an opinion. */
+.stat.over b { color: var(--warn); }
+.stat.bad b { color: var(--bad); }
+
+/* Level meter. Sits directly under its own value and shares its accent, so the eye can
+   link them. A bar with no number is meaningless, and so is a bar implying a range it
+   does not have: the scale is 0..max across the analysed windows and is labelled.
+
+   `display: block` is load-bearing, not tidiness. As a <span> this stayed an inline box, so
+   `width` and `height` did not apply and it measured 0.0 x 18.0: the meter rendered as
+   nothing at all and the screenshot read as a pale empty band. An inline element whose
+   size is set in CSS but which does not take that size is invisible in a way no assertion
+   on the markup would catch. */
+.level {
+  display: block;
+  position: relative;
+  height: 6px;
+  margin-top: 0.35rem;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  overflow: hidden;
+}
+.level i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  display: block;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width var(--dur) var(--ease-out);
+}
+.level.blind i { background: var(--fg-subtle); }
+.level.absent i { background: color-mix(in srgb, var(--fg) 18%, transparent); }
+
+/* Trend across analysis windows. A time series beside its own current value, so it
+   carries something the number does not: whether a cue is steady, drifting or spiking.
+   It is not a sparkline standing in for content. */
+.trend {
+  display: block;
+  width: 100%;
+  height: 22px;
+  margin-top: 0.3rem;
+  overflow: visible;
+}
+.trend path.line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.25;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.trend path.area {
+  fill: color-mix(in srgb, var(--accent) 16%, transparent);
+  stroke: none;
+}
+.trend line.base {
+  stroke: var(--line);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.trend.blind path.line { stroke: var(--fg-subtle); }
+.trend.blind path.area { fill: color-mix(in srgb, var(--fg) 8%, transparent); }
+
+/* The live indicator. One authored motion, and it stops when inference stops — a pulsing
+   dot that keeps pulsing with the camera off is a lie about the state. */
+.beacon {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: var(--text-xs);
+  font-weight: 620;
+  letter-spacing: 0.03em;
+  color: var(--fg-subtle);
+}
+.beacon::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-pill);
+  background: var(--fg-subtle);
+}
+.beacon[data-state="live"] { color: var(--ok); }
+.beacon[data-state="live"]::before {
+  background: var(--ok);
+  animation: seam-pulse 1.6s var(--ease-out) infinite;
+}
+.beacon[data-state="waiting"] { color: var(--warn); }
+.beacon[data-state="waiting"]::before { background: var(--warn); }
+.beacon[data-state="error"] { color: var(--bad); }
+.beacon[data-state="error"]::before { background: var(--bad); }
+@keyframes seam-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 55%, transparent); }
+  70% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--ok) 0%, transparent); }
+}
+
 /* Definition grid for measurement panels. */
 .kv {
   display: grid;

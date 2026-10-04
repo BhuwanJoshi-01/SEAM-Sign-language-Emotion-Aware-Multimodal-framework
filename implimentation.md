@@ -327,8 +327,11 @@ dictionary signing with no discourse context. →
   syntactic label tracks clip length (interrogative r_pb=+0.68), and an integral
   statistic inherits it — interrogative/brow_raise went +0.414 (p=0.015) -> **-0.045**
   on a per-frame mean
-- [X] **negation <-> head_shake: r=0.554, perm p=0.011, Bonferroni 0.033, MDE 0.411** —
-  survives duration control; interrogative pairings are powered nulls
+- [X] ~~**negation <-> head_shake: r=0.554, perm p=0.011, Bonferroni 0.033, MDE 0.411** —
+  survives duration control; interrogative pairings are powered nulls~~ —
+  **WITHDRAWN 2026-10-04.** The yaw decomposition in `_euler_from_matrix` read the wrong
+  matrix entries, so `head_shake` was identically zero for a real head shake. Re-measured:
+  prevalence 0.785 → 0.100, state degenerate → **blind**. The correlation is with the bug.
 - [X] `serve/app.py` + `web/index.html` + `seam serve` — live demo, client-side MediaPipe,
   no video leaves the browser; withholds affect and recognition with their measured reasons
 - [X] `make serve-check` HTTP smoke gate (caught a 44-byte 404 page that started "successfully")
@@ -359,9 +362,13 @@ dictionary signing with no discourse context. →
   not marker-feature evidence, and counting them would have manufactured agreement
 - [X] 15 cue/feature tests, duration-controlled, permutation + MDE + Bonferroni:
   **nothing survives** — the assumed feature set is *not* validated
-- [X] the head channel is the one with independent corroboration: `head_shake` r=+0.275
-  vs annotator text, and r=+0.554 (p=0.011) vs lexical negation in the previous run
+- [X] ~~the head channel is the one with independent corroboration: `head_shake` r=+0.275
+  vs annotator text, and r=+0.554 (p=0.011) vs lexical negation in the previous run~~ —
+  **WITHDRAWN 2026-10-04**, same cause. Two agreeing instruments mean nothing when one is
+  not measuring its subject.
 - [X] `head_nod` reported BLIND (zero on 83% of clips) rather than as a null
+- [X] **`head_shake` now also reported BLIND** (zero on 90% of clips) — the tally is
+  13 informative / 2 blind, and negation has no working instrument at all
 - [X] **6 annotator-named cues have no feature at all** — `head_tilt`, `eye_widen`,
   `blink_close`, `gaze_shift`, `fingerspelling`, `body_posture` — a data-derived spec
   for M4's feature set

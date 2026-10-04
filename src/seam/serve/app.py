@@ -162,10 +162,16 @@ def measure(window: Window) -> dict[str, Any]:
         per_marker[name] = {
             "magnitude": round(float(magnitude.get(name, 0.0)), 4),
             "peak": round(float(x.max()) if len(x) else 0.0, 4),
+            # Measured on *this window*. Never read as the marker being blind - see
+            # `corpus` below, which carries that measurement and where it came from.
             "zero_fraction": round(zero_frac, 4),
             "iqr": round(float(iqr), 5),
             "present_in_window": bool(presence[name]["present"]),
             "unit": presence[name]["peak_unit"],
+            # What M3 measured about the marker on the EmoSign 200, sent verbatim so the
+            # UI reports a measurement instead of re-deriving one from the window in front
+            # of it.
+            "corpus": dict(VM.MEASURED_DEGENERACY.get(name, {})),
         }
 
     return {
@@ -186,11 +192,19 @@ def measure(window: Window) -> dict[str, Any]:
             ),
         },
         "caveats": [
-            "Four of the six markers fire on 79-95% of EmoSign clips, so their "
-            "magnitudes barely separate windows; only head_shake and brow_furrow are "
-            "currently discriminative (M3)",
-            "head_nod is zero on 83% of clips and is reported as blind, not as absent",
-            "A magnitude here is measured signal, not a validated linguistic label",
+            "Three of the six markers fire on 79-95% of EmoSign clips, so their "
+            "magnitudes barely separate windows; only brow_furrow is usable (M3, "
+            "EXPERIMENT_LOG entry 27)",
+            "Both head markers are blind: head_shake is zero on 90% of EmoSign clips and "
+            "head_nod on 83%. No conclusion is available from either, and their "
+            "non-separation from a label is not evidence about the label",
+            "head_shake was re-measured after a rotation-decomposition bug was fixed and "
+            "its previous value was wrong; a published correlation attributed to this "
+            "channel has been withdrawn",
+            "mouth_positive is the control and is degenerate at 0.905 prevalence, which "
+            "is itself a finding rather than a pass",
+            "A magnitude here is measured signal, not a validated linguistic label, and "
+            "this process cannot verify the landmarks the tab sent it",
         ],
     }
 

@@ -492,17 +492,91 @@ def test_marker_thresholding_is_clip_relative() -> None:
     assert M.fire(sig)["brow_furrow"].mean() < 0.2
 
 
+def _zyx(roll: np.ndarray, pitch: np.ndarray, yaw: np.ndarray) -> np.ndarray:
+    """(T, 4, 4) rotations as Rz(yaw) @ Ry(pitch) @ Rx(roll).
+
+    The product order matters and is not a detail: :func:`markers._euler_from_matrix`
+    decomposes with the ZYX convention, which assumes exactly this order. A pure Ry is
+    *pitch* under that decomposition, so a test that builds one and calls it "yaw" is
+    testing a different axis than it names - which is how the original version of
+    ``test_head_shake_needs_oscillation_not_a_static_offset`` came to pass for the wrong
+    reason.
+    """
+    cr, sr = np.cos(roll), np.sin(roll)
+    cp, sp = np.cos(pitch), np.sin(pitch)
+    cy, sy = np.cos(yaw), np.sin(yaw)
+    rz = np.zeros((*roll.shape, 3, 3))
+    ry = np.zeros((*roll.shape, 3, 3))
+    rx = np.zeros((*roll.shape, 3, 3))
+    rz[..., 0, 0], rz[..., 0, 1], rz[..., 1, 0], rz[..., 1, 1] = cy, -sy, sy, cy
+    rz[..., 2, 2] = 1.0
+    ry[..., 0, 0], ry[..., 0, 2], ry[..., 1, 1] = cp, sp, 1.0
+    ry[..., 2, 0], ry[..., 2, 2] = -sp, cp
+    rx[..., 0, 0] = 1.0
+    rx[..., 1, 1], rx[..., 1, 2], rx[..., 2, 1], rx[..., 2, 2] = cr, -sr, sr, cr
+    out = np.zeros((*roll.shape, 4, 4))
+    out[..., :3, :3] = rz @ ry @ rx
+    out[..., 3, 3] = 1.0
+    return out
+
+
+def test_euler_decomposition_round_trips_each_axis() -> None:
+    """The head path must recover the angles it is given, on each axis separately.
+
+    ``head_shake`` and ``head_nod`` read columns 2 and 1 of the decomposition and nothing
+    else, so a decomposition that is wrong on one axis leaves those two markers reading a
+    quantity unrelated to head motion while every downstream test still passes - the
+    blendshape markers do not consult the rotation at all, and a head test only asserts
+    that *something* is nonzero.
+
+    This asserts the actual values. The previous implementation used
+    ``arctan2(r[2,0], r[1,0])`` for yaw, which returned exactly ``0.0`` for a pure yaw of
+    any size and ``+/-pi/2`` for a pure pitch, so ``head_shake`` was measured against a
+    signal that was identically zero for the motion it exists to detect.
+    """
+    for roll, pitch, yaw in [
+        (0.0, 0.0, 0.0),
+        (0.0, 0.0, 0.55),  # pure yaw - the case the old formula returned 0.0 for
+        (0.0, 0.5, 0.0),  # pure pitch - the case the old formula returned pi/2 for
+        (0.3, 0.4, 0.5),
+        (-0.2, 0.7, -0.4),
+        (0.0, 1.5, 0.3),  # near the pitch = pi/2 singularity
+    ]:
+        rot = _zyx(np.full(1, roll), np.full(1, pitch), np.full(1, yaw))
+        got = M._euler_from_matrix(rot)[0]
+        assert got[0] == pytest.approx(roll, abs=1e-6), f"roll at {(roll, pitch, yaw)}"
+        assert got[1] == pytest.approx(pitch, abs=1e-6), f"pitch at {(roll, pitch, yaw)}"
+        assert got[2] == pytest.approx(yaw, abs=1e-6), f"yaw at {(roll, pitch, yaw)}"
+
+
+def test_head_markers_read_their_own_axis() -> None:
+    """A shake must be visible to ``head_shake`` and not mainly to ``head_nod``.
+
+    Yaw and pitch are the two components that were swapped by the decomposition bug, so a
+    test that only checks each marker is nonzero on some rotation cannot tell them apart.
+    This drives each axis separately and asserts the separation.
+    """
+    fps = 25.0
+    t = np.arange(100) / fps
+    bs = base_blendshapes(100)
+    zero = np.zeros(100)
+
+    sig = M.signals(bs, _zyx(zero, zero, 0.6 * np.sin(2 * np.pi * 3.0 * t)), fps)
+    assert sig.head_shake.sum() > 0, "a 0.6 rad yaw oscillation must register as head_shake"
+    assert sig.head_nod.sum() == 0.0, "a pure yaw must not register as head_nod"
+
+    sig = M.signals(bs, _zyx(zero, 0.6 * np.sin(2 * np.pi * 3.0 * t), zero), fps)
+    assert sig.head_nod.sum() > 0, "a 0.6 rad pitch oscillation must register as head_nod"
+    assert sig.head_shake.sum() == 0.0, "a pure pitch must not register as head_shake"
+
+
 def test_head_shake_needs_oscillation_not_a_static_offset() -> None:
     fps = 25.0
     t = np.arange(100) / fps
     rot_static = np.tile(np.eye(4), (100, 1, 1))
     assert M.signals(base_blendshapes(100), rot_static, fps).head_shake.sum() == 0.0
 
-    yaw = 0.6 * np.sin(2 * np.pi * 3.0 * t)
-    rot = np.tile(np.eye(4), (100, 1, 1))
-    c, s = np.cos(yaw), np.sin(yaw)
-    rot[:, 0, 0], rot[:, 0, 2] = c, s
-    rot[:, 2, 0], rot[:, 2, 2] = -s, c
+    rot = _zyx(np.zeros(100), np.zeros(100), 0.6 * np.sin(2 * np.pi * 3.0 * t))
     sig = M.signals(base_blendshapes(100), rot, fps)
     assert sig.head_shake.sum() > 0
     assert M.fire(sig)["head_shake"].mean() > 0.1
