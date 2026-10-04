@@ -87,7 +87,7 @@ def _write_mp4(frames: list[np.ndarray], path: Path, fps: float) -> None:
             "20",
             str(path),
         ]
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True, stdin=subprocess.DEVNULL)
 
 
 def _fit_camera(

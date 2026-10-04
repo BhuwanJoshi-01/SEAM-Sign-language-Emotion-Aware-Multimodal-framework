@@ -121,7 +121,9 @@ def extract_frames(video: Path, out_dir: Path, *, fps: float | None = None) -> i
         vf.insert(0, f"fps={fps}")
     cmd = ["ffmpeg", "-y", "-v", "error", "-i", str(video), "-vf", ",".join(vf)]
     cmd += [str(out_dir / "frame_%05d.png")]
-    subprocess.run(cmd, check=True)
+    # stdin closed: a child that reads the terminal can swallow or echo the user's
+    # keystrokes, which floods the log with SS3 escapes and hides real progress.
+    subprocess.run(cmd, check=True, stdin=subprocess.DEVNULL)
     return len(list(out_dir.glob("frame_*.png")))
 
 
@@ -168,6 +170,7 @@ def run(
         cwd=str(Path(root).expanduser() / "main"),
         check=True,
         timeout=timeout,
+        stdin=subprocess.DEVNULL,
     )
     return parse(out_json, fps=fps or 25.0, checkpoint=ckpt)
 
