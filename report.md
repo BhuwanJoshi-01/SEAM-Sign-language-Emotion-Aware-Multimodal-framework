@@ -54,7 +54,7 @@ Update this table whenever you change a status. It is the only part most people 
 | 2 | M4 gate decision | | `DONE — NEEDS VERIFICATION` — (c) refuted, so (a) | | |
 | 3 | BU non-manual XML request | | `DONE` — 51 collections, 43,038 events, 200/200 joined | | |
 | 4 | DWPose corpus download | | `NOT STARTED` | | |
-| 5 | M7 preference study | | `IN PROGRESS` — stimuli built; **baseline is an author decision** | | |
+| 5 | M7 preference study | | `IN PROGRESS` — arms defined and both render; **blocked only on human raters** | | |
 
 **Project state at the time this form was written** — so a later reader can tell
 whether a number has moved:
@@ -502,6 +502,84 @@ confident nonsense first:
 
 **A degraded probe is worse than no probe**, because it reads as a finding. Both of these
 would have been committed as bugs in code that is in fact correct.
+
+---
+
+## 2026-10-04 — SMPLer-X replaces landmark guessing; the demo runs
+
+The landmark retargeting's leg failure was not a bug to be patched. It was the ceiling of
+the method: MediaPipe gives two 2D points per bone, and monocular depth for a leg is not
+recoverable from them. Measured on EmoSign, hip→knee distance spans 0.06–1.42
+torso-lengths across 200 clips.
+
+`Sapien_Pipeline` pointed at the way out: **SMPLer-X**, a learned whole-body SMPL-X
+regressor. Its `smpler_x_b32` checkpoint, the SMPL-X parameters and a working conda env were
+all already on this machine.
+
+### What it changed
+
+| | landmark arm | SMPLer-X arm |
+|---|---|---|
+| Pose source | 2D landmarks → per-joint rotation solve | learned regressor, no solve |
+| Legs | unusable (0.06–1.42 torso-lengths) | learned prior, coherent |
+| Seated vs standing | seated signer drawn standing | genuinely seated poses |
+| Body shape | one neutral mannequin | per-clip `betas` |
+| Face | MediaPipe blendshapes | `expression` + `jaw_pose` from SMPL-X |
+
+`SmplxFrame` already had exactly the SMPL-X fields, so **nothing in the avatar had to
+change** to consume it. New code is one adapter, `seam/perception/smplerx.py`, which shells
+out to the read-only tree as a subprocess and parses its JSON.
+
+The protected tree was never written to. `SMPLERX_ROOT` only ever runs
+`main/nsl_runner.py` and reads what it writes.
+
+### Three bugs that only rendering could have caught
+
+1. **Upside-down bodies.** SMPLer-X emits `global_orient` in its own training convention
+   (x averages **129°**), putting the head at y = −0.69 m. Upstream never rotates these —
+   it renders them inside a PyTorch3D camera — so there was no conversion to copy. Fixed by
+   deriving it from two anatomical invariants: head above pelvis, front toward the viewer.
+   Both are measured before and after. First attempt under-corrected because it derived
+   "up" with `global_orient=0`, which measures the chain rather than the body; still
+   under-corrected a second time because the facing vector ignored the root rotation, and
+   rendered a **perfectly good-looking back view**, which is exactly how that bug hides.
+2. **Empty frames.** The regressor works in a metric camera frame — the mesh centroid is
+   **22.6 m** from the origin while the renderer sits 2.6 m out. The first run produced a
+   2.9 KB MP4 with **two unique colours** in it, while every measurement said the pose was
+   fine. This is why the demo reports content-bearing numbers, not just exit codes.
+3. **Collapsed frames.** The regressor occasionally loses the person. Detection is on
+   head-above-pelvis distance, which is sharply bimodal (0.68–0.69 m for frames 0–39, then
+   0.17–0.18 m for 40–42). A median-deviation test was tried first and found **zero**
+   outliers in a clip that visibly has three, because signing moves far from the median by
+   definition. Repaired frames are interpolated, and reported as interpolated.
+
+### Measured, 4 clips / 541 frames
+
+Detection coverage 1.00 / 1.00 / 0.99 / 1.00. Five collapsed frames repaired in total. Head
+above pelvis in **100%** of frames after correction. Every mesh `is_human_mesh: true`.
+
+**These are pipeline measurements, not quality measurements.** They show the front end runs
+and produces coherent poses. They do not show Arm A *looks* better — that needs human
+raters, and that is now the only thing blocking M7.
+
+### The comparison is fair by construction, and that took three attempts
+
+One camera for both arms (separate fits gave different scales, and a viewer asked which is
+better will say "the bigger one"); camera distance from the 99th percentile of vertex
+radius over both arms (`max` let one stray vertex shrink both to specks); identical frame
+rate with the side-by-side truncated to the shorter arm (resampling one arm would double the
+other's speed); no arm label drawn on any frame, because the same files feed the blinded
+study.
+
+### A real bug the unit tests caught
+
+`_minimal_rotation` handled antiparallel vectors by rotating π about a hardcoded **x** axis.
+A half turn about `a` itself leaves `a` unchanged, so the antiparallel case silently
+returned the identity instead of a 180° flip. Found by
+`test_minimal_rotation_opposite_vectors`, not by looking at a render — because on real
+clips the case never arises, which is precisely why it needed a synthetic test.
+
+**453 passed, 0 failed.** Lint and mypy clean.
 
 | Field | Entry |
 |---|---|
