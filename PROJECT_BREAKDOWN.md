@@ -43,7 +43,7 @@ path's legs are noise (see §4), and the regressor says nothing about meaning.
 
 | Stage | What it does | State | Evidence |
 |---|---|---|---|
-| **M0** | Reproducibility gate | **met** | `make readiness`, `make repro` |
+| **M0** | Reproducibility gate | **regressed to OPEN** | `make readiness`: 6/10. Three blockers were false negatives; see §2.1 |
 | **M1** | Causal claim on affect | **refuted** | `paper/EXPERIMENT_LOG.md` |
 | **M2** | Latency budget on RTX 3050 | **met**, marginal | 19.7–20.4 FPS, K6 |
 | **M3** | Non-manual instrumentation | **met** | 2,407 utterances, 100% mapped |
@@ -56,6 +56,58 @@ path's legs are noise (see §4), and the regressor says nothing about meaning.
 
 Two of nine stages are refuted hypotheses and one is at chance. That is the honest state and
 it is recorded rather than buried.
+
+### 2.1 M0 regressed because the gate was wrong, not because data was lost
+
+`make readiness` reported 5/10 with four blockers. All four were false negatives, and all three
+errors had one shape: **the gate stated a fact it had not measured.**
+
+| resource | the gate said | what was actually on disk |
+|---|---|---|
+| `wlasl_local` | `reuse path absent: /home/bhuwan/Videos/wlasl/videos` | **3,863 clips, 7.43 GB, at exactly that path** |
+| `rafdb_mediapipe` | `not fetched yet` | **2.72 GB, 6/6 shards readable** — 14,329 train + 3,071 val + 3,071 test rows |
+| `how2sign_mediapipe_pose` | `not fetched yet` | genuinely absent — now fetching, 31 shards / 14.12 GB, ungated |
+| `asl_citizen_poses` | `not fetched yet` | genuinely absent — 81 GB, reviewer-owned, not started |
+
+Three fixes, each measured:
+
+1. **`_state_for` emitted `reuse path absent: <path>` without touching the filesystem.** It
+   had no manifest for `wlasl_local` because the reuse fallback keyed on *directory
+   existence*, and `seam_data/wlasl/` exists — holding 5,130 **landmark shards**, the derived
+   output of the M1 extraction, and zero videos. `dest="wlasl"` was doing double duty for a
+   corpus and its extracted keypoints. The fallback now keys on "no file matching this
+   resource's patterns is here".
+2. **A partially-downloaded resource read as complete.** With (1) fixed, How2Sign reported
+   `5/5 verified, ok` with 5 of 31 shards on disk. There is now a completeness check against
+   `approx_bytes`, requiring the shortfall to exceed both 2% and an absolute 50 MB — the
+   floor matters, because `approx_bytes` is an order of magnitude, not a contract.
+3. **`rafdb`'s real location was never declared.** Its shards sit at `seam_data/rafdb/`
+   under local names differing from the HuggingFace paths in `sources`.
+
+**WLASL's recorded defect was wrong, and the repair was never needed.** `sources.py` claimed
+*"untrimmed `.part` downloads whose mp4 containers have no `moov` atom"*, needing ffmpeg
+re-cuts, and a test asserted that guess was still on file. An ffprobe sweep of **all 3,863**
+files (42 s, 8 workers) found 92 undecodable and **every one is 813 KB of YouTube HTML**
+beginning `<!DOCTYPE html>`, saved as `0.mp4` — zero moov faults.
+
+Worse, `_FILENAME` did not match `N_yt.mp4.part.mp4` (it required `_yt` adjacent to `.part`),
+so **1,206 of 3,863 files were invisible to the indexer** and the HTML placeholders were the
+only candidate for their own `(gloss, instance)`. **88 of the 92 have a sibling that decodes
+cleanly**, so the repair is a substitution, not a transcode, and `index_on_disk` now performs
+it and records it:
+
+| | before | after |
+|---|---|---|
+| index keys | 2,661 | **3,775** |
+| keys bound to an HTML error page | 92 | **4** |
+| usable clips | ~2,565 | **3,771** |
+
+The 4 genuinely lost: `beard/1`, `children/1`, `corn/0`, `decide/0`. `wlasl_repaired/` was
+**empty** — the earlier attempt produced nothing and left a directory that looked like
+progress. Run `make wlasl-index` to see the current count.
+
+**M0 is still OPEN, and now correctly so:** ASL Citizen (81 GB) and NSL provenance are
+outstanding, and 4 of 3,863 WLASL clips are gone.
 
 ---
 

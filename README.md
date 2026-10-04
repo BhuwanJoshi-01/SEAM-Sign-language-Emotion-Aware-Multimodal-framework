@@ -46,6 +46,10 @@ make serve-check      # boots the server and asserts the HTTP contract of both p
 
 make demo-avatar      # video -> SMPLer-X -> SMPL-X mesh -> animated .glb + .mp4 + manifest
                       # ~15 min on the GPU; publishes a `status` while it runs
+
+make readiness        # the M0 gate: every dataset, its real state, and a named owner
+make wlasl-index      # WLASL on-disk index, incl. HTML-placeholder substitutions
+make fetch-how2sign   # 31 How2Sign pose shards, 14.1 GB, resumable
 ```
 
 `/avatar` loads the animated GLB in three.js. **three.js is vendored** under
@@ -81,7 +85,7 @@ what survives if everything after it is cut. See `plan.md`.
 
 | Milestone | Gate | State | Evidence |
 |---|---|---|---|
-| **M0** data spine | readiness table · 200/200 clips · face gate · tests green | **REGRESSED to OPEN** | `make readiness` reports **5/10 resources**; `wlasl_local` path is gone and `rafdb` / `how2sign` / `asl_citizen` were never fetched |
+| **M0** data spine | readiness table · 200/200 clips · face gate · tests green | **REGRESSED to OPEN** | `make readiness` reports **6/10 resources**; see the note below |
 | **M1** confound audit | measured FER bias, 2+ models, CIs | **met — hypothesis REFUTED** | 2,565 clips, 3 FER models, −0.008…+0.002, MDE 0.003–0.008 |
 | **M2** efficiency | 3050 p95 + peak VRAM, CI-enforced | **met, K6 marginal** | 73.2 ms p95 · 186 MB for 6 live models · 20.4 FPS (repeats 19.7–20.4) |
 | **M3** `L` labels | marker labels with provenance + cue correlation | **met** | 43,038 human non-manual annotations, 200/200 joined; negation ↔ head-shake r=0.554 |
@@ -100,12 +104,27 @@ instruments**: two refuted hypotheses, a measured result on how unreliable heuri
 pseudo-labels are in this domain, a reusable adversarial/probe harness that passes its own
 positive control, and a working SMPL-X avatar system. See `PROJECT_BREAKDOWN.md`.
 
-**M0 closed 2026-09-26, and has since regressed.** The EmoSign affect benchmark is reachable:
-its `video_name` trailing numeric token is the ASLLRP utterance ID, measured at **200/200**,
-and the face-visibility gate passed **24/24** sampled clips (face detected in 94–100% of
-frames, median 30 of 52 blendshapes carrying real temporal variance). The *dataset spine*
-still resolves; the readiness gate no longer passes because three optional resources were
-never fetched and one local path no longer exists. See `paper/EXPERIMENT_LOG.md`.
+**M0 closed 2026-09-26, and has since regressed** — but for one reason only, and it was
+three false negatives in the gate rather than lost data:
+
+| resource | reported before | actually on disk |
+|---|---|---|
+| `wlasl_local` | "reuse path absent" | **3,863 clips, 7.43 GB** at the very path named |
+| `rafdb_mediapipe` | "not fetched yet" | **2.72 GB, 6/6 shards readable** (14,329 train rows) |
+| `how2sign_mediapipe_pose` | "not fetched yet" | genuinely absent; 31 shards, 14.12 GB, ungated — `make fetch-how2sign` |
+
+The dataset spine still resolves: the EmoSign join is **200/200** and the face-visibility gate
+passed **24/24** sampled clips (face in 94–100% of frames, median 30 of 52 blendshapes with
+real temporal variance). What remains open is ASL Citizen (81 GB, reviewer-owned, not
+started) and NSL provenance, plus 4 of 3,863 WLASL clips that are genuinely lost.
+
+**WLASL's recorded defect was wrong.** `sources.py` said *"untrimmed `.part` downloads with no
+`moov` atom"*, needing ffmpeg re-cuts, and a test asserted that guess was still recorded. An
+ffprobe sweep of all 3,863 files found 92 undecodable, every one of them 813 KB of **YouTube
+HTML** saved as `0.mp4` — zero moov faults. 88 of the 92 have a sibling
+`N_yt.mp4.part.mp4` that decodes, so the repair is a substitution and `wlasl.index_on_disk`
+now performs it: **3,771 usable clips**, up from the ~2,565 the broken indexer reported. See
+`paper/EXPERIMENT_LOG.md`.
 
 ## The remaining data risk
 

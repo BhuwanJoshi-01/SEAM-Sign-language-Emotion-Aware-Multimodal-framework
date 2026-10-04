@@ -7,7 +7,8 @@ PIP ?= /home/bhuwan/miniconda3/envs/slr/bin/pip
 SMPLX ?= /mnt/Volume2/SignLanguagge/NSL Data/Sapien_Pipeline/models/smplx/SMPLX_NEUTRAL.npz
 
 .PHONY: help setup lint fmt typecheck test test-fast data readiness emosign landmarks facegate \
-        doctor bench train repro provenance alignment paper clean distclean demo-avatar
+        doctor bench train repro provenance alignment paper clean distclean demo-avatar \
+        fetch-how2sign wlasl-index
 
 help: ## List targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -46,6 +47,15 @@ readiness: ## Print the readiness table with blockers and owners  [M0 GATE]
 
 emosign: ## Report the EmoSign label distribution and the ASLLRP join
 	$(PY) -m seam.cli data emosign
+
+fetch-how2sign: ## Fetch the 31 How2Sign pose shards (14.1 GB, resumable)  [M5]
+	$(PY) scripts/fetch_how2sign.py
+
+wlasl-index: ## Report the WLASL on-disk index, incl. HTML-placeholder substitutions
+	PYTHONPATH=src $(PY) -c "from pathlib import Path; from seam.data.wlasl import index_on_disk, is_placeholder; \
+		r=Path('/home/bhuwan/Videos/wlasl/videos'); s={}; i=index_on_disk(r,s); \
+		print(f'{len(i)} keys, {len(s)} substitutions, {sum(1 for v in i.values() if is_placeholder(v))} unrecoverable'); \
+		[print('  ',k) for k,v in sorted(i.items()) if is_placeholder(v)]"
 
 landmarks: ## Extract landmarks + blendshapes for the EmoSign 200
 	$(PY) -m seam.cli landmarks extract --dataset emosign
