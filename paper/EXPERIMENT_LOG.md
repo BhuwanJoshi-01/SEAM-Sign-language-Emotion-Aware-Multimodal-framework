@@ -1358,3 +1358,90 @@ All four demo clips regenerated and re-verified: max error vs `smplx_mesh` 6.4�
 **Also fixed on the page, both found by rendering rather than by reading:**
 `new AnimationMixer()` with no scene root made `clipAction` throw; and framing before the
 skeleton was bound measured an identity skeleton (0.40 × 0.46 × 0.31 m for a 1.72 m body).
+
+---
+
+## 2026-10-04 — The M0 gate was reporting three things that were not true
+
+`make readiness` said `M0 gate: OPEN`, 5/10 resources usable, and named four blockers. Every
+one of the four was wrong, in a different way, and all three errors had the same shape: the
+gate stated a fact it had not measured.
+
+### 1. `wlasl_local`: "reuse path absent" — for a 7.43 GB corpus that was on disk
+
+The message read `reuse path absent: /home/bhuwan/Videos/wlasl/videos`. That path held 667
+gloss directories and 7.43 GB. The gate never looked: `_state_for` emitted
+`reuse path absent: <path>` whenever a resource had no manifest, with no filesystem access.
+
+The reason there was no manifest: the reuse fallback keyed on *directory existence*, and
+`seam_data/wlasl/` exists — holding **5,130 landmark shards**, the derived output of the M1
+extraction, and zero videos. So `dest="wlasl"` was doing double duty for the raw corpus and
+its extracted keypoints, and "the directory exists" was true while "the corpus is here" was
+false.
+
+Fixed by keying the fallback on "no file matching this resource's patterns is here" rather
+than "no directory here".
+
+### 2. `rafdb_mediapipe`: "not fetched yet" — for 2.72 GB that was on disk and readable
+
+All six parquet shards were present at `seam_data/rafdb/` under local names
+(`train_0-of-4.parquet` … `test.parquet`) that differ from the HuggingFace paths in
+`sources`. The registry declared `dest="rafdb_mediapipe"`, which does not exist. Declared the
+real location as a reuse path; the gate then verified 6/6.
+
+Verified readable, not merely present: 14,329 train + 3,071 val + 3,071 test rows, 20 columns
+each, via pyarrow.
+
+### 3. WLASL's recorded cause was wrong, and the repair was never needed
+
+`sources.py` recorded the defect as *"untrimmed .part downloads whose mp4 containers have no
+moov atom"*, with a repair pass requiring ffmpeg re-cuts.
+
+An ffprobe sweep of **all 3,863 files** (42 s, 8 workers) found 92 undecodable — and every
+one is **813 KB of YouTube HTML** beginning `<!DOCTYPE html>`, saved as `0.mp4`. Not one
+moov fault. The registry had carried a guess, and a test asserted the guess was still there.
+
+Worse, `_FILENAME` did not match `N_yt.mp4.part.mp4` at all — it required `_yt` adjacent to
+`.part`. So 1,206 of 3,863 files (31%) were invisible to the indexer, which left the HTML
+placeholders as the only candidate for their own `(gloss, instance)`.
+
+**88 of the 92 have a sibling `<n>_yt.mp4.part.mp4` that decodes cleanly.** The repair is a
+substitution, not a transcode. Only 4 are genuinely lost: `beard/1`, `children/1`, `corn/0`,
+`decide/0`.
+
+| | before | after |
+|---|---|---|
+| index keys | 2,661 | **3,775** |
+| keys bound to an HTML error page | 92 | **4** |
+| usable clips | ~2,565 | **3,771** |
+
+`wlasl_repaired/` was empty (0 files), so the earlier repair attempt had produced nothing at
+all and left a directory that looked like work in progress.
+
+### 4. A partially-downloaded resource read as complete
+
+With the fallback fixed, `how2sign` reported **`5/5 verified, ok`** with 5 of its 31 shards
+on disk. Every file present verified, because the gate had no notion of how much to expect.
+
+Added a completeness check against `approx_bytes`, requiring the shortfall to exceed both 2%
+and an absolute 50 MB floor. The floor matters: `approx_bytes` is an order of magnitude, not
+a contract, and a 384-byte stand-in CSV against a declared 67 KB is 99% short without being
+a broken download. The check targets interrupted bulk transfers, which are large in bytes as
+well as in proportion.
+
+### Result
+
+`6/10` usable, each remaining row with a measured cause and a named owner:
+
+| resource | state | cause |
+|---|---|---|
+| `wlasl_local` | partial | 4 of 3,863 unrecoverable; 88 substituted automatically |
+| `rafdb_mediapipe` | ok (reused local) | reuse path declared; 6/6 verified |
+| `how2sign_mediapipe_pose` | partial → ok | 31 shards, 14.12 GB, ungated; fetching |
+| `asl_citizen_poses` | missing | 81 GB, reviewer-owned, not started |
+| `nsl_local` | blocked | provenance and terms, reviewer decision |
+
+`M0 gate: OPEN` still, correctly: ASL Citizen (81 GB) and NSL provenance are outstanding, and
+the 4 lost WLASL clips are lost.
+
+484 tests pass (was 476).

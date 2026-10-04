@@ -265,14 +265,16 @@ RESOURCES: tuple[Resource, ...] = (
             "3,863 mp4 across 668 glosses. Used for the recognition backbone and, more "
             "importantly, as the label-free substrate for the M1 confound audit."
         ),
-        measured={"clips": "3863", "gloss_dirs": "668", "bytes": "7.0 GB"},
+        measured={"clips": "3863", "gloss_dirs": "668", "bytes": "7.43 GB"},
         verify=Verify.VIDEO_SAMPLE,
         sample_size=300,
         open_issues=(
-            "The raw tree contains untrimmed .part downloads whose mp4 containers "
-            "have no moov atom and do not decode. A repair pass (ffmpeg re-cut to "
-            "the annotated frame range) is required before M1 extraction; the "
-            "prior ISLR system measured 1,130 repairable of 3,863.",
+            "Measured by an ffprobe sweep of all 3,863 files, not sampled: 92 are "
+            "undecodable, and every one is 813 KB of YouTube HTML saved as 0.mp4, not a "
+            "truncated .part container as previously recorded here. 88 of the 92 have a "
+            "sibling <n>_yt.mp4.part.mp4 holding the real decodable clip, which "
+            "`wlasl.index_on_disk` substitutes automatically; 4 are genuinely lost "
+            "(beard/1, children/1, corn/0, decide/0). Usable clips: 3,771.",
         ),
         blocking=("M1", "M5"),
     ),
@@ -298,6 +300,11 @@ RESOURCES: tuple[Resource, ...] = (
         role=Role.FER_PRETRAIN,
         license_status=LicenseStatus.GRANTED,
         dest="rafdb_mediapipe",
+        # Already on disk, complete and readable, under a different directory name than the
+        # one `dest` declares. Declaring it here rather than re-downloading 2.7 GB is the
+        # point of a reuse path; the readiness gate reported this resource as "not fetched
+        # yet" while all six shards sat in the data root.
+        reuse_path="/mnt/DevProd/seam_data/rafdb",
         sources=(
             Source(
                 path="data/train-00000-of-00004.parquet",
@@ -307,8 +314,18 @@ RESOURCES: tuple[Resource, ...] = (
         approx_bytes=2_700_000_000,
         note=(
             "RAF-DB with MediaPipe already extracted, for non-signer FER pretraining and "
-            "as one of the models the M1 audit indicts."
+            "as one of the models the M1 audit indicts. On disk as six shards under "
+            "seam_data/rafdb with local names (train_0-of-4 ... test.parquet) that differ "
+            "from the HuggingFace paths in `sources`; the reuse path is the truth here."
         ),
+        measured={
+            "shards": "6",
+            "train_rows": "14329",
+            "val_rows": "3071",
+            "test_rows": "3071",
+            "bytes": "2.6 GB",
+            "all_shards_readable": "yes, via pyarrow",
+        },
         blocking=("M1", "M4"),
     ),
     Resource(
@@ -323,12 +340,20 @@ RESOURCES: tuple[Resource, ...] = (
                 url=f"{_HF}/Kavitha/how2sign_user3_mediapipe_pose/resolve/main/README.md",
             ),
         ),
-        approx_bytes=0,
+        approx_bytes=14_120_432_425,
         note=(
             "How2Sign MediaPipe pose keypoints, published separately from the 80 h of "
             "video. Carries the official English captions, which is what makes it the "
-            "translation substrate: ASLLRP English is not in the mirror."
+            "translation substrate: ASLLRP English is not in the mirror. 31 parquet shards; "
+            "fetch with `scripts/fetch_how2sign.py`, which resumes a dropped connection "
+            "rather than restarting 14 GB."
         ),
+        measured={
+            "shards": "31",
+            "bytes": "14.12 GB",
+            "gated": "False",
+            "remote_sizes_sum": "14120432425 (queried from the remote 2026-10-04)",
+        },
         blocking=("M5",),
     ),
     Resource(

@@ -38,7 +38,13 @@ log = get(__name__)
 #:
 #: so ``(gloss, instance_id)`` is the join key and the ``_yt``/``.part`` suffix
 #: predicts exactly the class that needs a repair pass.
-_FILENAME = re.compile(r"^(?P<instance>\d+)(?P<yt>_yt)?(?P<part>\.part)?\.mp4$")
+# Measured shapes in the local corpus, all 3,863 files:
+#   N.mp4                  2,657   pre-trimmed isolated signs
+#   N_yt.mp4.part.mp4      1,206   YouTube excerpts whose download was interrupted
+# The inner `.mp4` matters. A pattern expecting `_yt` adjacent to `.part` matches only the
+# first shape, which left all 1,206 YouTube excerpts invisible to the indexer and made the
+# 92 HTML placeholders the only candidate for their own (gloss, instance).
+_FILENAME = re.compile(r"^(?P<instance>\d+)(?P<yt>_yt)?(?P<inner>\.mp4)?(?P<part>\.part)?\.mp4$")
 
 #: Probe concurrency. ffprobe is IO-bound on a warm page cache; 8 workers keeps
 #: the 3,863-file sweep in the tens of seconds without saturating a machine that
@@ -55,10 +61,12 @@ class WlaslError(RuntimeError):
 #: repair that cannot work.
 #:
 #: ``html_placeholder``  the downloader saved an HTML error page under an .mp4
-#:                       name. Measured on this machine: all 92 failures of the
-#:                       2,657 local clips are of this kind - the first bytes are
-#:                       ``<!DOCTYPE html>``. There is no video in the file and no
-#:                       repair can recover one; the only fix is a re-download.
+#:                       name. Measured on this machine: 92 of the 3,863 local files
+#:                       are 813 KB of YouTube HTML beginning ``<!DOCTYPE html>``.
+#:                       **88 of the 92 are recoverable** — a sibling
+#:                       ``<n>_yt.mp4.part.mp4`` holds the real, decodable clip — so this
+#:                       is a substitution, not a re-download. Only 4 have no sibling and
+#:                       are genuinely lost. `index_on_disk` performs the substitution.
 #: ``truncated``        a real mp4 whose ``moov`` atom is missing because the
 #:                       download stopped before the end. Repairable when the
 #:                       annotation bounds the sign inside a longer video.
@@ -157,26 +165,68 @@ def load_annotation(path: Path) -> list[WlaslClip]:
     return clips
 
 
-def index_on_disk(root: Path) -> dict[tuple[str, int], Path]:
+def is_placeholder(path: Path) -> bool:
+    """Whether the file is an HTML error page saved under an ``.mp4`` name.
+
+    A content test, not a name test. The downloader wrote 813 KB of YouTube HTML to 92
+    files named ``0.mp4``, so any rule keyed on ``.part`` in the name misses every one of
+    them - and all 92 are *not* lost: 88 have a sibling ``<n>_yt.mp4.part.mp4`` that decodes
+    cleanly, which is a recoverable substitution rather than a re-download.
+    """
+    try:
+        with path.open("rb") as fh:
+            head = fh.read(256)
+    except OSError:
+        return False
+    return classify_failure(head, "") == FAILURE_HTML
+
+
+def index_on_disk(
+    root: Path, substitutions: dict[str, str] | None = None
+) -> dict[tuple[str, int], Path]:
     """Map ``(gloss, instance_id)`` -> file, by scanning the gloss directories.
 
-    Keyed on the gloss directory plus the instance id in the filename, because
-    that is what is actually on disk. Later files for the same key win only if
-    the earlier one is a ``.part`` download, since a ``.part`` is by definition
-    the incomplete one.
+    Keyed on the gloss directory plus the instance id in the filename, because that is what
+    is actually on disk.
+
+    Two preferences, in order, and the first one is the load-bearing one:
+
+    1. **A real container beats an HTML placeholder.** `0.mp4` sorts before
+       `0_yt.mp4.part.mp4`, so a naive scan binds each of the 92 affected (gloss, instance)
+       keys to the error page and never sees the valid sibling beside it. Measured on this
+       corpus: 92 placeholders, 88 recoverable this way, 4 genuinely lost.
+    2. A non-``.part`` file beats a ``.part`` one, since a ``.part`` is by definition the
+       interrupted download. This is a tiebreak only - the recoverable donor *is* a
+       ``.part``, so applying it first would discard the only good copy.
+
+    `substitutions`, if given, is filled with ``placeholder -> donor`` relative paths so the
+    substitution is recorded rather than happening silently.
     """
     index: dict[tuple[str, int], Path] = {}
     if not root.is_dir():
         return index
+    placeholders: dict[tuple[str, int], Path] = {}
     for gloss_dir in sorted(p for p in root.iterdir() if p.is_dir()):
         for f in sorted(gloss_dir.iterdir()):
             m = _FILENAME.match(f.name)
             if not m or not f.is_file():
                 continue
             key = (gloss_dir.name, int(m.group("instance")))
+            if is_placeholder(f):
+                placeholders.setdefault(key, f)
+                continue
             existing = index.get(key)
             if existing is None or (".part" in existing.name and ".part" not in f.name):
                 index[key] = f
+
+    for key, bad in placeholders.items():
+        if key in index:
+            if substitutions is not None:
+                substitutions[str(bad.relative_to(root))] = str(index[key].relative_to(root))
+            continue
+        # No usable sibling. Keep the placeholder so the clip is reported as a failure with
+        # a reason, rather than silently disappearing from the index.
+        index[key] = bad
     return index
 
 

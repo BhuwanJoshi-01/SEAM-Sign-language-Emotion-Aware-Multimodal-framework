@@ -288,6 +288,20 @@ def fetch(
     return Outcome(resource.id, Action.MISSING, 0, 0, "no strategy applies")
 
 
+def _has_matching_files(root: Path, patterns: Iterable[str]) -> bool:
+    """Whether ``root`` holds at least one file matching any of ``patterns``.
+
+    Used to decide whether the declared local path actually holds the resource, as opposed
+    to merely existing. `seam_data/wlasl/` exists and holds 5,130 *landmark shards* — the
+    derived output of the M1 extraction — and zero videos. "The directory exists" was
+    therefore true while "the corpus is here" was false, so the readiness gate reported a
+    7 GB corpus that was sitting on disk as absent.
+    """
+    if not root.is_dir():
+        return root.is_file()
+    return any(next(root.rglob(p), None) is not None for p in patterns)
+
+
 def manifest_for(resource_id: str, data_root: Path) -> Manifest:
     """Verify a resource's local footprint and return its manifest.
 
@@ -295,11 +309,15 @@ def manifest_for(resource_id: str, data_root: Path) -> Manifest:
     yields an empty manifest, which the readiness table would then report as
     "missing" immediately after a successful fetch - a false negative on the one
     resource the whole affect milestone depends on.
+
+    The reuse fallback triggers on "no matching files here", not on "no directory here".
+    A declared `dest` can end up holding a *derived* product of the same pipeline - the
+    landmark shards beside the corpus they were extracted from - and keying the fallback on
+    directory existence then hides the corpus entirely.
     """
     resource = get_resource(resource_id)
+    patterns = _scan_patterns(resource)
     root = resource.local_path(data_root)
-    if not root.exists() and resource.reuse_path:
-        root = Path(resource.reuse_path)
     # A fetcher may have recorded a different reuse location than the registry
     # declares; the marker on disk is the more recent truth.
     marker = resource.local_path(data_root) / ".reused_from"
@@ -307,6 +325,10 @@ def manifest_for(resource_id: str, data_root: Path) -> Manifest:
         recorded = Path(marker.read_text(encoding="utf-8").strip())
         if recorded.is_dir():
             root = recorded
+    elif resource.reuse_path and not _has_matching_files(root, patterns):
+        reuse = Path(resource.reuse_path)
+        if _has_matching_files(reuse, patterns):
+            root = reuse
 
     if resource.is_single_file:
         manifest = Manifest(resource_id=resource_id, root=str(root))
@@ -315,7 +337,6 @@ def manifest_for(resource_id: str, data_root: Path) -> Manifest:
         return manifest
 
     kind = _probe_kind(resource)
-    patterns = _scan_patterns(resource)
 
     if resource.verify is Verify.VIDEO_SAMPLE:
         return _sampled_scan(resource, root, kind=kind, patterns=patterns)

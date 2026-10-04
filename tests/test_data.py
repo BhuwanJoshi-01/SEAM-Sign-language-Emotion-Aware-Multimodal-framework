@@ -343,8 +343,213 @@ def test_wlasl_is_configured_for_sampled_video_verification() -> None:
     wlasl = get_resource("wlasl_local")
     assert wlasl.verify is Verify.VIDEO_SAMPLE
     assert wlasl.sample_size >= 100
-    # The known-bad-member problem must be recorded, not just configured around.
-    assert any("moov" in issue for issue in wlasl.open_issues)
+    # The known-bad-member problem must be recorded, not just configured around. The
+    # recorded cause was wrong for months: it said "untrimmed .part downloads with no moov
+    # atom", and a full ffprobe sweep of all 3,863 files found the failure is 92 files of
+    # 813 KB YouTube **HTML** saved as 0.mp4 - zero of them moov problems. So the assertion
+    # is on the measured cause, and it fails if the note drifts back to the wrong one.
+    issues = " ".join(wlasl.open_issues).lower()
+    assert "html" in issues, (
+        f"the recorded WLASL defect is not the measured one: {wlasl.open_issues}"
+    )
+    assert "moov" not in issues, (
+        "the WLASL open issue still claims a missing moov atom; a full sweep measured 0 of "
+        "3,863 files with that fault and 92 HTML placeholders"
+    )
+
+
+# ── the on-disk index: placeholder substitution ───────────────────────────────
+
+
+def _fake_mp4(path: Path, payload: bytes = b"\x00\x00\x00\x18ftypisom") -> Path:
+    path.write_bytes(payload + b"\x00" * 64)
+    return path
+
+
+def _html_mp4(path: Path) -> Path:
+    path.write_bytes(b"<!DOCTYPE html><html><body>video unavailable</body></html>" + b" " * 800)
+    return path
+
+
+def test_filename_pattern_matches_the_shapes_actually_on_disk() -> None:
+    """`N_yt.mp4.part.mp4` is 1,206 of the 3,863 local files.
+
+    A pattern that misses it leaves every YouTube excerpt invisible to the indexer, which is
+    how 92 HTML placeholders ended up as the only candidate for their own (gloss, instance).
+    """
+    from seam.data.wlasl import _FILENAME
+
+    for name, want_instance in (
+        ("0.mp4", 0),
+        ("10.mp4", 10),
+        ("0_yt.mp4.part.mp4", 0),
+        ("137_yt.mp4.part.mp4", 137),
+    ):
+        m = _FILENAME.match(name)
+        assert m is not None, f"{name!r} did not match the filename pattern"
+        assert int(m.group("instance")) == want_instance
+
+
+def test_a_valid_sibling_beats_an_html_placeholder(tmp_path: Path) -> None:
+    """`0.mp4` sorts first, so a naive scan binds the key to the error page.
+
+    Measured on the real corpus: 92 placeholders, 88 with a decodable
+    `0_yt.mp4.part.mp4` beside them, 4 with nothing.
+    """
+    from seam.data.wlasl import index_on_disk
+
+    gloss = tmp_path / "about"
+    gloss.mkdir()
+    _html_mp4(gloss / "0.mp4")
+    donor = _fake_mp4(gloss / "0_yt.mp4.part.mp4")
+
+    subs: dict[str, str] = {}
+    index = index_on_disk(tmp_path, subs)
+    assert index[("about", 0)] == donor, "the placeholder won over the real container"
+    assert subs == {"about/0.mp4": "about/0_yt.mp4.part.mp4"}
+
+
+def test_a_placeholder_with_no_sibling_still_appears_in_the_index(tmp_path: Path) -> None:
+    """Reported as a failure with a reason, rather than silently vanishing.
+
+    A clip that disappears from the index is indistinguishable from an annotation that was
+    never written, which is how 4 genuinely lost clips could have gone unnoticed.
+    """
+    from seam.data.wlasl import index_on_disk, is_placeholder
+
+    gloss = tmp_path / "corn"
+    gloss.mkdir()
+    bad = _html_mp4(gloss / "0.mp4")
+
+    index = index_on_disk(tmp_path)
+    assert ("corn", 0) in index
+    assert index[("corn", 0)] == bad
+    assert is_placeholder(bad)
+
+
+def test_placeholder_detection_is_a_content_test_not_a_name_test(tmp_path: Path) -> None:
+    """The defect has nothing to do with the filename.
+
+    Every one of the 92 is named `0.mp4` with no `.part` anywhere, so a rule keyed on `.part`
+    misses all of them.
+    """
+    from seam.data.wlasl import is_placeholder
+
+    html = _html_mp4(tmp_path / "0.mp4")
+    assert ".part" not in html.name
+    assert is_placeholder(html)
+
+    real = _fake_mp4(tmp_path / "1.mp4")
+    assert not is_placeholder(real)
+
+    # A truncated .part with a real container is not a placeholder.
+    part = _fake_mp4(tmp_path / "2_yt.mp4.part.mp4")
+    assert not is_placeholder(part)
+
+
+def test_the_partial_file_is_still_demoted_among_real_containers(tmp_path: Path) -> None:
+    """The `.part` tiebreak survives, it is just no longer the first rule.
+
+    Applied first it would discard the only good copy, because the recoverable donor *is* a
+    `.part`.
+    """
+    from seam.data.wlasl import index_on_disk
+
+    gloss = tmp_path / "again"
+    gloss.mkdir()
+    partial = _fake_mp4(gloss / "3_yt.mp4.part.mp4")
+    _fake_mp4(gloss / "3.mp4")
+    assert index_on_disk(tmp_path)[("again", 3)] == gloss / "3.mp4"
+    assert partial.is_file()
+
+
+def test_a_partially_fetched_resource_is_not_reported_ok(tmp_path: Path) -> None:
+    """Every file present verifying is not the same as the resource being complete.
+
+    Measured: how2sign read "5/5 verified, ok" with 5 of its 31 shards on disk, and
+    "ok (reused local)" for a corpus the gate had never looked at. A gate that cannot
+    distinguish finished from in-progress reports progress as completion.
+
+    Sizes are scaled down and written sparse, so the declared size stays above the absolute
+    floor without materialising anything. Asserting this against the real resource would mean
+    writing its declared 14 GB, which is its own kind of mistake.
+    """
+    from dataclasses import replace
+
+    from seam.data.readiness import (
+        _SIZE_FLOOR_BYTES,
+        _SIZE_TOLERANCE,
+        _state_for,
+    )
+    from seam.data.sources import Verify
+
+    want = _SIZE_FLOOR_BYTES * 4
+    res = replace(get_resource("how2sign_mediapipe_pose"), approx_bytes=want, verify=Verify.EXISTS)
+    assert res.approx_bytes > 0, "declared size is required for the completeness check"
+
+    def manifest(fraction: float) -> Manifest:
+        m = Manifest(resource_id=res.id, root=str(tmp_path))
+        # Sparse: st_size reports the full length, no blocks are allocated.
+        for i, part in enumerate((0.6 * fraction, 0.4 * fraction)):
+            p = tmp_path / f"train-{i:05d}-of-00031.parquet"
+            with p.open("wb") as fh:
+                fh.truncate(int(want * part))
+            m.files.append(verify_file(p.name, p))
+        assert abs(m.total_bytes / want - fraction) < 0.02
+        return m
+
+    done_state, _, done_blocker = _state_for(res, manifest(1.0))
+    part_state, integrity, part_blocker = _state_for(res, manifest(0.13))
+
+    assert done_state is readiness_mod.State.OK, (
+        f"a complete resource reported {done_state}: {done_blocker}"
+    )
+    assert part_state is readiness_mod.State.PARTIAL, (
+        f"a 13%-fetched resource reported {part_state}; the completeness check is not firing"
+    )
+    assert "incomplete" in part_blocker
+    assert "%" in integrity
+    assert _SIZE_TOLERANCE < 1.0
+
+
+def test_a_rough_estimate_on_a_small_resource_is_not_called_incomplete(tmp_path: Path) -> None:
+    """The absolute floor exists so a fixture is not mistaken for a broken download.
+
+    `approx_bytes` is an order of magnitude, not a contract: 384 bytes against a declared
+    67 KB is 99% short, and flagging it would make the gate permanently red for the M0 tests
+    and for any small resource whose estimate was rough.
+    """
+    from dataclasses import replace
+
+    from seam.data.readiness import _SIZE_FLOOR_BYTES, _state_for
+    from seam.data.sources import Verify
+
+    res = replace(get_resource("emosign_labels"), approx_bytes=67_018, verify=Verify.EXISTS)
+    p = tmp_path / "emosign_dataset.csv"
+    p.write_text("utterance_id,sentiment\n1,positive\n")
+    m = Manifest(resource_id=res.id, root=str(tmp_path))
+    m.files.append(verify_file(p.name, p))
+    state, _, blocker = _state_for(res, m)
+    assert m.total_bytes < _SIZE_FLOOR_BYTES
+    assert state is not readiness_mod.State.PARTIAL, blocker
+    assert "incomplete" not in blocker
+
+
+def test_an_unknown_size_cannot_be_called_incomplete(tmp_path: Path) -> None:
+    """`approx_bytes = 0` means "not declared", not "zero bytes expected"."""
+    from dataclasses import replace
+
+    from seam.data.readiness import _state_for
+    from seam.data.sources import Verify
+
+    res = replace(get_resource("emosign_labels"), approx_bytes=0, verify=Verify.EXISTS)
+    p = tmp_path / "emosign_dataset.csv"
+    p.write_text("utterance_id,sentiment\n1,positive\n")
+    m = Manifest(resource_id=res.id, root=str(tmp_path))
+    m.files.append(verify_file(p.name, p))
+    state, _, blocker = _state_for(res, m)
+    assert state is not readiness_mod.State.PARTIAL
+    assert "incomplete" not in blocker
 
 
 def test_emosign_video_is_fully_decoded_not_sampled() -> None:

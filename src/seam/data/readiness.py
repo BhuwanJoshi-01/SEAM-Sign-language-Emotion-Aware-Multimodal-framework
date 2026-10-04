@@ -85,6 +85,48 @@ BLOCKERS: dict[str, str] = {
 }
 
 
+def _describe_reuse_path(resource: Resource) -> tuple[bool, str]:
+    """Actually look at the reuse path. ``(present, description)``.
+
+    This used to report ``reuse path absent: <path>`` whenever a resource had no manifest,
+    without ever touching the filesystem. It was wrong: `wlasl_local` was reported absent
+    while 667 gloss directories and 7.0 GB sat at exactly the path named in the message. A
+    gate that states a fact it did not measure is worse than no gate, because every
+    downstream decision inherits the error — and here it sent the plan to treat 7 GB of
+    already-downloaded data as a fresh 7 GB fetch.
+    """
+    rp = resource.reuse_path
+    if not rp:
+        return False, "no reuse path declared"
+    p = Path(rp)
+    if not p.exists():
+        return False, f"declared reuse path does not exist: {rp}"
+    if p.is_file():
+        return True, f"{p.name}, {p.stat().st_size / 1e6:.1f} MB"
+    try:
+        entries = list(p.iterdir())
+    except OSError as e:  # pragma: no cover - permissions
+        return False, f"reuse path unreadable: {e}"
+    if not entries:
+        return False, f"reuse path is empty: {rp}"
+    return True, f"present at {rp} ({len(entries)} entries)"
+
+
+#: A resource is short of its declared size by more than this fraction when it is
+#: called incomplete. 2% absorbs shard-count rounding and container overhead without
+#: letting a half-finished download read as complete.
+_SIZE_TOLERANCE = 0.02
+
+#: ...and the shortfall must also exceed this many bytes in absolute terms.
+#:
+#: `approx_bytes` is an order-of-magnitude estimate, not a contract, so a small resource with
+#: a rough estimate would otherwise be reported incomplete forever: a 384-byte stand-in CSV
+#: against a declared 67 KB is 99% short, and that is a fixture, not a broken download. What
+#: this check exists to catch is an *interrupted bulk transfer* — how2sign reading `ok` with
+#: 5 of its 31 shards on disk — and that is always large in bytes as well as in proportion.
+_SIZE_FLOOR_BYTES = 50_000_000
+
+
 def _state_for(resource: Resource, manifest: Manifest | None) -> tuple[State, str, str]:
     """Return ``(state, integrity_summary, blocker)`` for one resource."""
     if not resource.usable:
@@ -95,9 +137,19 @@ def _state_for(resource: Resource, manifest: Manifest | None) -> tuple[State, st
         )
 
     if manifest is None or not manifest.files:
-        if resource.reuse_path:
-            return State.MISSING, "n/a", f"reuse path absent: {resource.reuse_path}"
-        return State.MISSING, "n/a", "not fetched yet"
+        present, desc = _describe_reuse_path(resource)
+        if not resource.reuse_path:
+            return State.MISSING, desc, "not fetched yet"
+        if present:
+            # The bytes are there and no manifest has been built over them yet. That is a
+            # different state from "absent", and a much cheaper one to resolve.
+            return (
+                State.PARTIAL,
+                desc,
+                "no manifest over the reuse path; the data is present but unverified "
+                f"(owner: {OWNERS.get(resource.id, 'implementer')})",
+            )
+        return State.MISSING, desc, f"reuse path absent: {desc}"
 
     counts = manifest.summary()
     total = len(manifest.files)
@@ -132,6 +184,22 @@ def _state_for(resource: Resource, manifest: Manifest | None) -> tuple[State, st
             State.PARTIAL,
             f"{bad}/{total} failed verification",
             (f"{bad} clips missing or undecodable; re-run `seam data fetch --all`"),
+        )
+
+    # Is what is here all of what there should be? Without this, a resource mid-download
+    # reads as `ok` because every file present verifies: how2sign showed "5/5 verified, ok"
+    # with 5 of its 31 shards on disk. A gate that cannot tell finished from unfinished
+    # reports progress as completion.
+    want = int(resource.approx_bytes or 0)
+    shortfall = want - manifest.total_bytes
+    if want and shortfall > want * _SIZE_TOLERANCE and shortfall > _SIZE_FLOOR_BYTES:
+        got_pct = 100 * manifest.total_bytes / want
+        return (
+            State.PARTIAL,
+            f"{manifest.total_bytes / 1e9:.2f} GB of {want / 1e9:.2f} GB expected "
+            f"({got_pct:.0f}%), {total} files verified",
+            f"incomplete: {100 - got_pct:.0f}% of the declared {want / 1e9:.2f} GB is absent "
+            f"(owner: {OWNERS.get(resource.id, 'implementer')})",
         )
 
     integrity = f"{total - bad}/{total} verified"
