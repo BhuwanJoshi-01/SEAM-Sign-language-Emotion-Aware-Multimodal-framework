@@ -54,7 +54,7 @@ Update this table whenever you change a status. It is the only part most people 
 | 2 | M4 gate decision | | `DONE — NEEDS VERIFICATION` — (c) refuted, so (a) | | |
 | 3 | BU non-manual XML request | | `DONE` — 51 collections, 43,038 events, 200/200 joined | | |
 | 4 | DWPose corpus download | | `NOT STARTED` | | |
-| 5 | M7 preference study | | `BLOCKED — no stimuli exist` | | |
+| 5 | M7 preference study | | `IN PROGRESS` — stimuli built; **baseline is an author decision** | | |
 
 **Project state at the time this form was written** — so a later reader can tell
 whether a number has moved:
@@ -413,7 +413,7 @@ ethical dimension specific to this project: a study of ASL avatar quality run on
 hearing people does not establish whether the work is *good*, only that some raters
 preferred one video to another. That distinction must be written down either way.
 
-> **Status: two blockers down, two to go.** The mesh export and the stimulus pipeline
+> **Status 2026-10-04: real stimuli exist. The blocker is now a decision, not code.** The mesh export and the stimulus pipeline
 > were **built 2026-09-30** — `seam.avatar.mesh` writes real binary glTF (verified by
 > re-loading) and `scripts/make_stimuli.py` produces `.glb` per clip from real extracted
 > landmarks. What remains:
@@ -428,6 +428,33 @@ preferred one video to another. That distinction must be written down either way
 >
 > Steps 3 and 4 do **not** block this one. The demo still renders a table of marker
 > magnitudes — that is unchanged and is not what raters will be shown.
+
+### 2026-10-04 — stimuli built, and the remaining blocker is a question, not a task
+
+Nancy Mahatha's `a29fc01` merged (see git log). Her tooling produced:
+
+- `artifacts/m7a/stimuli/` — 4 clips of **real SMPL-X geometry**, 10,475 vertices,
+  `is_proxy: false`, from real EmoSign landmarks.
+- `artifacts/m7a/study/public/` — 4 rendered `.mp4` at 480x600, opaque filenames,
+  public manifest verified free of condition labels.
+- `artifacts/m7a/study/private/blinding_key.json` — never shown to a rater.
+
+**Verified visually**, not assumed: the renders are front-facing. `check_facing.py`
+measures the nose as the most +z vertex and confirms the camera at yaw 210 faces the
+viewer; an earlier read of a small thumbnail suggested otherwise and was wrong.
+
+**What still blocks the study is the baseline condition, and it is not a coding task.**
+One arm cannot support a pairwise forced choice — comparing two renderings of the same
+system measures noise. Both scripts refuse to invent a baseline, correctly. The questions
+are written up in `paper/provenance/TASK5_QUESTIONS_FOR_AUTHOR.md` (a file both scripts
+cite that did not exist until now).
+
+**New finding, Q4 in that document:** `measure_posture.py` reports all signers are
+**seated**, but the renderer draws a standing body, and MediaPipe's leg tracking on these
+clips is unusable — hip-to-knee distance ranges 0.06 to 1.42 torso-lengths. Raters would
+see a seated signer standing upright. Needs an author decision.
+
+**No ratings exist and none have been simulated.**
 
 | Field | Entry |
 |---|---|

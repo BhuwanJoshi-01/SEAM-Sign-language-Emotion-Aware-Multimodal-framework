@@ -38,22 +38,20 @@ from seam.avatar.synthesis import load_smplx, model_rest_pose
 #: tests are valuable without it (they use a synthetic stand-in rest pose) but the most
 #: important one - that the spine's curvature is not inflated - only means something
 #: against real proportions, because the inflation factor *is* a property of the real
-#: ratio between pelvis->spine3 and pelvis->shoulders.
 # Candidate locations for the licence-gated SMPL-X model, in priority order.
 #
-# `SEAM_SMPLX_MODEL` is the project-wide convention and comes first: the original list
+# `SEAM_SMPLX_MODEL` is the project-wide convention and comes first. The original list
 # held two hardcoded paths, one of them a Windows desktop belonging to whoever wrote the
-# test, so these checks silently skipped on every other machine and on CI. A test that
-# cannot run is not a test - and one that skips quietly is worse, because it reads as
-# coverage in a report. The original paths are kept so the file still works on the
-# machine it was written on.
-_MODEL_CANDIDATES: tuple[Path, ...] = tuple(
-    p
-    for p in (
-        Path(v).expanduser()
-        for v in ([os.environ["SEAM_SMPLX_MODEL"]] if os.environ.get("SEAM_SMPLX_MODEL") else [])
-    )
-) + (
+# test, so these checks skipped silently on every other machine and on CI - and a test
+# that skips quietly reads as coverage in a report. The original paths are kept so the
+# file still works on the machine it was written on.
+_ENV_MODEL = (
+    (Path(os.environ["SEAM_SMPLX_MODEL"]).expanduser(),)
+    if os.environ.get("SEAM_SMPLX_MODEL")
+    else ()
+)
+_MODEL_CANDIDATES: tuple[Path, ...] = (
+    *_ENV_MODEL,
     Path("C:/Users/nancy/Desktop/.models/smplx"),
     Path.home() / ".models" / "smplx",
 )

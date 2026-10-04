@@ -8,6 +8,7 @@ convention is settled and the study renderer's default can be judged against it.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -16,8 +17,16 @@ import numpy as np
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 
-MODEL = Path("C:/Users/nancy/Desktop/.models/smplx")
-OUT = Path("C:/Users/nancy/AppData/Local/Temp/posturecheck")
+#: Licence-gated SMPL-X model. `SEAM_SMPLX_MODEL` first, then the author's local
+#: location. The original was a single hardcoded Windows desktop path, which made this
+#: script unrunnable on any other machine and on CI; the fallback is kept so it still
+#: works where it was written.
+MODEL = Path(
+    os.environ["SEAM_SMPLX_MODEL"]
+    if os.environ.get("SEAM_SMPLX_MODEL")
+    else r"C:/Users/nancy/Desktop/.models/smplx"
+)
+OUT = Path(os.environ.get("SEAM_TMP", "/tmp/posturecheck"))
 
 
 def main() -> int:

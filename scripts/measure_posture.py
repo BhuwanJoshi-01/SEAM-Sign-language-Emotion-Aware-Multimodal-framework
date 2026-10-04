@@ -26,6 +26,7 @@ Run:
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -34,7 +35,13 @@ import numpy as np
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 
-DATA = Path("C:/Users/nancy/Desktop/.seam_data/emosign/landmarks")
+#: EmoSign landmark shards. `SEAM_DATA_ROOT` first, then the author's local copy. The
+#: original was a hardcoded Windows desktop path, so this script only ran on one machine.
+DATA = Path(
+    os.environ["SEAM_DATA_ROOT"]
+    if os.environ.get("SEAM_DATA_ROOT")
+    else r"C:/Users/nancy/Desktop/.seam_data/emosign/landmarks"
+)
 
 # MediaPipe pose indices
 L_HIP, R_HIP = 23, 24

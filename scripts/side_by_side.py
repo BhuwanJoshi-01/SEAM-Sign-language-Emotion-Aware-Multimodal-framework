@@ -10,6 +10,7 @@ compare limb positions directly instead of guessing across differently-scaled pi
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -19,9 +20,9 @@ import numpy as np
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 
-TMP = Path("C:/Users/nancy/AppData/Local/Temp/posturecheck")
-STIM = Path("C:/Users/nancy/Desktop/.seam_data/m7a_stimuli_v3")
-VIDEO = Path("C:/Users/nancy/Desktop/.seam_data/emosign/video")
+TMP = Path(os.environ.get("SEAM_TMP", "/tmp/posturecheck"))
+STIM = Path(os.environ.get("SEAM_STIMULI", "artifacts/m7a/study/public"))
+VIDEO = Path(os.environ.get("SEAM_VIDEO", ""))
 FFMPEG = Path(
     "C:/Users/nancy/AppData/Local/Microsoft/WinGet/Packages/"
     "Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe/ffmpeg-9.0.1-full_build/bin/ffmpeg.exe"
