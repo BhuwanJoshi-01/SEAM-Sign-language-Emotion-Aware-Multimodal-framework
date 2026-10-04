@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SEAM — what is and is not claimed</title>
+<style>
+  :root{--bg:#0d1117;--panel:#161b22;--line:#30363d;--fg:#e6edf3;--dim:#8b949e;
+        --acc:#58a6ff;--ok:#3fb950;--warn:#d29922;--no:#f85149}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:14px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{padding:16px 22px;border-bottom:1px solid var(--line);display:flex;
+         align-items:baseline;gap:14px;flex-wrap:wrap}
+  h1{font-size:16px;margin:0}
+  .sub{color:var(--dim);font-size:12.5px}
+  main{padding:20px 22px 60px;max-width:1000px}
+  h2{font-size:12px;text-transform:uppercase;letter-spacing:.09em;color:var(--dim);
+     margin:26px 0 10px;padding-bottom:7px;border-bottom:1px solid var(--line)}
+  .note{background:var(--panel);border-left:3px solid var(--acc);padding:11px 13px;
+        border-radius:0 7px 7px 0;font-size:13px;color:#c6d2de;margin:0 0 16px}
+  .note.bad{border-left-color:var(--no)} .note.warn{border-left-color:var(--warn)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:8px 9px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--dim);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.07em}
+  .yes{color:var(--ok);font-weight:600} .no{color:var(--no);font-weight:600}
+  .dim{color:var(--dim)}
+  code{background:#0b0e13;padding:1px 5px;border-radius:4px;font-size:12.5px;
+       font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  a{color:var(--acc)}
+  ul{margin:8px 0 0;padding-left:20px} li{margin:4px 0}
+</style>
+<script type="module" src="/static/nav.js"></script>
+</head>
+<body>
+<header>
+  <h1>SEAM</h1>
+  <span class="sub">what the system does and does not claim</span>
+  <span style="flex:1"></span>
+  <span data-seamnav></span>
+</header>
+
+<main>
+  <div class="note bad">
+    <b>No human preference data exists.</b> The avatar-quality study (M7) has stimuli and a
+    measurement harness but <b>zero raters</b>. Nothing on any of these pages is a result
+    about how good the avatar looks. Any claim to that effect would be fabricated.
+  </div>
+
+  <div class="note warn">
+    <b>Affect and gloss are withheld from the live demo on purpose.</b> Affect is withheld
+    because M4 measured 0.497 balanced accuracy against a 0.5 reference. Gloss recognition is
+    withheld because M5a's WER (0.916) equals its most-frequent baseline. A number that
+    carries no information is worse than no number, so both are withheld rather than shown
+    empty.
+  </div>
+
+  <h2>Cue-to-feature expectations</h2>
+  <p class="sub" style="margin-top:0">
+    Generated from <code>seam.features.cues.expectations()</code>, so this page cannot drift
+    from the code. A cue with no feature behind it is listed as a to-do derived from the data
+    rather than from taste — the annotators used those categories, and we cannot yet measure
+    them.
+  </p>
+  <table id="cov">
+    <thead><tr><th>Cue</th><th>Features</th><th>Testable now</th><th>Why</th></tr></thead>
+    <tbody><tr><td colspan="4" class="dim">Loading…</td></tr></tbody>
+  </table>
+
+  <h2>Cues with no feature behind them</h2>
+  <p class="sub" id="gapIntro" style="margin-top:0">Loading…</p>
+
+  <h2>Other measured results</h2>
+  <ul class="dim">
+    <li><b>M1 confound audit — refuted.</b> No marker-induced negative FER bias is detectable
+      across 2,565 clips and 3 non-signer models: −0.008…+0.002 against an MDE of 0.003–0.008.
+      A powered null, not an absence of measurement.</li>
+    <li><b>M4 factorisation — refuted.</b> Worst-fold cross-prediction AUC 0.7276 (heuristic
+      <code>y_L</code>) and 0.7031 (human <code>y_L</code>) against a ≤0.60 target, with the
+      signer positive control at 0.973 so the instrument demonstrably works. The core
+      contribution as originally framed was withdrawn.</li>
+    <li><b>M3 label quality.</b> Human SignStream non-manual annotations for all 200 utterances;
+      Cohen's kappa 0.639 (negation) and 0.734 (rhetorical question) usable, 0.028 and 0.038 at
+      chance for the other two categories.</li>
+    <li><b>M2 efficiency.</b> 73.2 ms p95 perception, 186 MB peak for six models resident at
+      once against a 2,500 MB ceiling, 20.4 FPS sustained (repeats 19.7–20.4, so K6 is met at
+      the median and missed at the low end).</li>
+    <li><b>M5a gloss recognition — negative.</b> WER 0.916 against a most-frequent baseline of
+      0.916 and a shuffled-label control of 0.911.</li>
+  </ul>
+  <p class="sub">
+    Every number above traces to a run ID in <code>paper/EXPERIMENT_LOG.md</code>, and a test
+    fails if one does not. Full detail in <code>PROJECT_BREAKDOWN.md</code>.
+  </p>
+</main>
+
+<script type="module">
+const $ = (s) => document.querySelector(s);
+
+const r = await fetch('/api/cue_expectations', { cache: 'no-store' });
+if (!r.ok) {
+  $('#cov tbody').innerHTML =
+    `<tr><td colspan="4" class="no">/api/cue_expectations returned ${r.status}</td></tr>`;
+} else {
+  const { expectations, unmapped } = await r.json();
+  $('#cov tbody').innerHTML = Object.entries(expectations).map(([cue, v]) => `
+    <tr>
+      <td><b>${cue}</b></td>
+      <td>${(v.expects || []).length
+        ? (v.expects || []).map((f) => `<code>${f}</code>`).join(' ')
+        : '<span class="dim">none</span>'}</td>
+      <td class="${v.testable_now ? 'yes' : 'no'}">${v.testable_now ? 'yes' : 'no'}</td>
+      <td class="dim">${v.rationale || ''}</td>
+    </tr>`).join('');
+  $('#gapIntro').innerHTML = unmapped.length
+    ? `${unmapped.length} of ${Object.keys(expectations).length} cues the Deaf annotators
+       actually used have no feature behind them. These are the ones the next feature-set
+       decision has to answer for: <code>${unmapped.join('</code>, <code>')}</code>.`
+    : 'Every cue the annotators used has a feature behind it.';
+}
+</script>
+</body>
+</html>

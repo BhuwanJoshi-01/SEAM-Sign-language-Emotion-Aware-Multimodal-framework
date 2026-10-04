@@ -262,6 +262,25 @@ def _version() -> str:
     return __version__
 
 
+def _serve_page(web: Path, name: str) -> Any:
+    """Serve a hand-written page off disk with caching disabled.
+
+    `no-store` is not optional here. The UI is edited by hand and read straight from disk, so
+    a stale browser copy is the default outcome without it — and during the M7 study a cached
+    page would silently show raters an older instrument than the one being recorded against,
+    which is worse than the extra request.
+    """
+    from fastapi.responses import HTMLResponse
+
+    page = web / name
+    if not page.is_file():
+        return HTMLResponse(f"<h1>SEAM</h1><p>web/{name} not found</p>", 404)
+    return HTMLResponse(
+        page.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-store, must-revalidate", "Pragma": "no-cache"},
+    )
+
+
 def build_app() -> Any:
     """The FastAPI application."""
     import json
@@ -312,28 +331,12 @@ def build_app() -> Any:
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> Any:
-        page = web / "index.html"
-        if not page.is_file():
-            return HTMLResponse("<h1>SEAM</h1><p>web/index.html not found</p>", 404)
-        # The UI is edited by hand and served straight off disk, so a stale browser
-        # copy is the default outcome without an explicit no-store. During the M7
-        # study a cached page would silently show raters an older instrument than
-        # the one being recorded against, which is worse than the extra request.
-        return HTMLResponse(
-            page.read_text(encoding="utf-8"),
-            headers={"Cache-Control": "no-store, must-revalidate", "Pragma": "no-cache"},
-        )
+        return _serve_page(web, "index.html")
 
     @app.get("/avatar", response_class=HTMLResponse)
     def avatar_page() -> Any:
         """The avatar product page: a real skinned GLB playing a real animation clip."""
-        page = web / "avatar.html"
-        if not page.is_file():
-            return HTMLResponse("<h1>SEAM</h1><p>web/avatar.html not found</p>", 404)
-        return HTMLResponse(
-            page.read_text(encoding="utf-8"),
-            headers={"Cache-Control": "no-store, must-revalidate", "Pragma": "no-cache"},
-        )
+        return _serve_page(web, "avatar.html")
 
     @app.get("/api/demo/manifest")
     def demo_manifest() -> Any:
@@ -353,6 +356,16 @@ def build_app() -> Any:
             }
         return json.loads(mf.read_text(encoding="utf-8"))
 
+    @app.get("/routes", response_class=HTMLResponse)
+    def routes_page() -> Any:
+        """Every route this server answers, probed live, linked from every page.
+
+        The general escape hatch for discoverability. A route that is not reachable from
+        anywhere is a route nobody checks, which is how `/avatar` sat broken behind a
+        working server without anyone noticing.
+        """
+        return _serve_page(web, "routes.html")
+
     @app.get("/static/vendor/{path:path}")
     def vendored(path: str) -> Any:
         """Serve vendored front-end libraries (three.js and its addons).
@@ -370,6 +383,37 @@ def build_app() -> Any:
         return FileResponse(
             target, media_type="text/javascript", headers={"Cache-Control": "public, max-age=3600"}
         )
+
+    @app.get("/static/{path:path}")
+    def web_asset(path: str) -> Any:
+        """Serve a page's own shared asset (currently `nav.js`).
+
+        Declared *after* `/static/vendor/{path}` so the more specific pattern wins for
+        vendored files. Same containment rule: the path arrives from the URL, so the check
+        is on the resolved path rather than on the route shape.
+        """
+        root = web.resolve()
+        target = (root / path).resolve()
+        if not str(target).startswith(str(root) + "/"):
+            return JSONResponse({"error": "path escapes the web root"}, status_code=400)
+        if not target.is_file():
+            return JSONResponse({"error": f"{path} not found"}, status_code=404)
+        return FileResponse(
+            target,
+            media_type="text/javascript" if target.suffix == ".js" else None,
+            headers={"Cache-Control": "no-cache"},
+        )
+
+    @app.get("/api/cue_expectations")
+    def cue_expectations() -> Any:
+        """The cue-to-feature map, as JSON, for the coverage page.
+
+        JSON rather than server-rendered HTML so the page and the code cannot disagree: both
+        read `seam.features.cues`, which is the single source of truth.
+        """
+        from seam.features import cues as C
+
+        return {"expectations": C.expectations(), "unmapped": C.unmapped_cues()}
 
     @app.get("/api/demo/{name}")
     def demo_asset(name: str) -> Any:
@@ -393,20 +437,7 @@ def build_app() -> Any:
     @app.get("/api/coverage", response_class=HTMLResponse)
     def coverage() -> Any:
         """What the demo does and does not claim, served from the same text as the UI."""
-        page = web / "coverage.html"
-        if page.is_file():
-            return HTMLResponse(
-                page.read_text(encoding="utf-8"),
-                headers={"Cache-Control": "no-store, must-revalidate", "Pragma": "no-cache"},
-            )
-        from seam.features import cues as C
-
-        rows = "".join(
-            f"<tr><td>{k}</td><td>{'yes' if v['testable_now'] else 'no'}</td>"
-            f"<td>{v['rationale']}</td></tr>"
-            for k, v in C.expectations().items()
-        )
-        return HTMLResponse(f"<h1>Coverage</h1><table border=1>{rows}</table>")
+        return _serve_page(web, "coverage.html")
 
     log.info("app built")
     return app

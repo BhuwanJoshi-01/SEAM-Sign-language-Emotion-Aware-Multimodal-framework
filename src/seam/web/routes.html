@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SEAM — route index</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --line:#30363d; --fg:#e6edf3; --dim:#8b949e;
+    --acc:#58a6ff; --ok:#3fb950; --warn:#d29922; --no:#f85149;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:14px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{padding:16px 22px;border-bottom:1px solid var(--line);display:flex;
+         align-items:baseline;gap:14px;flex-wrap:wrap}
+  h1{font-size:16px;margin:0;letter-spacing:.02em}
+  .sub{color:var(--dim);font-size:12.5px}
+  main{padding:20px 22px 60px;max-width:1080px}
+  .note{background:var(--panel);border-left:3px solid var(--acc);padding:11px 13px;
+        border-radius:0 7px 7px 0;font-size:13px;color:#c6d2de;margin:0 0 18px}
+  .note.warn{border-left-color:var(--warn)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:8px 9px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--dim);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.07em}
+  td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  code{background:#0b0e13;padding:1px 5px;border-radius:4px;font-size:12.5px;
+       font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  a{color:var(--acc)}
+  .ok{color:var(--ok)} .warn{color:var(--warn)} .no{color:var(--no)} .dim{color:var(--dim)}
+  .kind{display:inline-block;padding:1px 7px;border-radius:99px;font-size:10.5px;
+        font-weight:600;letter-spacing:.05em;border:1px solid var(--line);color:var(--dim)}
+  h2{font-size:12px;text-transform:uppercase;letter-spacing:.09em;color:var(--dim);
+     margin:26px 0 10px;padding-bottom:7px;border-bottom:1px solid var(--line)}
+  button{background:#21262d;color:var(--fg);border:1px solid var(--line);
+         border-radius:7px;padding:6px 12px;font:inherit;font-size:12.5px;cursor:pointer}
+  button:hover{background:#30363d}
+</style>
+<script type="module" src="/static/nav.js"></script>
+</head>
+<body>
+<header>
+  <h1>SEAM</h1>
+  <span class="sub">route index — every path this server answers, probed live</span>
+  <span style="flex:1"></span>
+  <span data-seamnav></span>
+</header>
+
+<main>
+  <div class="note">
+    <b>What this page is.</b> A single place to reach every route, and a live check that each one
+    answers. A route that is not listed anywhere is a route nobody looks at — which is how
+    <code>/avatar</code> stayed broken for its whole life while the server ran fine.
+  </div>
+  <div class="note warn" id="demoState">
+    Checking the demo artefacts…
+  </div>
+
+  <h2>Routes</h2>
+  <table id="routes">
+    <thead><tr>
+      <th>Path</th><th>What it is</th><th class="num">Status</th><th class="num">Bytes</th>
+    </tr></thead>
+    <tbody><tr><td colspan="4" class="dim">Probing…</td></tr></tbody>
+  </table>
+  <p style="margin-top:14px"><button id="recheck">Re-check</button></p>
+
+  <h2>Vendored front-end libraries</h2>
+  <table id="vendor">
+    <thead><tr><th>File</th><th class="num">Status</th><th class="num">Bytes</th><th>Why</th></tr></thead>
+    <tbody><tr><td colspan="4" class="dim">Checking…</td></tr></tbody>
+  </table>
+  <p class="sub" style="margin-top:10px">
+    three.js is pinned in the repository rather than fetched from a CDN. The first version
+    imported it from a CDN's raw path, where the bare <code>three</code> specifier inside
+    <code>examples/jsm/*</code> cannot resolve — and the page's own error handler blamed the
+    CDN, which was reachable the whole time.
+  </p>
+</main>
+
+<script type="module">
+import { ROUTES } from '/static/nav.js';
+
+const $ = (s) => document.querySelector(s);
+const fmt = (n) => (n == null ? '—' : n.toLocaleString());
+
+/** Probe a route with GET. `post` and `pattern` routes are not fetchable by navigation. */
+async function probe(path, kind) {
+  if (kind === 'post' || kind === 'pattern') return null;
+  try {
+    const r = await fetch(path, { cache: 'no-store' });
+    const b = await r.arrayBuffer();
+    return { status: r.status, bytes: b.byteLength };
+  } catch (e) {
+    return { status: 0, bytes: null, error: String(e) };
+  }
+}
+
+async function renderRoutes() {
+  const rows = await Promise.all(ROUTES.map(async (r) => {
+    const res = await probe(r.path, r.kind);
+    let status = '—', cls = 'dim';
+    if (res) {
+      if (res.status >= 200 && res.status < 400) { status = res.status; cls = 'ok'; }
+      else if (res.status === 0) { status = 'unreachable'; cls = 'no'; }
+      else { status = res.status; cls = 'no'; }
+    } else {
+      status = r.kind === 'post' ? 'POST only' : 'pattern';
+      cls = 'warn';
+    }
+    return `<tr>
+      <td><code>${r.path}</code><br><span class="kind">${r.kind}</span></td>
+      <td><b>${r.title}</b><br><span class="dim">${r.what}</span></td>
+      <td class="num ${cls}">${status}</td>
+      <td class="num dim">${res ? fmt(res.bytes) : '—'}</td>
+    </tr>`;
+  }));
+  $('#routes tbody').innerHTML = rows.join('');
+}
+
+async function renderVendor() {
+  const files = [
+    ['three/three.module.js', 'the renderer'],
+    ['three/examples/jsm/controls/OrbitControls.js', 'orbit camera'],
+    ['three/examples/jsm/loaders/GLTFLoader.js', 'reads the exported .glb'],
+    ['three/examples/jsm/utils/BufferGeometryUtils.js', 'GLTFLoader dependency'],
+  ];
+  const rows = await Promise.all(files.map(async ([f, why]) => {
+    try {
+      const r = await fetch('/static/vendor/' + f, { cache: 'no-store' });
+      const b = await r.arrayBuffer();
+      const good = r.status === 200 && b.byteLength > 1000;
+      return `<tr><td><code>${f}</code></td>
+        <td class="num ${good ? 'ok' : 'no'}">${r.status}</td>
+        <td class="num dim">${fmt(b.byteLength)}</td>
+        <td class="dim">${why}</td></tr>`;
+    } catch (e) {
+      return `<tr><td><code>${f}</code></td><td class="num no">error</td>
+        <td class="num dim">—</td><td class="dim">${why}</td></tr>`;
+    }
+  }));
+  $('#vendor tbody').innerHTML = rows.join('');
+}
+
+/* The demo manifest is the one route whose content changes meaning over time: "no clips"
+   and "still rendering" are different states and must not read the same. */
+async function renderDemoState() {
+  const el = $('#demoState');
+  try {
+    const m = await (await fetch('/api/demo/manifest', { cache: 'no-store' })).json();
+    if (m.status === 'running') {
+      el.className = 'note warn';
+      el.innerHTML = `<b>Still rendering.</b> ${m.done}/${m.total} clip(s)` +
+        (m.in_progress ? `, working on <code>${m.in_progress}</code>` : '') +
+        `. This takes about 15 minutes on the GPU — the manifest is published while it runs
+         precisely so this is not the same message as "never run".`;
+      return;
+    }
+    const withGlb = (m.clips || []).filter((c) => c.arm_a_smplerx && c.arm_a_smplerx.glb);
+    if (!withGlb.length) {
+      el.className = 'note warn';
+      el.innerHTML = `<b>No rendered clips.</b> Run <code>make demo-avatar</code> (~15 min)
+        to produce the animated glTF files. <a href="/avatar">/avatar</a> will be empty until
+        it finishes.`;
+      return;
+    }
+    el.className = 'note';
+    el.innerHTML = `<b>${withGlb.length} clip(s) rendered.</b> <a href="/avatar">Open
+      /avatar</a>. Every figure on that page is a <em>pipeline</em> measurement — is the front
+      end running, did a frame collapse, is the body upright — not a quality score, and no
+      human has rated anything.`;
+  } catch (e) {
+    el.className = 'note warn';
+    el.textContent = 'Could not reach /api/demo/manifest.';
+  }
+}
+
+await Promise.all([renderRoutes(), renderVendor(), renderDemoState()]);
+$('#recheck').onclick = () => Promise.all([renderRoutes(), renderVendor(), renderDemoState()]);
+</script>
+</body>
+</html>

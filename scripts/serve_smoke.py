@@ -48,53 +48,61 @@ def main() -> int:
             return 1
 
         page = urllib.request.urlopen(f"http://127.0.0.1:{PORT}/", timeout=15).read()
-        print(f"GET /                 {len(page)} bytes")
         if b"<!doctype html>" not in page[:64].lower():
             failures.append("index did not serve an HTML document")
         if b"tasks-vision" not in page:
             failures.append("page does not load client-side MediaPipe")
         if b"api/analyse" not in page:
             failures.append("page does not post to /api/analyse")
-        # The landing page must point at the avatar page. `/` used to be the only thing
-        # reachable and advertised, which is how a working feature stayed invisible.
-        if b'href="/avatar"' not in page:
-            failures.append("index does not link to /avatar")
 
-        health = json.loads(
-            urllib.request.urlopen(f"http://127.0.0.1:{PORT}/api/health", timeout=15).read()
-        )
-        got = health.get("expects", {}).get("blendshapes")
-        if got != [None, NM_DIM]:
-            failures.append(
-                f"health contract mismatch: NM_DIM={NM_DIM}, got {got!r}; body={health!r}"
-            )
+        # ── every page, and every page reachable from every page ─────────────
+        # `/avatar` shipped unlinked from `/`, absent from the banner, and absent from
+        # this smoke test, and stayed broken for its whole life. A route nothing points at
+        # is a route nobody checks, so both properties are asserted here.
+        PAGES = {
+            "/": (b"tasks-vision", b"api/analyse"),
+            "/avatar": (b"/api/demo/manifest", b"importmap"),
+            "/api/coverage": (b"api/cue_expectations", b"does and does not claim"),
+            "/routes": (b"/static/nav.js", b"/api/demo/manifest"),
+        }
+        for route, needles in PAGES.items():
+            try:
+                body = urllib.request.urlopen(f"http://127.0.0.1:{PORT}{route}", timeout=15).read()
+            except urllib.error.HTTPError as e:
+                failures.append(f"{route} returned HTTP {e.code}")
+                continue
+            print(f"GET {route:17.17} {len(body)} bytes")
+            if b"<!doctype html>" not in body[:64].lower():
+                failures.append(f"{route} did not serve an HTML document")
+                continue
+            for needle in needles:
+                if needle not in body:
+                    failures.append(f"{route} does not reference {needle!r}")
+            if b"/static/nav.js" not in body:
+                failures.append(f"{route} does not load the shared nav module")
 
-        # ── /avatar ──────────────────────────────────────────────────────────
-        # This page was unlisted and unchecked for its whole life, and it was broken the
-        # whole time. A route that is not in the smoke test is a route nobody looks at.
+        # The nav module is the single source of truth for cross-page links, so if it is
+        # missing a page then that page is genuinely unreachable from the UI.
+        nav = urllib.request.urlopen(f"http://127.0.0.1:{PORT}/static/nav.js", timeout=15).read()
+        print(f"GET /static/nav.js    {len(nav)} bytes")
+        for target in PAGES:
+            if f"'{target}'" not in nav.decode():
+                failures.append(f"nav.js does not link {target}; that page is unreachable")
+
+        # ── /avatar specifics ────────────────────────────────────────────────
         av = urllib.request.urlopen(f"http://127.0.0.1:{PORT}/avatar", timeout=15).read()
-        print(f"GET /avatar           {len(av)} bytes")
-        if b"<!doctype html>" not in av[:64].lower():
-            failures.append("/avatar did not serve an HTML document")
-        for needle, why in (
-            (b"/api/demo/manifest", "/avatar never fetches the manifest"),
-            (b"importmap", "/avatar has no import map, so bare `three` specifiers cannot resolve"),
-        ):
-            if needle not in av:
-                failures.append(why)
-        if b"cdn.jsdelivr" in av:
+        if b"cdn.jsdelivr" in av or b"unpkg.com" in av:
             failures.append(
                 "/avatar loads three.js from a CDN; a product page that needs the network "
                 "to render is not a product page"
             )
-        if b"cdn.jsdelivr" in av or b"unpkg.com" in av:
-            failures.append("/avatar must not reference a CDN")
 
         # Vendored three.js must actually be reachable, or the page is a red screen.
         for asset in (
             "/static/vendor/three/three.module.js",
             "/static/vendor/three/examples/jsm/controls/OrbitControls.js",
             "/static/vendor/three/examples/jsm/loaders/GLTFLoader.js",
+            "/static/vendor/three/examples/jsm/utils/BufferGeometryUtils.js",
         ):
             try:
                 body = urllib.request.urlopen(f"http://127.0.0.1:{PORT}{asset}", timeout=30).read()
@@ -106,9 +114,9 @@ def main() -> int:
             else:
                 print(f"GET {asset:52.52} {len(body)} bytes")
 
-        # Path containment on both file routes. `{path:path}` patterns match `../`, so the
+        # Path containment on every file route. `{path:path}` patterns match `../`, so the
         # guard has to be on the resolved path rather than trusted from the route shape.
-        for route in ("/static/vendor/", "/api/demo/"):
+        for route in ("/static/vendor/", "/static/", "/api/demo/"):
             url = f"http://127.0.0.1:{PORT}{route}..%2f..%2f..%2fetc%2fpasswd"
             try:
                 body = urllib.request.urlopen(url, timeout=10).read()
@@ -129,6 +137,28 @@ def main() -> int:
             failures.append("manifest lists clips but none carry a .glb")
         else:
             print(f"GET /api/demo/manifest      {len(mf['clips'])} clip(s)")
+
+        ce = json.loads(
+            urllib.request.urlopen(
+                f"http://127.0.0.1:{PORT}/api/cue_expectations", timeout=15
+            ).read()
+        )
+        if not ce.get("expectations"):
+            failures.append("/api/cue_expectations returned no cues; the coverage page is empty")
+        else:
+            print(
+                f"GET /api/cue_expectations   {len(ce['expectations'])} cues, "
+                f"{len(ce.get('unmapped', []))} without a feature"
+            )
+
+        health = json.loads(
+            urllib.request.urlopen(f"http://127.0.0.1:{PORT}/api/health", timeout=15).read()
+        )
+        got = health.get("expects", {}).get("blendshapes")
+        if got != [None, NM_DIM]:
+            failures.append(
+                f"health contract mismatch: NM_DIM={NM_DIM}, got {got!r}; body={health!r}"
+            )
 
         rng = np.random.default_rng(0)
         payload = {

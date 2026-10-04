@@ -33,15 +33,14 @@
   .kv b{color:var(--dim);font-weight:500}
   code{background:#161b22;padding:1px 5px;border-radius:4px}
 </style>
+<script type="module" src="/static/nav.js"></script>
 </head>
 <body>
 <header>
   <h1>SEAM</h1>
   <span class="sub">live non-manual analysis — video never leaves this tab</span>
   <span style="flex:1"></span>
-  <!-- Two products, one server. `/` was the only reachable page for the whole life of
-       `/avatar`, which is most of why a working feature read as a broken website. -->
-  <a class="sub" href="/avatar" style="color:var(--accent);text-decoration:none;border:1px solid var(--line);border-radius:7px;padding:5px 11px">SMPL-X avatar →</a>
+  <span data-seamnav></span>
   <span class="sub" id="status">starting…</span>
 </header>
 
