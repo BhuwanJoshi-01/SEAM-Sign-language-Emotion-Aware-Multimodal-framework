@@ -2,9 +2,12 @@
 SHELL := /bin/bash
 PY ?= /home/bhuwan/miniconda3/envs/slr/bin/python
 PIP ?= /home/bhuwan/miniconda3/envs/slr/bin/pip
+# Licence-gated SMPL-X parameters. Deliberately not vendored: the Max Planck Institute
+# gates the download, so the loader takes a path. Override on the command line.
+SMPLX ?= /mnt/Volume2/SignLanguagge/NSL\ Data/Sapien_Pipeline/models/smplx/SMPLX_NEUTRAL.npz
 
 .PHONY: help setup lint fmt typecheck test test-fast data readiness emosign landmarks facegate \
-        doctor bench train repro provenance alignment paper clean distclean
+        doctor bench train repro provenance alignment paper clean distclean demo-avatar
 
 help: ## List targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -58,6 +61,9 @@ bench-seq: ## Sequential perception baseline for the concurrency ablation  [M2]
 
 export: ## ONNX export + FP32/INT8 parity; non-zero on a failed gate  [M2]
 	$(PY) -m seam.cli export
+
+demo-avatar: ## Video -> SMPLer-X vs landmark avatar comparison, both arms  [M7]
+	PYTHONPATH=src python scripts/make_avatar_demo.py --model "$(SMPLX)" --limit 4
 
 serve: ## Live browser demo; video is processed client-side, never uploaded  [M7]
 	$(PY) -m seam.cli serve
