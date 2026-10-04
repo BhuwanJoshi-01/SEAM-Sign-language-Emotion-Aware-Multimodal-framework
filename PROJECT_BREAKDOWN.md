@@ -292,6 +292,38 @@ manifest while it runs**. It used to write the manifest only at the end, so for 
 run the page said "No clips. Run `make demo-avatar`" — which is exactly what it says to
 someone who never ran it.
 
+### Theming, and what it cost
+
+Light and dark are **both designed**, not one derived from the other. Dark is not light
+inverted: surfaces climb `8% → 12% → 16%` near-neutral; light goes white → `#f7f9fc` →
+`#eef2f8` with a deeper accent, because 4.5:1 is far harder to hit on white. Shadows widen as
+the ambient falls, and the 3D stage is lit for its own background in each theme — a light
+stage needs *less* ambient or the mesh washes out and loses every silhouette cue.
+
+`src/seam/web/tokens.css` is the only place a colour exists. `theme.js` resolves the theme
+(explicit choice → `?theme=` override → system → dark) and runs from an inline snippet before
+first paint, so there is no flash. `?theme=` is not test scaffolding: **the M7 study harness
+needs it**, because a rater whose OS is in light mode seeing a different stage background
+from the next rater is a confounded experiment.
+
+Contrast was measured, not eyeballed. **One value failed and was corrected**: light `--ok` on
+its own tint measured 4.44:1. `--fg-subtle` also measured 3.7:1 on the light stage — the
+stage is *darker* than the page in that theme, which inverts the usual direction — so there
+is a separate `--fg-stage`. Disabled controls use muted colours rather than `opacity`, because
+a 0.45-opacity label measures **1.2:1** against its own surface.
+
+The mechanical detector reports **0 findings** across four pages × two themes × desktop and
+390 px mobile. Two patterns it did find were removed rather than re-declared: a coloured
+`border-left` ≥1px on every callout, and `ui-monospace` on `body`, which made every paragraph
+read as a code listing. Monospace is now scoped to identifiers and raw values.
+
+**One product bug was found by looking at the render.** The GLB wrote no `materials` block, so
+every conforming loader applied the glTF spec defaults — `metallicFactor: 1.0`,
+`roughnessFactor: 1.0` — a mirror. With no environment map a metal has no diffuse term, and
+the body rendered as a near-black silhouette on any background, in both themes. Legal glTF,
+so every structural check passed throughout. The exporter now writes a matte material
+(`metallicFactor 0.0`, `roughnessFactor 0.72`) and a test asserts it.
+
 ---
 
 ## 7. Provenance and honesty rules

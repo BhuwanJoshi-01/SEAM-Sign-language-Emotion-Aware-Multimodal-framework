@@ -440,9 +440,32 @@ def export_animated_glb(
                             "WEIGHTS_0": wgt_i,
                         },
                         "indices": idx_i,
+                        "material": 0,
                         "mode": 4,
                     }
                 ],
+            }
+        ],
+        # A material, and not an optional one.
+        #
+        # glTF's default `metallicFactor` is **1.0** and its default `roughnessFactor` is
+        # **1.0**. With no `materials` block, every conforming loader therefore builds a
+        # fully-metallic, fully-rough material - a mirror. three.js has no environment map
+        # here, so a metal with nothing to reflect has no diffuse term either, and the body
+        # renders as a near-black silhouette against any background. Measured on clip 1372
+        # in both themes before this block existed.
+        #
+        # Matte, slightly warm, and not specular: the point of this page is a readable
+        # silhouette and readable limb articulation, not a shiny mannequin.
+        "materials": [
+            {
+                "name": f"{name}-skin",
+                "pbrMetallicRoughness": {
+                    "baseColorFactor": [0.78, 0.76, 0.74, 1.0],
+                    "metallicFactor": 0.0,
+                    "roughnessFactor": 0.72,
+                },
+                "doubleSided": False,
             }
         ],
         "skins": [

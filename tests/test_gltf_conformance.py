@@ -379,6 +379,36 @@ document.getElementById('r').textContent = '__RESULT__' + JSON.stringify(out) + 
     return json.loads(blob.replace("&quot;", '"').replace("&amp;", "&").replace("&lt;", "<"))
 
 
+def test_the_file_declares_a_material_so_loaders_do_not_invent_a_mirror(tmp_path: Path) -> None:
+    """No `materials` block means every loader applies the spec defaults — which are a mirror.
+
+    glTF's default `metallicFactor` is 1.0 and its default `roughnessFactor` is 1.0. A viewer
+    with no environment map then has a metal with nothing to reflect and no diffuse term, so
+    the body renders as a near-black silhouette on any background. Measured on clip 1372 in
+    both themes before this was written; every structural check passed throughout, because a
+    missing material is legal glTF.
+    """
+    model = _model()
+    out = export_animated_glb(_frames(2), model, tmp_path / "mat.glb", fps=10.0)
+    gj = _gltf_json(out)
+
+    assert gj.get("materials"), (
+        "no materials block: every loader will build metallicFactor=1, roughnessFactor=1 "
+        "and render a mirror"
+    )
+    prim = gj["meshes"][0]["primitives"][0]
+    assert "material" in prim, "the primitive does not reference the material"
+
+    pbr = gj["materials"][0]["pbrMetallicRoughness"]
+    assert pbr["metallicFactor"] < 0.2, (
+        f"metallicFactor={pbr['metallicFactor']}: with no environment map this is a mirror"
+    )
+    assert 0.2 < pbr["roughnessFactor"] < 1.0, pbr["roughnessFactor"]
+    base = pbr["baseColorFactor"]
+    assert len(base) == 4 and all(0.0 <= c <= 1.0 for c in base), base
+    assert 0 <= prim["material"] < len(gj["materials"]), prim["material"]
+
+
 @pytest.mark.slow
 def test_three_js_opens_the_file(tmp_path: Path) -> None:
     """three.js must load this as a skinned, animated mesh.

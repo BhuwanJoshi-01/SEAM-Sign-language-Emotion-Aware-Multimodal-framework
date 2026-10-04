@@ -61,6 +61,32 @@ at your own copy:
 make demo-avatar SMPLX=/path/to/SMPLX_NEUTRAL.npz
 ```
 
+## The web front end
+
+Four pages, one shared header, reachable from each other:
+
+| Page | What it is |
+|---|---|
+| `/` | webcam demo — MediaPipe runs in the browser, video is never uploaded |
+| `/avatar` | animated skinned glTF beside the per-clip measurements |
+| `/api/coverage` | what the system does and does not claim, generated from the code |
+| `/routes` | every route, probed live, with status and byte count |
+
+**Light and dark, both designed.** The default follows your system preference; the toggle
+overrides it and is remembered. `?theme=light` / `?theme=dark` forces one — the M7 study
+harness needs it so every rater sees the same stage.
+
+All colour, type, space and depth live in `src/seam/web/tokens.css`, which is why no page
+carries a palette of its own. Contrast was measured rather than eyeballed: **body text clears
+4.5:1 on every surface in both themes**, and the one value that failed (light `--ok` on its
+own tint, 4.44:1) was corrected rather than tolerated. Text selection, focus rings,
+scrollbars, placeholder text and tabular numerals are themed too — browser defaults belong to
+no design system.
+
+`make serve-check` asserts that all four pages load the token sheet and the pre-paint theme
+boot snippet, and it fails on the patterns that were actually removed: a coloured
+`border-left` on a callout, and monospace set on body text as a costume.
+
 ## The headline numbers
 
 | KPI | Reference | Target | Milestone |

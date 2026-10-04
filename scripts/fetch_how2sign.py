@@ -1,19 +1,31 @@
 #!/usr/bin/env python
-"""Fetch the How2Sign MediaPipe pose keypoints (31 parquet shards, ~14 GB).
+"""Fetch the How2Sign MediaPipe landmark cache (4.8 GB, 991 NPZ shards + metadata).
 
-Why a script rather than `seam data fetch`
-------------------------------------------
-The registry declares only ``README.md`` for this resource: listing 31 shards in
-`sources.py` would make the licence/role metadata unreadable, and the shard count is a
-property of the upstream repo rather than of this project. So the registry stays declarative
-and the bulk transfer lives here, where resume and retry can be handled properly.
+Why this dataset and not the one `plan.md` names
+-------------------------------------------------
+`plan.md` §1 lists `Kavitha/how2sign_user3_mediapipe_pose` as the ungated M5b substrate,
+described as "media-pipe keypoints published, plus official English". Measured on 2026-10-04
+after fetching 7.2 GB of it, that description is wrong on both counts:
 
-Resumable on purpose. At the ~2.7 MB/s this link sustains, a full pass is ~85 minutes, and a
-single dropped connection must not throw that away - `.part` files are kept and resumed with
-a Range request, and only renamed into place once the byte count matches the server's.
+* **There are no keypoints.** The schema is `image` (JPEG bytes), `conditioning_image`
+  (JPEG bytes), `text` (string). 31 shards, ~91,500 rows, 14.12 GB.
+* **There are no English captions.** `text` is the constant string `"signer signing"` on
+  every row sampled. With no landmarks and no target text it cannot train or evaluate a
+  translation model at all.
 
-Ungated (`gated=False`), which is what makes M5 reachable at all: ASLLRP English is not in
-the mirror, and How2Sign's published captions are the only translation substrate left.
+`martinctl/how2sign-asl-landmarks` (CC-BY-NC-4.0, ungated, 4.82 GB) has what the plan
+assumed, and it was checked rather than assumed:
+
+* `metadata.parquet`, **35,176 rows**, one per sentence, with a real `sentence` field
+  ("My name is Dr. Art Bowler.") and official train/validation/test `split`
+* `shards/shard_NNNNN.npz` holding `landmarks_image`, `landmarks_world`,
+  `features_geometric`, `valid_mask`, `timestamps_ms`, `handedness_scores`
+* 51 ARKit face landmark indices in `preprocessing_config.json` — the same face channel
+  this project already extracts, so M5b features are comparable with M3/M4
+* failures recorded in `failures.parquet` rather than silently dropped
+
+Resumable on purpose: `.part` files are kept and continued with a Range request, and only
+renamed into place once the byte count matches the server's.
 """
 
 from __future__ import annotations
@@ -25,21 +37,30 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-REPO = "Kavitha/how2sign_user3_mediapipe_pose"
-BASE = f"https://huggingface.co/datasets/{REPO}/resolve/main/data/"
+REPO = "martinctl/how2sign-asl-landmarks"
+BASE = f"https://huggingface.co/datasets/{REPO}/resolve/main/"
 UA = "seam/0.1 (research; contact via repo owner)"
-DEFAULT_OUT = Path("/mnt/DevProd/seam_data/how2sign_pose")
+DEFAULT_OUT = Path("/mnt/DevProd/seam_data/how2sign_landmarks")
+
+#: Fetched before the bulk shards, because they are what makes the corpus interpretable and
+#: because they are small enough to fail fast on a bad repo id.
+CONTROL_FILES = (
+    "README.md",
+    "metadata.parquet",
+    "feature_names.json",
+    "preprocessing_config.json",
+    "audit_report.json",
+    "failures.parquet",
+)
 
 
-def shard_names(n: int = 31) -> list[str]:
-    return [f"train-{i:05d}-of-{n:05d}.parquet" for i in range(n)]
+def _get(url: str, timeout: int = 60) -> urllib.request.Request:
+    return urllib.request.Request(url, headers={"User-Agent": UA, "timeout": str(timeout)})
 
 
-def remote_size(name: str) -> int | None:
-    """Content-Length for one shard, or None if the server will not say."""
-    req = urllib.request.Request(BASE + name, method="HEAD", headers={"User-Agent": UA})
+def remote_size(path: str) -> int | None:
     try:
-        with urllib.request.urlopen(req, timeout=60) as r:
+        with urllib.request.urlopen(_get(BASE + path), timeout=60) as r:
             n = r.headers.get("Content-Length")
             return int(n) if n else None
     except urllib.error.HTTPError as e:
@@ -48,32 +69,31 @@ def remote_size(name: str) -> int | None:
         raise
 
 
-def fetch_one(name: str, out: Path, *, attempts: int = 5) -> tuple[str, int]:
-    """Download one shard with resume. Returns ``(status, bytes)``."""
-    dest = out / name
-    part = out / (name + ".part")
+def fetch_one(path: str, out: Path, *, attempts: int = 5) -> tuple[str, int]:
+    """Download one file with resume. Returns ``(status, bytes)``."""
+    dest = out / path
+    part = out / (path + ".part")
+    dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.is_file():
         return "skip", dest.stat().st_size
 
-    want = remote_size(name)
+    want = remote_size(path)
     for attempt in range(1, attempts + 1):
         have = part.stat().st_size if part.is_file() else 0
         if want is not None and have == want:
             part.rename(dest)
             return "ok", have
         if want is not None and have > want:
-            # A stale .part from a different revision; start over rather than resume into it.
-            part.unlink()
+            part.unlink()  # stale .part from another revision; resuming into it would corrupt
             have = 0
         headers = {"User-Agent": UA}
         if have:
             headers["Range"] = f"bytes={have}-"
-        req = urllib.request.Request(BASE + name, headers=headers)
         try:
             t0 = time.time()
-            with urllib.request.urlopen(req, timeout=180) as r:
-                # A server that ignores Range replies 200 with the whole body; appending
-                # then would produce a file with a duplicated prefix that still "verifies".
+            with urllib.request.urlopen(_get(BASE + path), timeout=180) as r:
+                # A server that ignores Range replies 200 with the whole body; appending then
+                # would produce a file with a duplicated prefix that still "verifies".
                 mode = "ab" if (have and r.status == 206) else "wb"
                 if mode == "wb":
                     have = 0
@@ -81,45 +101,61 @@ def fetch_one(name: str, out: Path, *, attempts: int = 5) -> tuple[str, int]:
                     while chunk := r.read(1 << 20):
                         f.write(chunk)
             got = part.stat().st_size
-            mb = got / 1e6
             rate = (got - have) / 1e6 / max(time.time() - t0, 0.01)
-            print(f"  {name}: {mb:.0f} MB at {rate:.1f} MB/s", flush=True)
+            print(f"  {path}: {got / 1e6:.1f} MB at {rate:.1f} MB/s", flush=True)
             if want is None or got == want:
                 part.rename(dest)
                 return "ok", got
             print(f"  short read: {got} of {want}", flush=True)
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            print(f"  attempt {attempt}/{attempts} for {name}: {exc}", flush=True)
-            time.sleep(min(10 * attempt, 60))
+            print(f"  attempt {attempt}/{attempts} for {path}: {exc}", flush=True)
+            time.sleep(min(5 * attempt, 45))
     return "failed", part.stat().st_size if part.is_file() else 0
+
+
+def shard_paths(n: int) -> list[str]:
+    return [f"shards/shard_{i:05d}.npz" for i in range(n)]
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", type=Path, default=DEFAULT_OUT)
-    ap.add_argument("--limit", type=int, default=0, help="only the first N shards")
-    ap.add_argument("--manifest-only", action="store_true", help="print sizes and exit")
+    ap.add_argument("--shards", type=int, default=991)
+    ap.add_argument("--control-only", action="store_true")
+    ap.add_argument("--plan-only", action="store_true", help="print the plan and exit")
     args = ap.parse_args()
 
     args.out.mkdir(parents=True, exist_ok=True)
-    names = shard_names()
+    shards = shard_paths(args.shards)
     total = 0
-    for name in names:
-        size = remote_size(name)
+    for path in (*CONTROL_FILES, *shards):
+        size = remote_size(path)
         if size is None:
-            print(f"  {name}: not on the remote any more", flush=True)
+            print(f"  {path}: not on the remote", flush=True)
             continue
         total += size
-        if not args.manifest_only:
-            fetch_one(name, args.out)
+        if args.plan_only:
+            print(f"  {path:34} {size / 1e6:9.1f} MB")
+            continue
+        if path in CONTROL_FILES or not args.control_only:
+            fetch_one(path, args.out)
+
+    if args.plan_only:
+        print(f"total {total / 1e9:.2f} GB over {len(CONTROL_FILES) + len(shards)} files")
+        return 0
 
     summary = {
         "repo": REPO,
-        "shards": len(names),
+        "license": "cc-by-nc-4.0",
+        "gated": False,
+        "shards": args.shards,
         "bytes": total,
         "gigabytes": round(total / 1e9, 2),
         "out": str(args.out),
-        "license": "ungated (gated=False, private=False) as checked 2026-10-04",
+        "supersedes": (
+            "Kavitha/how2sign_user3_mediapipe_pose, which plan.md named but which contains "
+            "JPEG images and the constant caption 'signer signing' - no landmarks, no English"
+        ),
     }
     (args.out / "fetch_manifest.json").write_text(json.dumps(summary, indent=2))
     print(json.dumps(summary, indent=2))

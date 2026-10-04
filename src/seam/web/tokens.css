@@ -1,0 +1,762 @@
+/* SEAM design tokens — the single source of truth for colour, type, space, depth.
+ *
+ * Why one file: the four pages had four independent `:root` blocks with four different
+ * palettes, and a theme is only real if every surface reads from the same place. A page that
+ * hardcodes a colour cannot be themed, and the one thing that must never drift is contrast.
+ *
+ * Both themes are designed. Dark is not light inverted and light is not dark washed out —
+ * each is chosen against its own surface, because a palette tuned on white and dimmed is
+ * always muddy and a palette tuned on black and lifted is always milky.
+ *
+ * Use scene: this is a research instrument. It is read at a desk, often for hours, often
+ * beside a window, and occasionally projected in a room. So the default follows the reader's
+ * own system preference rather than the category, and the explicit toggle wins over both.
+ */
+
+:root {
+  /* ── type ────────────────────────────────────────────────────────────────
+   * Display voice is typographic — weight, scale, tracking, case — rather than a novelty
+   * face. The incumbent pages set `ui-monospace` on `body`, which made every paragraph
+   * read as a code listing; monospace is now scoped to code, identifiers and raw values,
+   * which is the only job it is good at.
+   */
+  --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.625rem;
+  --text-2xl: 2.25rem;
+  --text-display: clamp(2rem, 1.2rem + 2.6vw, 3.5rem);
+
+  --leading-tight: 1.2;
+  --leading-snug: 1.4;
+  --leading-body: 1.65;
+  /* 65–75ch is the readable measure. Long single-column prose at 100% width is the most
+     common way a "clean" dashboard becomes unreadable. */
+  --measure: 68ch;
+
+  --tracking-tight: -0.018em;
+  --tracking-display: -0.03em;
+  --tracking-caps: 0.07em;
+
+  /* ── space — 4px base, with the section rhythm the spacing rules ask for ── */
+  --s-1: 0.25rem;
+  --s-2: 0.5rem;
+  --s-3: 0.75rem;
+  --s-4: 1rem;
+  --s-5: 1.5rem;
+  --s-6: 2rem;
+  --s-7: 3rem;
+  --s-8: 4.5rem;
+
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+
+  --header-h: 3.5rem;
+  --maxw: 84rem;
+
+  /* ── motion ───────────────────────────────────────────────────────────────
+   * One authored moment, and it starts from an already-visible default so nothing pops in
+   * after load. Exponential ease-out, not linear and not a bounce. */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 120ms;
+  --dur: 220ms;
+  --dur-slow: 420ms;
+}
+
+/* ══ DARK ════════════════════════════════════════════════════════════════════
+ * Surfaces climb in lightness with elevation, which is what keeps nested panels
+ * readable: bg 8% -> panel 12% -> raised 16%, all near-neutral with a blue cast.
+ */
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #0b0e14;
+  --bg-deep: #070a10;
+  --panel: #121722;
+  --panel-raised: #1a2130;
+  --line: #232c3b;
+  --line-strong: #334053;
+
+  --fg: #e8eef7;
+  --fg-muted: #a9b6c9;   /* 9.4:1 on --bg */
+  --fg-subtle: #7d8ca3;  /* 5.7:1 on --bg */
+  --fg-stage: #a9b6c9;   /* 8.4:1 on --stage-bg */
+  --fg-on-raised: #8d9bb1;  /* 5.2:1 on the disabled-button surface */
+
+  --accent: #6fb0ff;
+  --accent-fg: #06121f;
+  --accent-soft: #16273c;
+
+  --ok: #4ade80;
+  --ok-soft: #10261a;
+  --warn: #fbbf3c;
+  --warn-soft: #2a2110;
+  --bad: #ff8b81;
+  --bad-soft: #2d1618;
+
+  /* Depth carries an offset and a blur. A zero-blur halo is decoration, not depth. */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.44), 0 2px 6px rgba(0, 0, 0, 0.28);
+  --shadow: 0 2px 4px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.36);
+  --shadow-lg: 0 4px 8px rgba(0, 0, 0, 0.36), 0 20px 48px rgba(0, 0, 0, 0.44);
+
+  --scrim: rgba(4, 7, 12, 0.72);
+  /* The 3D stage is lit for its own background, not for the page: a bright fill against a
+     near-black stage, and a mid bounce so the underside is not a void. */
+  --stage-bg: #151b26;
+  --stage-fg: #e8eef7;
+}
+
+/* ══ LIGHT ═══════════════════════════════════════════════════════════════════
+ * Not an inversion. Surfaces go white -> #f7f9fc -> #eef2f8, and the accent is a deeper
+ * blue because the 4.5:1 target is far harder to hit on white than on near-black.
+ */
+[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #f4f6fa;
+  --bg-deep: #e8ecf3;
+  --panel: #ffffff;
+  --panel-raised: #ffffff;
+  --line: #d8dfea;
+  --line-strong: #b9c4d4;
+
+  --fg: #101720;
+  --fg-muted: #4a5568;   /* 7.6:1 on --bg */
+  --fg-subtle: #64707f;  /* 4.9:1 on --bg, 4.7:1 on --panel */
+  /* On the 3D stage specifically, `--fg-subtle` falls to 3.7:1 - the stage is darker than the
+     page in this theme, which inverts the usual direction. Measured, so it is corrected
+     rather than argued about. */
+  --fg-stage: #4a5568;
+  --fg-on-raised: #64707f;  /* 4.7:1 on the disabled-button surface */
+
+  --accent: #0b62d6;
+  --accent-fg: #ffffff;
+  --accent-soft: #e3edfc;
+
+  --ok: #127033;
+  --ok-soft: #e2f4e8;
+  --warn: #8a5a00;
+  --warn-soft: #fdf0d8;
+  --bad: #b3261e;
+  --bad-soft: #fbe6e4;
+
+  /* Shadows are lighter and wider in daylight: a shadow that works at 12% ambient
+     disappears at 100%, so the offset grows as the ambient falls. */
+  --shadow-sm: 0 1px 2px rgba(16, 32, 56, 0.07), 0 2px 5px rgba(16, 32, 56, 0.05);
+  --shadow: 0 2px 4px rgba(16, 32, 56, 0.06), 0 10px 26px rgba(16, 32, 56, 0.1);
+  --shadow-lg: 0 4px 10px rgba(16, 32, 56, 0.07), 0 24px 56px rgba(16, 32, 56, 0.13);
+
+  --scrim: rgba(226, 232, 240, 0.76);
+  /* A light stage cannot be lit like a dark one: the ambient has to drop or the mesh washes
+     out to white and loses every silhouette cue that makes a pose readable. */
+  --stage-bg: #d7dee9;
+  --stage-fg: #ffffff;
+}
+
+/* Follow the reader's system when they have expressed no preference. The explicit choice
+   sets `data-theme` and wins outright, because a toggle that loses to the OS is a bug. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    color-scheme: light;
+    --bg: #f4f6fa;
+    --bg-deep: #e8ecf3;
+    --panel: #ffffff;
+    --panel-raised: #ffffff;
+    --line: #d8dfea;
+    --line-strong: #b9c4d4;
+    --fg: #101720;
+    --fg-muted: #4a5568;
+    --fg-subtle: #64707f;
+    --fg-stage: #4a5568;
+    --fg-on-raised: #64707f;
+    --accent: #0b62d6;
+    --accent-fg: #ffffff;
+    --accent-soft: #e3edfc;
+    --ok: #127033;
+    --ok-soft: #e2f4e8;
+    --warn: #8a5a00;
+    --warn-soft: #fdf0d8;
+    --bad: #b3261e;
+    --bad-soft: #fbe6e4;
+    --shadow-sm: 0 1px 2px rgba(16, 32, 56, 0.07), 0 2px 5px rgba(16, 32, 56, 0.05);
+    --shadow: 0 2px 4px rgba(16, 32, 56, 0.06), 0 10px 26px rgba(16, 32, 56, 0.1);
+    --shadow-lg: 0 4px 10px rgba(16, 32, 56, 0.07), 0 24px 56px rgba(16, 32, 56, 0.13);
+    --scrim: rgba(226, 232, 240, 0.76);
+    --stage-bg: #d7dee9;
+    --stage-fg: #ffffff;
+  }
+}
+
+/* ══ base ═══════════════════════════════════════════════════════════════════ */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  line-height: var(--leading-body);
+  -webkit-font-smoothing: antialiased;
+  transition: background-color var(--dur) var(--ease-out), color var(--dur) var(--ease-out);
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+  text-wrap: balance;
+}
+
+h1 {
+  font-size: var(--text-lg);
+  font-weight: 650;
+  letter-spacing: var(--tracking-display);
+}
+h2 {
+  font-size: var(--text-xs);
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  color: var(--fg-subtle);
+}
+
+a {
+  color: var(--accent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.22em;
+  text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  transition: text-decoration-color var(--dur-fast) var(--ease-out);
+}
+a:hover {
+  text-decoration-color: var(--accent);
+}
+
+code,
+kbd,
+samp {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  padding: 0.1em 0.36em;
+  border-radius: var(--radius-sm);
+}
+
+/* Numbers in tables must align. This is the single cheapest signal that a page was built
+   rather than assembled — browser-default proportional figures make a measurement column
+   look like an accident. */
+table {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.dim {
+  color: var(--fg-subtle);
+}
+.ok {
+  color: var(--ok);
+}
+.warn {
+  color: var(--warn);
+}
+.bad {
+  color: var(--bad);
+}
+
+/* ══ browser surfaces ══════════════════════════════════════════════════════
+ * Selection, caret, scrollbars, focus rings and placeholder text all ship as browser
+ * defaults that belong to no design system. They are themed from the palette here. */
+::selection {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  color: var(--fg);
+}
+::placeholder {
+  color: var(--fg-subtle);
+  opacity: 1;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: var(--radius-pill);
+  border: 3px solid var(--bg);
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--fg-subtle);
+}
+
+/* ══ components ════════════════════════════════════════════════════════════ */
+
+/* Shell. One header across every page so the nav is never a per-page decision. */
+.seam-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  min-height: var(--header-h);
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  flex-wrap: wrap;
+  padding: var(--s-3) var(--s-5);
+  /* Opaque, not a blurred translucent sheet. Two reasons, both measured: a 14% transparent
+     background over moving content makes the brand's contrast unverifiable — 1.8–2.5:1
+     against whatever happens to be scrolling behind it — and blur used as decoration is a
+     gesture rather than an effect. */
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+
+.seam-brand {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+  text-decoration: none;
+  color: inherit;
+}
+.seam-brand b {
+  font-size: var(--text-lg);
+  font-weight: 680;
+  letter-spacing: var(--tracking-display);
+}
+.seam-brand span {
+  color: var(--fg-subtle);
+  font-size: var(--text-sm);
+}
+
+.seam-main {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: var(--s-6) var(--s-5) var(--s-8);
+}
+
+.seam-main > * + * {
+  margin-top: var(--s-5);
+}
+
+/* Cards. A card is a container, not a layout primitive — so this is one flat panel and
+   nothing nests inside another card. */
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+.card > header,
+.card > .card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  background: var(--panel-raised);
+  border-bottom: 1px solid var(--line);
+}
+.card > .body {
+  padding: var(--s-4);
+}
+
+/* Callouts. Deliberately NOT a coloured border-left: a 3px accent rule is the default
+   gesture of every alert box ever shipped, and it carries no information the fill does
+   not. Severity lives in the surface tint plus a leading marker. */
+.callout {
+  position: relative;
+  padding: var(--s-4) var(--s-4) var(--s-4) calc(var(--s-4) + var(--s-4));
+  border-radius: var(--radius);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--fg-muted);
+  font-size: var(--text-base);
+}
+.callout::before {
+  content: "";
+  position: absolute;
+  left: var(--s-4);
+  top: calc(var(--s-4) + 0.45em);
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+}
+.callout b {
+  color: var(--fg);
+  font-weight: 640;
+}
+.callout.warn {
+  background: var(--warn-soft);
+  border-color: color-mix(in srgb, var(--warn) 32%, var(--line));
+}
+.callout.warn::before {
+  background: var(--warn);
+}
+.callout.bad {
+  background: var(--bad-soft);
+  border-color: color-mix(in srgb, var(--bad) 32%, var(--line));
+}
+.callout.bad::before {
+  background: var(--bad);
+}
+
+/* Buttons: every state named. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: 2.25rem;
+  padding: 0 var(--s-4);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 550;
+  color: var(--fg);
+  background: var(--panel-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+.btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--fg) 7%, var(--panel-raised));
+  border-color: var(--fg-subtle);
+}
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.btn:disabled {
+  /* Not `opacity`. A 0.45 opacity label measures 1.2:1 against its own surface — a
+     disabled control you cannot read is not a state, it is a broken one. Muted colours keep
+     the label legible (5.2:1 dark, 4.7:1 light) while the border and background still carry
+     the affordance. `--fg-on-raised` exists because `--fg-subtle` drops to 4.3:1 on the
+     disabled surface, which is 4% foreground mixed into the raised panel. */
+  color: var(--fg-on-raised);
+  background: color-mix(in srgb, var(--fg) 4%, var(--panel-raised));
+  border-color: var(--line);
+  cursor: not-allowed;
+}
+.btn[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--fg);
+}
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+.btn-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 86%, var(--fg));
+  border-color: color-mix(in srgb, var(--accent) 86%, var(--fg));
+}
+
+select,
+input[type="text"],
+input[type="number"] {
+  min-height: 2.25rem;
+  padding: 0 var(--s-3);
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--fg);
+  background: var(--panel-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+}
+select:hover,
+input:hover {
+  border-color: var(--fg-subtle);
+}
+
+input[type="range"] {
+  accent-color: var(--accent);
+  min-width: 8rem;
+  flex: 1;
+}
+
+/* Nav: the header's own row. `[aria-current]` marks the reader's place, so it is a state
+   rather than a highlight someone has to notice. */
+.seam-nav {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  flex-wrap: wrap;
+}
+.seam-navlink {
+  padding: 0.3rem var(--s-3);
+  border-radius: var(--radius-sm);
+  color: var(--fg-muted);
+  text-decoration: none;
+  font-size: var(--text-sm);
+  font-weight: 520;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  transition: background-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.seam-navlink:hover {
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  color: var(--fg);
+}
+.seam-navlink[aria-current="page"] {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 34%, transparent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.seam-headeractions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-left: auto;
+}
+
+/* Stack the header on narrow screens rather than letting the nav wrap under the brand in
+   an order that depends on content length. */
+@media (max-width: 720px) {
+  .seam-header {
+    gap: var(--s-2);
+  }
+  .seam-brand span {
+    display: none;
+  }
+  .seam-nav {
+    order: 3;
+    width: 100%;
+    overflow-x: auto;
+    padding-bottom: var(--s-1);
+  }
+  .seam-headeractions {
+    order: 2;
+  }
+}
+
+/* Status pill. One shape, used for state, not decoration. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 0.15rem 0.6rem;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  font-weight: 620;
+  letter-spacing: 0.03em;
+  border: 1px solid transparent;
+}
+.pill.none {
+  background: var(--bad-soft);
+  color: var(--bad);
+  border-color: color-mix(in srgb, var(--bad) 30%, transparent);
+}
+.pill.ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 30%, transparent);
+}
+.pill.warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 30%, transparent);
+}
+.pill.info {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.tag {
+  display: inline-block;
+  padding: 0.05rem 0.45rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--panel-raised);
+  color: var(--fg-subtle);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Tables: one header row, hairline rules, no zebra. */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+thead th {
+  position: sticky;
+  top: 0;
+  text-align: left;
+  padding: var(--s-2) var(--s-3);
+  background: var(--panel-raised);
+  border-bottom: 1px solid var(--line-strong);
+  color: var(--fg-subtle);
+  font-size: var(--text-xs);
+  font-weight: 620;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  white-space: nowrap;
+}
+tbody td {
+  padding: var(--s-3);
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+  color: var(--fg-muted);
+}
+tbody tr:last-child td {
+  border-bottom: none;
+}
+tbody tr:hover td {
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+
+/* A magnitude bar sits *beside* its own number, never in place of one — it is a paired
+   encoding for comparing magnitudes down a column, not a progress ring standing in for
+   content. */
+.meter {
+  display: block;
+  height: 3px;
+  margin-top: 0.3rem;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  overflow: hidden;
+}
+.meter i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: inherit;
+}
+
+/* A table that is a card's direct child has nothing between its first cell and the card's
+   border. Detected as cramped padding on every page, and it is genuinely flush. */
+.card > table {
+  width: calc(100% - var(--s-5));
+  margin: var(--s-2) var(--s-3);
+}
+.card > table thead th:first-child,
+.card > table tbody td:first-child {
+  padding-left: var(--s-2);
+}
+
+/* Definition grid for measurement panels. */
+.kv {
+  display: grid;
+  grid-template-columns: minmax(9rem, auto) 1fr;
+  gap: var(--s-2) var(--s-4);
+  margin: 0;
+  font-size: var(--text-sm);
+}
+.kv dt {
+  color: var(--fg-subtle);
+}
+.kv dd {
+  margin: 0;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.note {
+  color: var(--fg-subtle);
+  font-size: var(--text-sm);
+  margin: 0;
+}
+
+/* One authored moment: content lifts into place once, from visible, exponential ease-out.
+   Not a stagger, not a bounce, and never an entrance that delays what the reader came for. */
+@keyframes seam-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.seam-enter {
+  animation: seam-rise var(--dur-slow) var(--ease-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+/* Prose measure. Applied where a page actually writes sentences to the reader. */
+.prose {
+  max-width: var(--measure);
+  color: var(--fg-muted);
+}
+.prose p {
+  margin: 0 0 var(--s-4);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.stack > * + * {
+  margin-top: var(--s-3);
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+}

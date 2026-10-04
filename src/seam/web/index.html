@@ -3,82 +3,110 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0b0e14">
+<meta name="color-scheme" content="dark light">
 <title>SEAM — live non-manual analysis</title>
-<style>
-  :root{--bg:#0d1117;--fg:#e6edf3;--dim:#8b949e;--line:#30363d;--ok:#3fb950;--warn:#d29922;--no:#f85149;--acc:#58a6ff}
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
-  header{padding:12px 18px;border-bottom:1px solid var(--line);display:flex;gap:16px;align-items:baseline;flex-wrap:wrap}
-  h1{font-size:16px;margin:0;font-weight:600}
-  .sub{color:var(--dim);font-size:12px}
-  main{display:grid;grid-template-columns:minmax(320px,1fr) minmax(360px,1.2fr);gap:18px;padding:18px}
-  @media(max-width:900px){main{grid-template-columns:1fr}}
-  video{width:100%;border-radius:8px;background:#000;transform:scaleX(-1)}
-  .panel{border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:14px}
-  .panel h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);margin:0 0 10px}
-  table{width:100%;border-collapse:collapse}
-  td,th{padding:3px 6px;text-align:left;border-bottom:1px solid var(--line);font-size:13px}
-  th{color:var(--dim);font-weight:500;font-size:11px;text-transform:uppercase}
-  .n{text-align:right;font-variant-numeric:tabular-nums}
-  .bar{height:4px;background:#21262d;border-radius:2px;overflow:hidden;margin-top:3px}
-  .bar i{display:block;height:100%;background:var(--acc)}
-  .blind{color:var(--warn)} .good{color:var(--ok)} .bad{color:var(--no)}
-  button{background:#21262d;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:7px 14px;cursor:pointer;font:inherit}
-  button:hover:not(:disabled){background:#30363d}
-  button:disabled{opacity:.45;cursor:not-allowed}
-  input{background:#0d1117;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 9px;font:inherit;width:130px}
-  .note{color:var(--dim);font-size:12px;margin:8px 0 0}
-  .err{color:var(--no);font-size:12px;white-space:pre-wrap}
-  .kv{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;font-size:12px}
-  .kv b{color:var(--dim);font-weight:500}
-  code{background:#161b22;padding:1px 5px;border-radius:4px}
-</style>
+<link rel="stylesheet" href="/static/tokens.css">
+<script>(function(){try{var k='seam.theme',s=localStorage.getItem(k);var q=new URLSearchParams(location.search).get('theme');var t=(q==='light'||q==='dark')?q:((s==='light'||s==='dark')?s:(matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'));document.documentElement.dataset.theme=t;}catch(e){}})();</script>
 <script type="module" src="/static/nav.js"></script>
+<style>
+  /* Layout only. The old page set `ui-monospace` on `body`, which made every paragraph read
+     as a code listing; monospace is now scoped to identifiers and raw values, which is the
+     only job it is good at. Type, colour and depth all come from tokens.css. */
+  .demo-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+    gap: var(--s-5);
+    align-items: start;
+  }
+  @media (max-width: 940px) {
+    .demo-grid { grid-template-columns: 1fr; }
+  }
+
+  #v {
+    display: block;
+    width: 100%;
+    border-radius: var(--radius);
+    background: var(--bg-deep);
+    box-shadow: var(--shadow);
+    transform: scaleX(-1);   /* mirror the preview; the data is never mirrored */
+  }
+
+  .controls {
+    display: flex;
+    gap: var(--s-2);
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: var(--s-4);
+  }
+  .controls label {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s-2);
+    font-size: var(--text-sm);
+    color: var(--fg-subtle);
+  }
+
+  #err {
+    color: var(--bad);
+    font-size: var(--text-sm);
+    white-space: pre-wrap;
+    min-height: 1.2em;
+  }
+
+  .side > * + * { margin-top: var(--s-5); }
+</style>
 </head>
 <body>
-<header>
-  <h1>SEAM</h1>
-  <span class="sub">live non-manual analysis — video never leaves this tab</span>
-  <span style="flex:1"></span>
-  <span data-seamnav></span>
-  <span class="sub" id="status">starting…</span>
-</header>
+<div data-seam-header></div>
 
-<main>
-<div>
-  <video id="v" playsinline muted autoplay></video>
-  <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
-    <button id="go" disabled>start camera</button>
-    <button id="stop" disabled>stop camera</button>
-    <button id="analyse" disabled>analyse window</button>
-    <label class="sub">utterance <input id="uid" placeholder="e.g. 24363254"></label>
-  </div>
-  <div class="err" id="err"></div>
-  <p class="note">
-    MediaPipe Tasks runs here in WASM. This tab posts the 52 blendshape coefficients and
-    the head transform to the local server, which never sees the image.
-  </p>
-</div>
-
-<div>
-  <div class="panel">
-    <h2>marker magnitudes</h2>
-    <div id="empty" class="sub">no window analysed yet</div>
-    <table id="mt" style="display:none">
-      <thead><tr><th>marker</th><th class="n">magnitude</th><th class="n">zero&nbsp;%</th><th>status</th></tr></thead>
-      <tbody></tbody>
-    </table>
-    <p class="note" id="mnote"></p>
+<main class="seam-main">
+<div class="demo-grid seam-enter">
+  <div>
+    <video id="v" playsinline muted autoplay></video>
+    <div class="controls">
+      <button type="button" class="btn btn-primary" id="go" disabled>Start camera</button>
+      <button type="button" class="btn" id="stop" disabled>Stop camera</button>
+      <button type="button" class="btn" id="analyse" disabled>Analyse window</button>
+      <label for="uid">Utterance <input type="text" id="uid" placeholder="e.g. 24363254"></label>
+      <span class="pill" id="status">starting…</span>
+    </div>
+    <div id="err" role="status" aria-live="polite"></div>
+    <p class="note" style="margin-top:var(--s-3)">
+      MediaPipe Tasks runs here in WASM. This tab posts the 52 blendshape coefficients and
+      the head transform to the local server, which never sees the image.
+    </p>
   </div>
 
-  <div class="panel">
-    <h2>linguistic annotation</h2>
-    <div class="sub" id="ling">supply an ASLLRP utterance id to see its gloss context</div>
-  </div>
+  <div class="side">
+    <div class="card">
+      <h2>Marker magnitudes</h2>
+      <div class="body">
+        <div class="dim" id="empty">No window analysed yet.</div>
+        <table id="mt" style="display:none">
+          <thead><tr>
+            <th scope="col">Marker</th><th scope="col" class="num">Magnitude</th>
+            <th scope="col" class="num">Zero&nbsp;%</th><th scope="col">Status</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+        <p class="note" id="mnote"></p>
+      </div>
+    </div>
 
-  <div class="panel">
-    <h2>not supported by this build</h2>
-    <div id="unsup" class="sub">—</div>
+    <div class="card">
+      <h2>Linguistic annotation</h2>
+      <div class="body">
+        <div class="dim" id="ling">Supply an ASLLRP utterance id to see its gloss context.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Not supported by this build</h2>
+      <div class="body">
+        <div class="dim" id="unsup">—</div>
+      </div>
+    </div>
   </div>
 </div>
 </main>
@@ -251,30 +279,31 @@ function render(j) {
     const tr = document.createElement("tr");
     tr.innerHTML =
       `<td>${name}</td>` +
-      `<td class="n">${m.magnitude.toFixed(3)}<div class="bar"><i style="width:${(m.magnitude / max * 100).toFixed(1)}%"></i></div></td>` +
-      `<td class="n">${(m.zero_fraction * 100).toFixed(0)}</td>` +
-      `<td class="${blind ? "blind" : (m.present_in_window ? "good" : "")}">${
+      `<td class="num">${m.magnitude.toFixed(3)}` +
+        `<span class="meter" aria-hidden="true"><i style="width:${(m.magnitude / max * 100).toFixed(1)}%"></i></span></td>` +
+      `<td class="num">${(m.zero_fraction * 100).toFixed(0)}</td>` +
+      `<td><span class="pill ${blind ? "warn" : (m.present_in_window ? "ok" : "none")}">${
         blind ? "blind — cannot discriminate" : (m.present_in_window ? "marker present" : "no marker in window")
-      }</td>`;
+      }</span></td>`;
     tb.appendChild(tr);
   }
   $("mnote").textContent = `${j.n_frames} frames at ${j.fps} fps · server ${j.server_ms} ms · ` + j.caveats[0];
 
   const l = j.linguistic;
   $("ling").innerHTML = l === null
-    ? 'supply an ASLLRP utterance id to see its gloss context'
+    ? 'Supply an ASLLRP utterance id to see its gloss context.'
     : (!l.available
         ? `<div class="bad">${l.reason}</div>`
-        : `<div class="kv"><b>gloss</b><span>${l.gloss}</span>` +
-          `<b>tokens</b><span>${l.n_tokens}</span>` +
-          `<b>markers</b><span>${l.markers_present.length ? l.markers_present.join(", ") : "none in the lexical gloss"}</span></div>` +
+        : `<dl class="kv"><dt>gloss</dt><dd>${l.gloss}</dd>` +
+          `<dt>tokens</dt><dd>${l.n_tokens}</dd>` +
+          `<dt>markers</dt><dd>${l.markers_present.length ? l.markers_present.join(", ") : "none in the lexical gloss"}</dd></dl>` +
           `<p class="note">${l.note}</p>` +
           Object.entries(l.provenance).map(([k, v]) => `<div class="note">${k}: ${v}</div>`).join(""));
 
   $("unsup").innerHTML =
-    `<div class="bad">affect — ${j.affect.reason}</div>` +
-    `<div class="bad">gloss recognition — ${j.recognition.reason}</div>` +
-    `<p class="note">both are withheld rather than shown empty, because a number that carries no information is worse than no number.</p>`;
+    `<p class="bad">affect — ${j.affect.reason}</p>` +
+    `<p class="bad">gloss recognition — ${j.recognition.reason}</p>` +
+    `<p class="note">Both are withheld rather than shown empty, because a number that carries no information is worse than no number.</p>`;
 }
 
 // Report a load failure in the visible error box, not only in the small status

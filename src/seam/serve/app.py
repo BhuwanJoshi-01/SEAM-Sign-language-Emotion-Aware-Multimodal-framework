@@ -398,9 +398,19 @@ def build_app() -> Any:
             return JSONResponse({"error": "path escapes the web root"}, status_code=400)
         if not target.is_file():
             return JSONResponse({"error": f"{path} not found"}, status_code=404)
+        types = {
+            ".js": "text/javascript",
+            ".mjs": "text/javascript",
+            ".css": "text/css",
+            ".html": "text/html",
+            ".json": "application/json",
+            ".svg": "image/svg+xml",
+        }
         return FileResponse(
             target,
-            media_type="text/javascript" if target.suffix == ".js" else None,
+            media_type=types.get(target.suffix),
+            # tokens.css carries both themes in one file, so a stale copy means stale colours
+            # rather than stale text. Revalidate instead of serving it for a day.
             headers={"Cache-Control": "no-cache"},
         )
 

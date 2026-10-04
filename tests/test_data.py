@@ -501,9 +501,13 @@ def test_a_partially_fetched_resource_is_not_reported_ok(tmp_path: Path) -> None
     done_state, _, done_blocker = _state_for(res, manifest(1.0))
     part_state, integrity, part_blocker = _state_for(res, manifest(0.13))
 
-    assert done_state is readiness_mod.State.OK, (
+    # `REUSED` is as complete as `OK` — the resource declares a reuse path, so the gate
+    # reports that rather than a fetch. Asserting on the exact enum member here broke the
+    # moment a reuse path was added, which says nothing about completeness.
+    assert done_state in (readiness_mod.State.OK, readiness_mod.State.REUSED), (
         f"a complete resource reported {done_state}: {done_blocker}"
     )
+    assert not done_blocker
     assert part_state is readiness_mod.State.PARTIAL, (
         f"a 13%-fetched resource reported {part_state}; the completeness check is not firing"
     )

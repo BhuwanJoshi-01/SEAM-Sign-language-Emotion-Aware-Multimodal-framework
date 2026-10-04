@@ -3,147 +3,182 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SEAM — Sign Language Emotion-Aware Multimodal Framework</title>
+<title>SEAM — SMPL-X avatar</title>
+<meta name="theme-color" content="#0b0e14">
+<meta name="color-scheme" content="dark light">
 <script type="importmap">
 {"imports":{"three":"/static/vendor/three/three.module.js"}}
 </script>
+<script>(function(){try{var k='seam.theme',s=localStorage.getItem(k);var q=new URLSearchParams(location.search).get('theme');var t=(q==='light'||q==='dark')?q:((s==='light'||s==='dark')?s:(matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'));document.documentElement.dataset.theme=t;}catch(e){}})();</script>
+<link rel="stylesheet" href="/static/tokens.css">
 <script type="module" src="/static/nav.js"></script>
 <style>
-  :root{
-    --bg:#0e1116; --panel:#161b22; --panel2:#1c232c; --line:#2a323d;
-    --ink:#e6edf3; --dim:#8b98a5; --accent:#4c9aff; --ok:#3fb950; --warn:#d29922; --bad:#f85149;
+  /* Page-specific layout only. Every colour, font, radius and shadow comes from
+     tokens.css, so the two themes stay in step without this file knowing they exist.
+
+     Two rows, not one tall pair. Measured at 1280x800: with the stage and the sidebar side
+     by side, the sidebar ran 1,158 px against the stage's 640 px — the fold fell 145% of the
+     way down one column while the short one floated beside it. The caveats belong to the
+     opening row, because they are the precondition for reading anything else; the
+     measurements are the payload, so they take the full width below, side by side. */
+  .avatar-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+    gap: var(--s-5);
+    align-items: start;
   }
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);
-       font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-  header{padding:22px 28px;border-bottom:1px solid var(--line);display:flex;
-         align-items:baseline;gap:14px;flex-wrap:wrap}
-  h1{font-size:19px;margin:0;letter-spacing:.02em}
-  .sub{color:var(--dim);font-size:13px}
-  main{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:20px;padding:20px 28px 60px}
-  @media(max-width:960px){main{grid-template-columns:1fr}}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
-  .card h2{font-size:13px;text-transform:uppercase;letter-spacing:.09em;color:var(--dim);
-           margin:0;padding:13px 16px;border-bottom:1px solid var(--line);background:var(--panel2)}
-  .card .body{padding:16px}
-  #stage{width:100%;aspect-ratio:4/5;background:#1a1f27;position:relative}
-  canvas{display:block;width:100%;height:100%}
-  #stage .msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-              text-align:center;padding:28px;color:var(--dim);font-size:14px}
-  .bar{display:flex;gap:8px;align-items:center;padding:11px 14px;border-top:1px solid var(--line);
-       background:var(--panel2);flex-wrap:wrap}
-  button,select{background:#232b35;color:var(--ink);border:1px solid var(--line);
-                border-radius:7px;padding:7px 11px;font:inherit;font-size:13px;cursor:pointer}
-  button:hover{background:#2c3641}
-  button:disabled{opacity:.45;cursor:not-allowed}
-  input[type=range]{flex:1;min-width:120px;accent-color:var(--accent)}
-  .lbl{font-size:12px;color:var(--dim);font-variant-numeric:tabular-nums;min-width:96px;text-align:right}
-  table{width:100%;border-collapse:collapse;font-size:13px}
-  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line)}
-  th{color:var(--dim);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.07em}
-  td.num{text-align:right;font-variant-numeric:tabular-nums}
-  .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
-  .note{background:#1d2430;border-left:3px solid var(--accent);padding:11px 13px;
-        border-radius:0 7px 7px 0;font-size:13px;color:#c6d2de;margin:0 0 14px}
-  .note.warn{border-left-color:var(--warn)}
-  .note.bad{border-left-color:var(--bad)}
-  .note b{color:var(--ink)}
-  .kv{display:grid;grid-template-columns:auto 1fr;gap:5px 14px;font-size:13px}
-  .kv dt{color:var(--dim)} .kv dd{margin:0;font-variant-numeric:tabular-nums}
-  a{color:var(--accent)}
-  code{background:#0b0e13;padding:1px 5px;border-radius:4px;font-size:12px}
-  .pill{display:inline-block;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;
-        letter-spacing:.04em}
-  .pill.none{background:#3a2323;color:#ff9d96}
-  .pill.real{background:#12351f;color:#7ee787}
+  .avatar-data {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--s-5);
+    align-items: start;
+  }
+  @media (max-width: 1000px) {
+    .avatar-row,
+    .avatar-data { grid-template-columns: 1fr; }
+  }
+
+  #stage {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 4 / 5;
+    /* Capped, because 4:5 at a wide column is a 1,175 px stage and the reader scrolls past
+       the entire measurement panel before reaching anything else. The subject stays whole;
+       the frame gets shorter. The bar rows below it are part of the column's height, so the
+       cap is set against the viewport rather than the stage alone - measured: the avatar
+       column was running 143% of the fold while its sibling fitted in 92%. */
+    max-height: min(58vh, 520px);
+    margin-inline: auto;
+    background: var(--stage-bg);
+    transition: background-color var(--dur) var(--ease-out);
+  }
+  #stage canvas { display: block; width: 100%; height: 100%; }
+
+  #stage .msg {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: var(--s-5);
+    color: var(--fg-stage);
+    font-size: var(--text-base);
+    white-space: pre-line;
+  }
+
+  .bar {
+    display: flex;
+    gap: var(--s-3);
+    align-items: center;
+    padding: var(--s-3) var(--s-4);
+    border-top: 1px solid var(--line);
+    background: var(--panel-raised);
+    flex-wrap: wrap;
+  }
+  .lbl {
+    font-size: var(--text-xs);
+    color: var(--fg-subtle);
+    font-variant-numeric: tabular-nums;
+    min-width: 7rem;
+    margin-left: auto;
+    text-align: right;
+  }
+  .sidebar > * + * { margin-top: var(--s-5); }
 </style>
 </head>
 <body>
-<header>
-  <h1>SEAM</h1>
-  <span class="sub">Sign Language Emotion-Aware Multimodal framework — perception → linguistic &amp; affect → recognition → SMPL-X avatar</span>
-  <span style="flex:1"></span>
-  <span data-seamnav></span>
-</header>
+<div data-seam-header></div>
 
-<main>
+<main class="seam-main">
+  <div class="avatar-row seam-enter">
   <!-- ─────────────────────────────── AVATAR ─────────────────────────────── -->
   <section class="card">
-    <h2>Avatar</h2>
+    <div class="card-head"><h2>Avatar</h2>
+      <span class="pill info" id="clipLbl"></span>
+    </div>
     <div id="stage">
       <div class="msg" id="stageMsg">Loading renderer…</div>
     </div>
     <div class="bar">
-      <button id="play">Pause</button>
-      <input type="range" id="scrub" min="0" max="1000" value="0">
+      <button type="button" class="btn" id="play">Pause</button>
+      <input type="range" id="scrub" min="0" max="1000" value="0" aria-label="Scrub the clip">
       <span class="lbl" id="clock">0.00 / 0.00 s</span>
     </div>
     <div class="bar">
-      <select id="clip"></select>
-      <select id="cam">
+      <select id="clip" aria-label="Clip"></select>
+      <select id="cam" aria-label="Camera angle">
         <option value="3q">Three-quarter</option>
         <option value="front">Front</option>
         <option value="side">Side</option>
       </select>
-      <button id="wire">Show skeleton</button>
-      <span class="lbl" id="clipLbl"></span>
+      <button type="button" class="btn" id="wire" aria-pressed="false">Show skeleton</button>
     </div>
   </section>
 
-  <!-- ────────────────────────────── SIDEBAR ────────────────────────────── -->
-  <div>
-    <div class="card" style="margin-bottom:20px">
+  <!-- ── Caveats, in the opening row: the precondition for reading anything else ── -->
+    <div class="card">
       <h2>What this is — and is not</h2>
-      <div class="body">
-        <div class="note bad">
+      <div class="body stack">
+        <div class="callout bad">
           <b>No human preference data exists.</b> The avatar-quality study (M7) has stimuli and
           a measurement harness but <b>zero raters</b>. Nothing on this page is a result about
           how good the avatar looks. Any claim to that effect would be fabricated.
         </div>
-        <div class="note warn">
-          Pose comes from <b>SMPLer-X</b>, a third-party regressor trained on mocap. It knows
+        <div class="callout warn">
+          <b>Pose comes from SMPLer-X</b>, a third-party regressor trained on mocap. It knows
           nothing about sign language and will render plausible signing whatever the hands
           say. Its output must not be cited as evidence about linguistic content.
         </div>
-        <div class="note">
+        <div class="callout">
           The numbers below are <b>pipeline measurements</b> — is the front end running, does it
           detect the signer, did it collapse, is the body upright. They are deliberately not
           quality scores. A confidently wrong pipeline produces a similar table.
         </div>
-        <span class="pill none">NO RATINGS</span>
-        <span class="pill real">REAL GEOMETRY</span>
+        <div class="row">
+          <span class="pill none">NO RATINGS</span>
+          <span class="pill ok">REAL GEOMETRY</span>
+        </div>
       </div>
     </div>
+  </div>
 
-    <div class="card" style="margin-bottom:20px">
+  <!-- ── Measurements: the payload, full width, side by side ── -->
+  <div class="avatar-data seam-enter">
+    <div class="card">
       <h2>Per-clip measurements</h2>
-      <div class="body" style="padding:0">
-        <table id="mtab">
-          <thead><tr>
-            <th>Clip</th><th class="num">Detect</th><th class="num">Fixed</th>
-            <th class="num">Frames</th><th class="num">Head&nbsp;above&nbsp;pelvis</th>
-          </tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
+      <table id="mtab">
+        <thead><tr>
+          <th scope="col">Clip</th><th scope="col" class="num">Detect</th>
+          <th scope="col" class="num">Fixed</th><th scope="col" class="num">Frames</th>
+          <th scope="col" class="num">Head&nbsp;above&nbsp;pelvis</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
     </div>
 
     <div class="card">
       <h2>Selected clip</h2>
       <div class="body">
-        <dl class="kv" id="det"><dd style="color:var(--dim)">Loading manifest…</dd></dl>
+        <dl class="kv" id="det"><dd class="dim">Loading manifest…</dd></dl>
       </div>
     </div>
   </div>
 </main>
 
 <script type="module">
+import { tokenHex, token, current as currentTheme } from '/static/theme.js';
+
 /* Order matters here. The measurement panels are loaded and rendered FIRST, so the page is
    still useful if the 3D renderer cannot start. An earlier version imported three.js before
    fetching the manifest and threw on failure, which left every table reading "Loading
    manifest..." on a blank stage - the page then looks broken rather than partially working. */
 const msg = document.getElementById('stageMsg');
-const show = (t, bad=false) => { msg.textContent = t; msg.style.color = bad ? '#f85149' : ''; msg.style.display='flex'; };
+const show = (t, bad=false) => {
+  msg.textContent = t;
+  msg.style.color = bad ? 'var(--bad)' : '';
+  msg.style.display = 'flex';
+};
 
 let manifest, clips = [];
 try {
@@ -173,7 +208,7 @@ tbody.innerHTML = clips.length ? clips.map(c => {
     <td class="num ${a.collapsed_frames_interpolated.length?'warn':''}">${a.collapsed_frames_interpolated.length}</td>
     <td class="num">${a.frames}</td>
     <td class="num ${a.upright.frames_head_below_pelvis?'bad':'ok'}">${a.upright.frames_head_below_pelvis?'FAIL':'100%'}</td></tr>`;
-}).join('') : `<tr><td colspan="5" style="color:var(--dim)">${why}</td></tr>`;
+}).join('') : `<tr><td colspan="5" class="dim">${why}</td></tr>`;
 
 function showDetail(c){
   const a = c.arm_a_smplerx;
@@ -189,10 +224,16 @@ function showDetail(c){
     <dt>mesh</dt><dd>${a.mesh.n_vertices} verts, ${a.mesh.n_faces} faces, ${a.mesh.height_m.toFixed(2)} m, human=${a.mesh.is_human_mesh}</dd>
     <dt>glTF</dt><dd>${a.glb_check.animations} clip &middot; ${a.glb_check.channels} channels &middot; ${a.glb_check.keyframes} keys &middot; 1 skin, 1 mesh</dd>
     <dt>glTF vs mesh max error</dt><dd class="${a.glb_check.agrees?'ok':'bad'}">${(a.glb_check.max_abs_error_m*1000).toFixed(1)} mm (4-influence limit drops ${(a.glb_check.weight_mass_dropped_max*100).toFixed(1)}% weight mass)</dd>`;
-  tbody.querySelectorAll('tr').forEach(r => r.style.background = r.dataset.id === c.utterance_id ? '#1f2937' : '');
+  /* Selection is a token, not a literal. This was `#1f2937` — a dark-only hex left over from
+     the one-theme page, which painted a near-black bar across a white table in light mode. */
+  tbody.querySelectorAll('tr').forEach(r => {
+    const on = r.dataset.id === c.utterance_id;
+    r.style.background = on ? 'var(--accent-soft)' : '';
+    r.style.boxShadow = on ? 'inset 2px 0 0 var(--accent)' : '';
+  });
 }
 if (clips.length) showDetail(clips[0]);
-else document.getElementById('det').innerHTML = `<dd style="color:var(--dim)">${why}</dd>`;
+else document.getElementById('det').innerHTML = `<dd class="dim">${why}</dd>`;
 
 /* Renderer is vendored (src/seam/web/vendor/three) so the page works with no network.
    A CDN import was tried first and is wrong for a product: it makes the page fail whenever
@@ -210,30 +251,88 @@ try {
 /* ── scene ─────────────────────────────────────────────────────────────── */
 const stage = document.getElementById('stage');
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x1a1f27);
 const camera = new THREE.PerspectiveCamera(38, 1, 0.01, 100);
 camera.position.set(1.6, 1.1, 2.4);
 const renderer = new THREE.WebGLRenderer({antialias:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 stage.insertBefore(renderer.domElement, msg);
 const controls = new OrbitControls(camera, renderer.domElement);  // `controls` is read in fit()
-new THREE.HemisphereLight(0xdfe7f0, 0x2a2f36, 2.1).position.set(0,3,0);
-const key = new THREE.DirectionalLight(0xffffff, 1.5); key.position.set(2,4,3); scene.add(key);
-const rim = new THREE.DirectionalLight(0x88aaff, 0.7); rim.position.set(-3,1,-2); scene.add(rim);
 
-/* Fit the camera to the MESH only.
-   The first version used Box3.setFromObject, which also bounds the 55 joint nodes. Those
-   carry their own local transforms, and including them put the camera inside the body - the
-   scene looked broken while the file was fine. Bounds come from geometry alone. */
+  /* The stage is capped by CSS, so the drawing buffer has to follow it or the canvas is
+     stretched. Measured from the element's own client size rather than a resize listener,
+     because the cap comes from `vh` and so changes with the window, not only its width. */
+  function syncStageSize() {
+    const w = stage.clientWidth, h = stage.clientHeight;
+    if (!w || !h) return;
+    const dpr = renderer.getPixelRatio();
+    const bw = Math.round(w * dpr), bh = Math.round(h * dpr);
+    if (renderer.domElement.width !== bw || renderer.domElement.height !== bh) {
+      renderer.setSize(w, h, false);
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+    }
+  }
+
+/* Lighting is a property of the theme, not of the page.
+   three.js takes colours as integers and reads no CSS, so a scene built from literals stays
+   dark in the light theme — the page then looks broken in exactly one of its two themes,
+   which is the worst possible place for a bug. Colours are pulled from the active tokens and
+   the lights are re-tinted whenever the theme changes. */
+const hemi = new THREE.HemisphereLight(0xffffff, 0x404040, 2.1);
+hemi.position.set(0, 3, 0);
+scene.add(hemi);
+const key = new THREE.DirectionalLight(0xffffff, 1.5);
+key.position.set(2, 4, 3);
+scene.add(key);
+const rim = new THREE.DirectionalLight(0x88aaff, 0.7);
+rim.position.set(-3, 1, -2);
+scene.add(rim);
+
+function applyThemeToScene() {
+  const light = currentTheme() === 'light';
+  scene.background = new THREE.Color(tokenHex('--stage-bg', 0x151b26));
+  // A dark scene needs a bright fill and a low bounce; a light one is the reverse, and
+  // reusing dark-theme intensities makes the body read as a silhouette on white.
+  hemi.color.setHex(tokenHex('--stage-fg', 0xffffff));
+  hemi.groundColor.setHex(light ? 0xb9c3d1 : 0x2a2f36);
+  hemi.intensity = light ? 2.6 : 2.1;
+  key.intensity = light ? 2.0 : 1.5;
+  key.color.setHex(0xffffff);
+  rim.intensity = light ? 0.45 : 0.7;
+  renderer.toneMappingExposure = light ? 1.0 : 1.05;
+}
+applyThemeToScene();
+document.addEventListener('seam:theme', applyThemeToScene);
+
+/* Fit the camera to the SKINNED mesh only, in its current pose.
+
+   Two earlier attempts, wrong in opposite directions, and the difference is the lesson:
+
+   - `Box3.setFromObject(gltf.scene)` also bounds the 55 joint nodes. Those carry no static
+     TRS - their transforms live in the animation - so before the mixer runs they collapse
+     to the origin and the camera ends up inside the body. Measured 0.40 x 0.46 x 0.31 m
+     for a 1.72 x 1.72 x 0.29 m subject.
+   - `geometry.boundingBox` is the *bind* pose. Right for a standing body, wrong for every
+     clip here: EmoSign signers are seated, so the bind box sits above and behind the body
+     actually on screen and the subject ends up in a corner of the frame.
+
+   `setFromObject(mesh, true)` is the precise path - three.js routes it through
+   `SkinnedMesh.getVertexPosition`, which applies the bone transforms, so this measures the
+   pose that is about to be drawn. Only the mesh is passed in, never the whole scene. */
 function fit(obj){
   const box = new THREE.Box3();
-  obj.traverse(o => {
-    if (!o.isMesh || !o.geometry) return;
-    o.geometry.computeBoundingBox();
-    const b = o.geometry.boundingBox.clone().applyMatrix4(o.matrixWorld);
-    box.union(b);
-  });
-  if (box.isEmpty()) return;
+  let skinned = null;
+  obj.traverse(o => { if (o.isSkinnedMesh) skinned = o; });
+  if (skinned) {
+    box.setFromObject(skinned, true);
+  } else {
+    obj.traverse(o => {
+      if (!o.isMesh || !o.geometry) return;
+      o.geometry.computeBoundingBox();
+      box.union(o.geometry.boundingBox.clone().applyMatrix4(o.matrixWorld));
+    });
+  }
+  if (box.isEmpty() || !isFinite(box.min.x)) return;
   const c = box.getCenter(new THREE.Vector3());
   const size = box.getSize(new THREE.Vector3());
   const radius = Math.max(size.length() * 0.5, 1e-3);
@@ -277,8 +376,11 @@ async function loadClip(id){
   mixer = new THREE.AnimationMixer(gltf.scene);
   skel = null;
 
-  scene.clear(); scene.add(key, rim);
-  scene.add(new THREE.HemisphereLight(0xdfe7f0,0x2a2f36,2.1));
+  scene.clear();
+  // Re-add the three themed lights, not fresh literals: `scene.clear()` drops them and the
+  // clip would otherwise be lit by whatever was added first.
+  scene.add(hemi, key, rim);
+  applyThemeToScene();
   clip = gltf.animations[0];
   if (!clip) { show('That .glb has no animation clip.', true); return; }
   action = mixer.clipAction(clip); action.reset().play();
@@ -307,7 +409,9 @@ const sel = document.getElementById('clip');
 sel.innerHTML = clips.map(c => `<option value="${c.utterance_id}">clip ${c.utterance_id}</option>`).join('');
 sel.onchange = () => loadClip(sel.value);
 document.getElementById('wire').onclick = e => {
-  wireframe = !wireframe; e.target.textContent = wireframe ? 'Hide mesh' : 'Show skeleton';
+  wireframe = !wireframe;
+  e.target.textContent = wireframe ? 'Hide mesh' : 'Show skeleton';
+  e.target.setAttribute('aria-pressed', String(wireframe));
   scene.traverse(o => { if (o.isMesh && o.material) { o.material.wireframe = wireframe;
                          o.material.needsUpdate = true; } });
 };
@@ -331,12 +435,13 @@ function resize(){
   const w = stage.clientWidth, h = stage.clientHeight;
   renderer.setSize(w, h, false); camera.aspect = w/h; camera.updateProjectionMatrix();
 }
-addEventListener('resize', resize); resize();
+addEventListener('resize', () => { syncStageSize(); resize(); }); resize();
 
 const clock3 = new THREE.Clock();
 function loop(){
   requestAnimationFrame(loop);
   const dt = Math.min(clock3.getDelta(), 0.1);
+  syncStageSize();
   if (playing && clip) mixer.update(dt);
   controls.update();
   renderer.render(scene, camera);

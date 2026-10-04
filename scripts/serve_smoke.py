@@ -62,7 +62,7 @@ def main() -> int:
         PAGES = {
             "/": (b"tasks-vision", b"api/analyse"),
             "/avatar": (b"/api/demo/manifest", b"importmap"),
-            "/api/coverage": (b"api/cue_expectations", b"does and does not claim"),
+            "/api/coverage": (b"api/cue_expectations", b"is not claimed"),
             "/routes": (b"/static/nav.js", b"/api/demo/manifest"),
         }
         for route, needles in PAGES.items():
@@ -80,11 +80,48 @@ def main() -> int:
                     failures.append(f"{route} does not reference {needle!r}")
             if b"/static/nav.js" not in body:
                 failures.append(f"{route} does not load the shared nav module")
+            # Theming. A page that skips the token sheet or the no-flash boot snippet is dark
+            # only, and it flashes the wrong theme on every load before the module arrives.
+            if b"/static/tokens.css" not in body:
+                failures.append(f"{route} does not load tokens.css, so it cannot be themed")
+            if b"seam.theme" not in body:
+                failures.append(f"{route} has no pre-paint theme boot snippet; it will flash")
+            if b"data-seam-header" not in body:
+                failures.append(f"{route} does not mount the shared header")
+            # The incumbent pages shipped a 3px coloured border-left on every callout, which
+            # is the default gesture of every alert box ever built. Keep it out.
+            if b"border-left:3px" in body or b"border-left: 3px" in body:
+                failures.append(f"{route} uses a coloured border-left on a callout")
+            # And monospace as a costume: it belongs on code and raw values, not on body text.
+            if b"font:14px/1.5 ui-monospace" in body or b"ui-monospace,SFMono" in body:
+                failures.append(f"{route} sets monospace on body text as a costume")
+
+        for asset in ("/static/tokens.css", "/static/theme.js", "/static/nav.js"):
+            try:
+                body = urllib.request.urlopen(f"http://127.0.0.1:{PORT}{asset}", timeout=15).read()
+            except urllib.error.HTTPError as e:
+                failures.append(f"{asset} -> HTTP {e.code}")
+                continue
+            print(f"GET {asset:17.17} {len(body)} bytes")
+            if asset.endswith("tokens.css"):
+                # Both themes must be real blocks, and the system preference must be honoured
+                # when the reader has chosen nothing.
+                for needle, why in (
+                    (b'[data-theme="light"]', "no light theme block"),
+                    (b'[data-theme="dark"]', "no dark theme block"),
+                    (b"prefers-color-scheme: light", "no system-preference fallback"),
+                    (b"::selection", "text selection is left at the browser default"),
+                    (b"focus-visible", "no focus ring"),
+                    (b"tabular-nums", "table numerals are not tabular"),
+                ):
+                    if needle not in body:
+                        failures.append(f"tokens.css: {why}")
+            if asset.endswith("theme.js") and b"seam.theme" not in body:
+                failures.append("theme.js does not persist the reader's choice")
 
         # The nav module is the single source of truth for cross-page links, so if it is
         # missing a page then that page is genuinely unreachable from the UI.
         nav = urllib.request.urlopen(f"http://127.0.0.1:{PORT}/static/nav.js", timeout=15).read()
-        print(f"GET /static/nav.js    {len(nav)} bytes")
         for target in PAGES:
             if f"'{target}'" not in nav.decode():
                 failures.append(f"nav.js does not link {target}; that page is unreachable")

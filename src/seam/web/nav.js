@@ -1,13 +1,13 @@
 /**
- * One navigation definition for every SEAM page, injected at runtime.
+ * One navigation and one theme control for every SEAM page.
  *
  * Why a module and not copy-pasted HTML: `/avatar` shipped without being linked from `/`,
  * without appearing in the `make serve` banner, and without being covered by
- * `make serve-check` - and stayed broken for its whole life partly because nothing pointed
+ * `make serve-check` — and stayed broken for its whole life partly because nothing pointed
  * at it. Three copies of a nav list drift; one list cannot.
  *
- * Every entry is also probed on the `/routes` page, so a link that 404s is visible rather
- * than merely unfortunate.
+ * Also the single place that knows how a page chrome is *composed*, so the header, the nav
+ * and the theme control cannot disagree about spacing or focus order.
  */
 
 export const ROUTES = [
@@ -73,58 +73,59 @@ export const ROUTES = [
   },
 ];
 
-/** The four pages a person actually navigates between. */
+/** The pages a person navigates between, in reading order. */
 const NAV = ['/', '/avatar', '/api/coverage', '/routes'];
 
-export function navHtml(current) {
-  const items = NAV.map((p) => {
+const BRAND = 'SEAM';
+const TAGLINE = 'Sign-language non-manual analysis';
+
+function navHtml(current) {
+  const links = NAV.map((p) => {
     const r = ROUTES.find((x) => x.path === p);
     const here = p === current;
-    const style = here
-      ? 'color:var(--fg);border-color:var(--acc);background:rgba(88,166,255,.10)'
-      : 'color:var(--dim);border-color:var(--line)';
-    return `<a class="seamnav-link" href="${p}" style="${style}"${
-      here ? ' aria-current="page"' : ''
-    }>${r ? r.title : p}</a>`;
+    return `<a class="seam-navlink" href="${p}"${here ? ' aria-current="page"' : ''}>${
+      r ? r.title : p
+    }</a>`;
   }).join('');
-  return `<nav class="seamnav" aria-label="SEAM pages">${items}</nav>`;
+
+  return `<header class="seam-header">
+  <a class="seam-brand" href="/"><b>${BRAND}</b><span>${TAGLINE}</span></a>
+  <nav class="seam-nav" aria-label="Pages">${links}</nav>
+  <div class="seam-headeractions">
+    <button type="button" class="btn" data-theme-toggle aria-label="Switch theme">Light</button>
+  </div>
+</header>`;
 }
 
 /**
- * Render the nav into every `[data-seamnav]` placeholder.
+ * Render the header into every `[data-seam-header]` placeholder.
  *
  * Falls back to plain links if this module fails to load, because a navigation bar that
  * disappears when the network hiccups is the same failure this project keeps hitting.
  */
 export function mountNav(current = location.pathname) {
-  const targets = document.querySelectorAll('[data-seamnav]');
+  const targets = document.querySelectorAll('[data-seam-header]');
   if (!targets.length) return;
   let html;
   try {
     html = navHtml(current);
   } catch (e) {
-    html = NAV.map((p) => `<a class="seamnav-link" href="${p}">${p}</a>`).join('');
+    html = `<header class="seam-header"><a class="seam-brand" href="/"><b>${BRAND}</b></a>
+      <nav class="seam-nav" aria-label="Pages">${NAV.map(
+        (p) => `<a class="seam-navlink" href="${p}">${p}</a>`,
+      ).join('')}</nav></header>`;
   }
   for (const t of targets) t.outerHTML = html;
 }
 
-/** CSS the pages need for the nav, injected once so no page has to repeat it. */
-export const NAV_CSS = `
-.seamnav{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
-.seamnav-link{font-size:12px;text-decoration:none;padding:4px 10px;border-radius:6px;
-  border:1px solid var(--line);white-space:nowrap}
-.seamnav-link:hover{background:rgba(255,255,255,.06);color:var(--fg)}
-`;
-
-// Auto-mount. `document.readyState` is checked because the module is deferred, but the
-// avatar page injects its nav placeholder from a template built at parse time.
+/* Auto-mount. Deferred module scripts run after parsing, so `document.body` exists. */
 if (typeof document !== 'undefined') {
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => mountNav());
   } else {
     mountNav();
   }
-  const style = document.createElement('style');
-  style.textContent = NAV_CSS;
-  document.head.appendChild(style);
+  // theme.js binds [data-theme-toggle] on DOMContentLoaded too; dispatch once it is up so
+  // the button label reflects the applied theme rather than the initial 'Light' default.
+  import('./theme.js').then((t) => t.mount());
 }

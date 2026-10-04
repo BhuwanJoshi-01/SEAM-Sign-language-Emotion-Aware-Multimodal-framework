@@ -333,26 +333,45 @@ RESOURCES: tuple[Resource, ...] = (
         kind=ResourceKind.KEYPOINTS,
         role=Role.TRANSLATION,
         license_status=LicenseStatus.GRANTED,
-        dest="how2sign_pose",
+        dest="how2sign_landmarks",
+        # CORRECTED 2026-10-04. plan.md §1 named Kavitha/how2sign_user3_mediapipe_pose
+        # ("media-pipe keypoints published, plus official English"). Measured after fetching
+        # 7.2 GB of it: there are no keypoints and no English. Its schema is `image`
+        # (JPEG bytes), `conditioning_image` (JPEG bytes), `text` (string) — 31 shards,
+        # ~91,500 rows, 14.12 GB — and `text` is the constant "signer signing" on every row
+        # sampled. With neither landmarks nor a target sentence it cannot train or evaluate
+        # a translation model, so it could never have served as the M5b substrate.
+        #
+        # This repo has what the plan assumed: 35,176 sentence-level rows with real English
+        # and official train/val/test splits, plus NPZ shards of MediaPipe landmarks and 30
+        # geometric features. 4.82 GB, CC-BY-NC-4.0, ungated. Fetch with
+        # `scripts/fetch_how2sign.py`.
+        reuse_path="/mnt/DevProd/seam_data/how2sign_landmarks",
         sources=(
             Source(
-                path="README.md",
-                url=f"{_HF}/Kavitha/how2sign_user3_mediapipe_pose/resolve/main/README.md",
+                path="metadata.parquet",
+                url=f"{_HF}/martinctl/how2sign-asl-landmarks/resolve/main/metadata.parquet",
             ),
         ),
-        approx_bytes=14_120_432_425,
+        approx_bytes=4_820_000_000,
         note=(
-            "How2Sign MediaPipe pose keypoints, published separately from the 80 h of "
-            "video. Carries the official English captions, which is what makes it the "
-            "translation substrate: ASLLRP English is not in the mirror. 31 parquet shards; "
-            "fetch with `scripts/fetch_how2sign.py`, which resumes a dropped connection "
-            "rather than restarting 14 GB."
+            "How2Sign sentence-level MediaPipe landmarks with the official English "
+            "sentences, which is what makes it the translation substrate: ASLLRP English is "
+            "not in the mirror. Carries the same 51 ARKit face landmark indices this project "
+            "already extracts elsewhere, so M5b features are comparable with M3/M4. "
+            "Failures are recorded in failures.parquet rather than silently dropped."
         ),
         measured={
-            "shards": "31",
-            "bytes": "14.12 GB",
+            "rows": "35176 (metadata.parquet)",
+            "shards": "991 npz",
+            "bytes": "4.82 GB",
+            "license": "cc-by-nc-4.0",
             "gated": "False",
-            "remote_sizes_sum": "14120432425 (queried from the remote 2026-10-04)",
+            "example_sentence": "'My name is Dr. Art Bowler.'",
+            "superseded_source": (
+                "Kavitha/how2sign_user3_mediapipe_pose: JPEG + constant caption, no "
+                "landmarks, no English - 14.12 GB and unusable"
+            ),
         },
         blocking=("M5",),
     ),
