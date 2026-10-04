@@ -159,13 +159,19 @@ def _state_for(resource: Resource, manifest: Manifest | None) -> tuple[State, st
     if resource.verify is Verify.VIDEO_SAMPLE:
         # Say plainly how much was decoded. "3863 files" and "some unknown
         # fraction decode" are different facts and the table must not blur them.
+        #
+        # `checked` is the number of files carrying a verification status, which includes
+        # the ones that failed, so it is the denominator - never the numerator. Printing
+        # `checked/checked decoded` alongside `bad undecodable of {checked} sampled`
+        # produced "300/300 decoded, 2 undecodable of 300 sampled": one sentence asserting
+        # a fact and its negation. A gate that contradicts itself in its own output is
+        # worse than one that is vague, because a reviewer cannot tell which half to
+        # believe.
         if bad:
+            good = checked - bad
             return (
                 State.PARTIAL,
-                (
-                    f"{checked}/{checked} decoded, {bad} undecodable of {checked} sampled; "
-                    f"{total} files total"
-                ),
+                (f"{good}/{checked} sampled decode cleanly, {bad} do not; {total} files total"),
                 (
                     f"{bad} of {checked} sampled files do not decode; a repair pass is "
                     f"required before extraction (owner: {OWNERS.get(resource.id, 'implementer')})"

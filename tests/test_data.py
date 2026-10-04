@@ -336,6 +336,15 @@ def test_video_sample_reports_how_much_was_actually_decoded(tmp_path: Path) -> N
     assert "do not decode" in row.blocker
     assert row.owner
 
+    # The integrity cell must not assert a fact and its negation in one sentence. It read
+    # "2/2 decoded, 1 undecodable of 2 sampled", because `checked` (files carrying a status)
+    # was used as the numerator as well as the denominator - and `checked` includes the
+    # failures. A gate whose output contradicts itself is worse than a vague one: a
+    # reviewer cannot tell which half to believe.
+    assert "2/2 decoded" not in row.integrity
+    assert "1/2" in row.integrity, row.integrity
+    assert "undecodable of 2" not in row.integrity
+
 
 def test_wlasl_is_configured_for_sampled_video_verification() -> None:
     from seam.data.sources import Verify
