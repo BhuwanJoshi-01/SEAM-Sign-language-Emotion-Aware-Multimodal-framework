@@ -264,8 +264,10 @@ def _version() -> str:
 
 def build_app() -> Any:
     """The FastAPI application."""
+    import json
+
     from fastapi import FastAPI
-    from fastapi.responses import HTMLResponse, JSONResponse
+    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
     app = FastAPI(
         title="SEAM live demo",
@@ -280,6 +282,8 @@ def build_app() -> Any:
     # demo serves the same page whichever directory it starts from - the earlier
     # parents[2] pointed at src/ and silently served a 44-byte 404 page.
     web = Path(__file__).resolve().parents[1] / "web"
+    # Rendered demo artefacts: `make demo-avatar` writes manifest.json + .glb here.
+    demo_dir = Path(__file__).resolve().parents[3] / "artifacts" / "m7a" / "demo"
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
@@ -318,6 +322,72 @@ def build_app() -> Any:
         return HTMLResponse(
             page.read_text(encoding="utf-8"),
             headers={"Cache-Control": "no-store, must-revalidate", "Pragma": "no-cache"},
+        )
+
+    @app.get("/avatar", response_class=HTMLResponse)
+    def avatar_page() -> Any:
+        """The avatar product page: a real skinned GLB playing a real animation clip."""
+        page = web / "avatar.html"
+        if not page.is_file():
+            return HTMLResponse("<h1>SEAM</h1><p>web/avatar.html not found</p>", 404)
+        return HTMLResponse(
+            page.read_text(encoding="utf-8"),
+            headers={"Cache-Control": "no-store, must-revalidate", "Pragma": "no-cache"},
+        )
+
+    @app.get("/api/demo/manifest")
+    def demo_manifest() -> Any:
+        """Manifest for the rendered demo clips.
+
+        Served from disk rather than recomputed, so the page shows exactly what
+        `make demo-avatar` produced. A missing manifest returns an empty clip list with a
+        200 and a `reason`, because the page already handles "run make demo-avatar" and a
+        500 here would replace that message with a stack trace.
+        """
+        mf = demo_dir / "manifest.json"
+        if not mf.is_file():
+            return {
+                "clips": [],
+                "render": {},
+                "reason": "no manifest; run `make demo-avatar`",
+            }
+        return json.loads(mf.read_text(encoding="utf-8"))
+
+    @app.get("/static/vendor/{path:path}")
+    def vendored(path: str) -> Any:
+        """Serve vendored front-end libraries (three.js and its addons).
+
+        Vendored rather than pulled from a CDN on purpose: a page that needs the network to
+        render is not a product, and a CDN dependency cannot be audited or pinned by the
+        repo. Constrained to `vendor/` for the same reason as the demo route.
+        """
+        root = (web / "vendor").resolve()
+        target = (root / path).resolve()
+        if not str(target).startswith(str(root) + "/"):
+            return JSONResponse({"error": "path escapes vendor/"}, status_code=400)
+        if not target.is_file():
+            return JSONResponse({"error": f"{path} not found"}, status_code=404)
+        return FileResponse(
+            target, media_type="text/javascript", headers={"Cache-Control": "public, max-age=3600"}
+        )
+
+    @app.get("/api/demo/{name}")
+    def demo_asset(name: str) -> Any:
+        """Serve one rendered artefact (`.glb`) from the demo directory.
+
+        Resolved and then checked to be inside `demo_dir`, because `name` arrives from the
+        URL. `{name:path}` would also allow `../`, so containment is enforced on the
+        resolved path rather than trusted from the pattern.
+        """
+        target = (demo_dir / name).resolve()
+        if not str(target).startswith(str(demo_dir.resolve()) + "/"):
+            return JSONResponse({"error": "path escapes the demo directory"}, status_code=400)
+        if not target.is_file():
+            return JSONResponse({"error": f"{name} not found"}, status_code=404)
+        return FileResponse(
+            target,
+            media_type="model/gltf-binary" if target.suffix == ".glb" else None,
+            headers={"Cache-Control": "no-cache"},
         )
 
     @app.get("/api/coverage", response_class=HTMLResponse)

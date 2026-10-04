@@ -279,13 +279,32 @@ def cmd_serve(args: argparse.Namespace) -> int:
     from seam.serve.app import build_app
 
     app = build_app()
+    demo_dir = Path(app.__dict__.get("_seam_demo_dir", "")) if False else None
     print(f"SEAM demo on http://{args.host}:{args.port}  (video stays in the browser tab)")
-    print("  GET  /             demo page")
+    print("  GET  /             demo page (webcam, MediaPipe in the browser)")
+    print("  GET  /avatar       SMPL-X avatar page (needs `make demo-avatar` first)")
     print("  GET  /api/health   request contract")
     print("  GET  /api/coverage what the demo does and does not claim")
     print("  POST /api/analyse  one window of blendshapes + head pose")
+    _warn_if_no_avatar_artefacts()
     uvicorn.run(app, host=args.host, port=args.port, log_level=args.log_level)
     return 0
+
+
+def _warn_if_no_avatar_artefacts() -> None:
+    """Say so when `/avatar` has nothing to show, instead of letting the page explain it.
+
+    `make demo-avatar` takes ~15 minutes on the GPU and writes its manifest last, so for
+    most of that window the page reads "No clips. Run `make demo-avatar`" - which is
+    indistinguishable from never having run it.
+    """
+    from seam.paths import repo_root
+
+    mf = repo_root() / "artifacts" / "m7a" / "demo" / "manifest.json"
+    if mf.is_file():
+        return
+    print("  note: no artifacts/m7a/demo/manifest.json - run `make demo-avatar` (~15 min)")
+    print("        (it writes the manifest when it finishes; /avatar will be empty until then)")
 
 
 def _not_yet(name: str) -> Callable[[argparse.Namespace], int]:

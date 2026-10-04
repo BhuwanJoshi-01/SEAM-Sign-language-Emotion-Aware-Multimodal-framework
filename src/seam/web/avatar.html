@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SEAM — Sign Language Emotion-Aware Multimodal Framework</title>
+<script type="importmap">
+{"imports":{"three":"/static/vendor/three/three.module.js"}}
+</script>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c232c; --line:#2a323d;
+    --ink:#e6edf3; --dim:#8b98a5; --accent:#4c9aff; --ok:#3fb950; --warn:#d29922; --bad:#f85149;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{padding:22px 28px;border-bottom:1px solid var(--line);display:flex;
+         align-items:baseline;gap:14px;flex-wrap:wrap}
+  h1{font-size:19px;margin:0;letter-spacing:.02em}
+  .sub{color:var(--dim);font-size:13px}
+  main{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:20px;padding:20px 28px 60px}
+  @media(max-width:960px){main{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .card h2{font-size:13px;text-transform:uppercase;letter-spacing:.09em;color:var(--dim);
+           margin:0;padding:13px 16px;border-bottom:1px solid var(--line);background:var(--panel2)}
+  .card .body{padding:16px}
+  #stage{width:100%;aspect-ratio:4/5;background:#1a1f27;position:relative}
+  canvas{display:block;width:100%;height:100%}
+  #stage .msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+              text-align:center;padding:28px;color:var(--dim);font-size:14px}
+  .bar{display:flex;gap:8px;align-items:center;padding:11px 14px;border-top:1px solid var(--line);
+       background:var(--panel2);flex-wrap:wrap}
+  button,select{background:#232b35;color:var(--ink);border:1px solid var(--line);
+                border-radius:7px;padding:7px 11px;font:inherit;font-size:13px;cursor:pointer}
+  button:hover{background:#2c3641}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  input[type=range]{flex:1;min-width:120px;accent-color:var(--accent)}
+  .lbl{font-size:12px;color:var(--dim);font-variant-numeric:tabular-nums;min-width:96px;text-align:right}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line)}
+  th{color:var(--dim);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.07em}
+  td.num{text-align:right;font-variant-numeric:tabular-nums}
+  .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+  .note{background:#1d2430;border-left:3px solid var(--accent);padding:11px 13px;
+        border-radius:0 7px 7px 0;font-size:13px;color:#c6d2de;margin:0 0 14px}
+  .note.warn{border-left-color:var(--warn)}
+  .note.bad{border-left-color:var(--bad)}
+  .note b{color:var(--ink)}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:5px 14px;font-size:13px}
+  .kv dt{color:var(--dim)} .kv dd{margin:0;font-variant-numeric:tabular-nums}
+  a{color:var(--accent)}
+  code{background:#0b0e13;padding:1px 5px;border-radius:4px;font-size:12px}
+  .pill{display:inline-block;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;
+        letter-spacing:.04em}
+  .pill.none{background:#3a2323;color:#ff9d96}
+  .pill.real{background:#12351f;color:#7ee787}
+</style>
+</head>
+<body>
+<header>
+  <h1>SEAM</h1>
+  <span class="sub">Sign Language Emotion-Aware Multimodal framework — perception → linguistic &amp; affect → recognition → SMPL-X avatar</span>
+</header>
+
+<main>
+  <!-- ─────────────────────────────── AVATAR ─────────────────────────────── -->
+  <section class="card">
+    <h2>Avatar</h2>
+    <div id="stage">
+      <div class="msg" id="stageMsg">Loading renderer…</div>
+    </div>
+    <div class="bar">
+      <button id="play">Pause</button>
+      <input type="range" id="scrub" min="0" max="1000" value="0">
+      <span class="lbl" id="clock">0.00 / 0.00 s</span>
+    </div>
+    <div class="bar">
+      <select id="clip"></select>
+      <select id="cam">
+        <option value="3q">Three-quarter</option>
+        <option value="front">Front</option>
+        <option value="side">Side</option>
+      </select>
+      <button id="wire">Show skeleton</button>
+      <span class="lbl" id="clipLbl"></span>
+    </div>
+  </section>
+
+  <!-- ────────────────────────────── SIDEBAR ────────────────────────────── -->
+  <div>
+    <div class="card" style="margin-bottom:20px">
+      <h2>What this is — and is not</h2>
+      <div class="body">
+        <div class="note bad">
+          <b>No human preference data exists.</b> The avatar-quality study (M7) has stimuli and
+          a measurement harness but <b>zero raters</b>. Nothing on this page is a result about
+          how good the avatar looks. Any claim to that effect would be fabricated.
+        </div>
+        <div class="note warn">
+          Pose comes from <b>SMPLer-X</b>, a third-party regressor trained on mocap. It knows
+          nothing about sign language and will render plausible signing whatever the hands
+          say. Its output must not be cited as evidence about linguistic content.
+        </div>
+        <div class="note">
+          The numbers below are <b>pipeline measurements</b> — is the front end running, does it
+          detect the signer, did it collapse, is the body upright. They are deliberately not
+          quality scores. A confidently wrong pipeline produces a similar table.
+        </div>
+        <span class="pill none">NO RATINGS</span>
+        <span class="pill real">REAL GEOMETRY</span>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:20px">
+      <h2>Per-clip measurements</h2>
+      <div class="body" style="padding:0">
+        <table id="mtab">
+          <thead><tr>
+            <th>Clip</th><th class="num">Detect</th><th class="num">Fixed</th>
+            <th class="num">Frames</th><th class="num">Head&nbsp;above&nbsp;pelvis</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Selected clip</h2>
+      <div class="body">
+        <dl class="kv" id="det"><dd style="color:var(--dim)">Loading manifest…</dd></dl>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script type="module">
+/* Order matters here. The measurement panels are loaded and rendered FIRST, so the page is
+   still useful if the 3D renderer cannot start. An earlier version imported three.js before
+   fetching the manifest and threw on failure, which left every table reading "Loading
+   manifest..." on a blank stage - the page then looks broken rather than partially working. */
+const msg = document.getElementById('stageMsg');
+const show = (t, bad=false) => { msg.textContent = t; msg.style.color = bad ? '#f85149' : ''; msg.style.display='flex'; };
+
+let manifest, clips = [];
+try {
+  manifest = await (await fetch('/api/demo/manifest')).json();
+  clips = manifest.clips.filter(c => c.arm_a_smplerx && !c.arm_a_smplerx.error && c.arm_a_smplerx.glb);
+} catch (e) {
+  show('Could not reach the demo manifest. Is the server running?', true);
+}
+
+const tbody = document.querySelector('#mtab tbody');
+tbody.innerHTML = clips.length ? clips.map(c => {
+  const a = c.arm_a_smplerx;
+  return `<tr data-id="${c.utterance_id}" style="cursor:pointer">
+    <td>${c.utterance_id}</td>
+    <td class="num ${a.detection_coverage>0.98?'ok':'warn'}">${(a.detection_coverage*100).toFixed(0)}%</td>
+    <td class="num ${a.collapsed_frames_interpolated.length?'warn':''}">${a.collapsed_frames_interpolated.length}</td>
+    <td class="num">${a.frames}</td>
+    <td class="num ${a.upright.frames_head_below_pelvis?'bad':'ok'}">${a.upright.frames_head_below_pelvis?'FAIL':'100%'}</td></tr>`;
+}).join('') : `<tr><td colspan="5" style="color:var(--dim)">No clips. Run <code>make demo-avatar</code>.</td></tr>`;
+
+function showDetail(c){
+  const a = c.arm_a_smplerx;
+  document.getElementById('det').innerHTML = `
+    <dt>clip</dt><dd>${c.utterance_id}</dd>
+    <dt>pose source</dt><dd>SMPLer-X <code>smpler_x_b32</code> (third-party)</dd>
+    <dt>detection coverage</dt><dd class="${a.detection_coverage>0.98?'ok':'warn'}">${(a.detection_coverage*100).toFixed(1)}%</dd>
+    <dt>collapsed frames interpolated</dt><dd class="${a.collapsed_frames_interpolated.length?'warn':'ok'}">${a.collapsed_frames_interpolated.length} ${JSON.stringify(a.collapsed_frames_interpolated)}</dd>
+    <dt>frames / fps</dt><dd>${a.frames} / ${manifest.render.fps}</dd>
+    <dt>head above pelvis</dt><dd class="${a.upright.frames_head_below_pelvis?'bad':'ok'}">${a.upright.frames_head_below_pelvis} below (min ${a.upright.head_above_pelvis_min_m.toFixed(3)} m)</dd>
+    <dt>up-axis tilt max</dt><dd>${a.upright.up_axis_tilt_max_deg.toFixed(1)}&deg;</dd>
+    <dt>mean joint speed</dt><dd>${a.motion.mean_joint_speed.toFixed(4)} rad/frame</dd>
+    <dt>mesh</dt><dd>${a.mesh.n_vertices} verts, ${a.mesh.n_faces} faces, ${a.mesh.height_m.toFixed(2)} m, human=${a.mesh.is_human_mesh}</dd>
+    <dt>glTF</dt><dd>${a.glb_check.animations} clip &middot; ${a.glb_check.channels} channels &middot; ${a.glb_check.keyframes} keys &middot; 1 skin, 1 mesh</dd>
+    <dt>glTF vs mesh max error</dt><dd class="${a.glb_check.agrees?'ok':'bad'}">${(a.glb_check.max_abs_error_m*1000).toFixed(1)} mm (4-influence limit drops ${(a.glb_check.weight_mass_dropped_max*100).toFixed(1)}% weight mass)</dd>`;
+  tbody.querySelectorAll('tr').forEach(r => r.style.background = r.dataset.id === c.utterance_id ? '#1f2937' : '');
+}
+if (clips.length) showDetail(clips[0]);
+else document.getElementById('det').innerHTML = '<dd style="color:var(--dim)">No manifest.</dd>';
+
+/* Renderer is vendored (src/seam/web/vendor/three) so the page works with no network.
+   A CDN import was tried first and is wrong for a product: it makes the page fail whenever
+   the CDN is unreachable, and it cannot be audited. */
+let THREE, OrbitControls, GLTFLoader;
+let camYaw = 210, camPitch = 8;   // matches avatar/render.py
+try {
+  THREE = await import('three');
+  ({OrbitControls} = await import('/static/vendor/three/examples/jsm/controls/OrbitControls.js'));
+  ({GLTFLoader} = await import('/static/vendor/three/examples/jsm/loaders/GLTFLoader.js'));
+} catch (e) {
+  show('3D renderer failed to load (WebGL or the vendored three.js).\n\nThe measurements on the right are real and unaffected. The .glb files animate correctly in any glTF viewer.', true);
+  throw e;
+}
+/* ── scene ─────────────────────────────────────────────────────────────── */
+const stage = document.getElementById('stage');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a1f27);
+const camera = new THREE.PerspectiveCamera(38, 1, 0.01, 100);
+camera.position.set(1.6, 1.1, 2.4);
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+stage.insertBefore(renderer.domElement, msg);
+const controls = new OrbitControls(camera, renderer.domElement);  // `controls` is read in fit()
+new THREE.HemisphereLight(0xdfe7f0, 0x2a2f36, 2.1).position.set(0,3,0);
+const key = new THREE.DirectionalLight(0xffffff, 1.5); key.position.set(2,4,3); scene.add(key);
+const rim = new THREE.DirectionalLight(0x88aaff, 0.7); rim.position.set(-3,1,-2); scene.add(rim);
+
+/* Fit the camera to the MESH only.
+   The first version used Box3.setFromObject, which also bounds the 55 joint nodes. Those
+   carry their own local transforms, and including them put the camera inside the body - the
+   scene looked broken while the file was fine. Bounds come from geometry alone. */
+function fit(obj){
+  const box = new THREE.Box3();
+  obj.traverse(o => {
+    if (!o.isMesh || !o.geometry) return;
+    o.geometry.computeBoundingBox();
+    const b = o.geometry.boundingBox.clone().applyMatrix4(o.matrixWorld);
+    box.union(b);
+  });
+  if (box.isEmpty()) return;
+  const c = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const radius = Math.max(size.length() * 0.5, 1e-3);
+  // The camera moves; the body does NOT. three.js binds the skeleton at load time
+  // (bindMode 'attached' captures the mesh's world matrix), so translating an ancestor
+  // afterwards shears the skin - which looks like a limb the size of the viewport.
+  const half = THREE.MathUtils.degToRad(camera.fov) * 0.5;
+  const d = (radius / Math.sin(half)) * 1.35; // bounding sphere + margin
+  // Same convention as avatar/render.py, which is verified by check_facing.py: yaw 210,
+  // pitch 8. Guessing a direction here is how you end up publishing a back view again.
+  const yaw = THREE.MathUtils.degToRad(camYaw), pitch = THREE.MathUtils.degToRad(camPitch);
+  const dir = new THREE.Vector3(
+    Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
+  camera.position.copy(c).addScaledVector(dir, d);
+  camera.near = Math.max(d * 0.005, 0.01);
+  camera.far = d * 20;
+  camera.updateProjectionMatrix();
+  controls.target.copy(c);
+  camera.lookAt(c);
+  controls.update();
+}
+
+const loader = new GLTFLoader();
+/* The mixer must be built with the scene as its root, and it must be rebuilt per clip
+   because each GLB is a different scene graph. `new AnimationMixer()` leaves `_root`
+   undefined and `clipAction` then throws `reading 'uuid'` on the very first load - the
+   clip never plays and the stage stays empty with no error on screen. */
+let mixer = null;
+let clip, action, skel = null, wireframe = false, current = null;
+
+async function loadClip(id){
+  const c = clips.find(x => x.utterance_id === id);
+  if (!c) return;
+  showDetail(c);
+  const a = c.arm_a_smplerx;
+
+  show('Loading clip…');
+  const gltf = await loader.loadAsync(`/api/demo/${a.glb}`);
+  if (mixer) { mixer.stopAllAction(); mixer.uncacheAll(); }
+  /* Root = the scene just loaded. See the note on `mixer` above. */
+  mixer = new THREE.AnimationMixer(gltf.scene);
+  skel = null;
+
+  scene.clear(); scene.add(key, rim);
+  scene.add(new THREE.HemisphereLight(0xdfe7f0,0x2a2f36,2.1));
+  clip = gltf.animations[0];
+  if (!clip) { show('That .glb has no animation clip.', true); return; }
+  action = mixer.clipAction(clip); action.reset().play();
+
+  /* Frame the body only after the skeleton is bound and posed. Before this,
+     `SkinnedMesh.computeBoundingBox()` measures an identity skeleton - the joint nodes
+     carry no static TRS, their transforms live in the animation - and returns a collapsed
+     box: measured 0.40 x 0.46 x 0.31 m for a 1.72 x 1.72 x 0.29 m body, which parks the
+     camera ~0.8 m from the subject and fills the stage with the inside of its head. */
+  mixer.update(0);
+  gltf.scene.updateMatrixWorld(true);
+
+  fit(gltf.scene);
+  gltf.scene.traverse(o => { if (o.isMesh) { o.frustumCulled = false; if(wireframe) o.material.wireframe = true; } });
+  scene.add(gltf.scene);
+  document.getElementById('clipLbl').textContent =
+    `${clip.duration.toFixed(2)}s · ${gltf.scene.children.length} node(s)`;
+  msg.style.display = 'none';
+}
+
+/* ── table interaction ─────────────────────────────────────────────────── */
+tbody.querySelectorAll('tr[data-id]').forEach(r =>
+  r.onclick = () => { document.getElementById('clip').value = r.dataset.id; loadClip(r.dataset.id); });
+
+const sel = document.getElementById('clip');
+sel.innerHTML = clips.map(c => `<option value="${c.utterance_id}">clip ${c.utterance_id}</option>`).join('');
+sel.onchange = () => loadClip(sel.value);
+document.getElementById('wire').onclick = e => {
+  wireframe = !wireframe; e.target.textContent = wireframe ? 'Hide mesh' : 'Show skeleton';
+  scene.traverse(o => { if (o.isMesh && o.material) { o.material.wireframe = wireframe;
+                         o.material.needsUpdate = true; } });
+};
+document.getElementById('cam').onchange = e => {
+  ({ '3q':[210,8], 'front':[180,4], 'side':[270,2] }[e.target.value]).length;
+  const [y,p] = { '3q':[210,8], 'front':[180,4], 'side':[270,2] }[e.target.value];
+  camYaw = y; camPitch = p;
+  if (current) fit(current);
+};
+
+/* ── transport ─────────────────────────────────────────────────────────── */
+let playing = true;
+const scrub = document.getElementById('scrub'), clock = document.getElementById('clock');
+document.getElementById('play').onclick = e => {
+  playing = !playing; e.target.textContent = playing ? 'Pause' : 'Play';
+};
+scrub.oninput = () => { if (clip) { playing = false; document.getElementById('play').textContent='Play';
+  mixer.setTime(scrub.value/1000 * clip.duration); } };
+
+function resize(){
+  const w = stage.clientWidth, h = stage.clientHeight;
+  renderer.setSize(w, h, false); camera.aspect = w/h; camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize); resize();
+
+const clock3 = new THREE.Clock();
+function loop(){
+  requestAnimationFrame(loop);
+  const dt = Math.min(clock3.getDelta(), 0.1);
+  if (playing && clip) mixer.update(dt);
+  controls.update();
+  renderer.render(scene, camera);
+  if (clip){
+    const t = mixer.time % clip.duration;
+    clock.textContent = `${t.toFixed(2)} / ${clip.duration.toFixed(2)} s`;
+    if (playing) scrub.value = Math.round(t/clip.duration*1000);
+  }
+}
+loop();
+if (clips.length) await loadClip(sel.value);
+</script>
+</body>
+</html>

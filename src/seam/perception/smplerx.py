@@ -152,6 +152,17 @@ def run(
     if n == 0:
         raise RuntimeError(f"no frames decoded from {video}")
     out_json = tmp / "smplerx_raw.json"
+    # Reuse an existing dump. The regressor costs ~2 min/clip and nothing downstream
+    # touches it, so without this, fixing an exporter costs a 15-minute re-run - long
+    # enough that you stop verifying and start assuming. Keyed on the frame count so a
+    # changed frame rate cannot silently reuse a differently-sampled dump.
+    if out_json.is_file():
+        try:
+            cached = json.loads(out_json.read_text())
+            if cached.get("n_frames") == n and cached.get("n_requested", n) == n:
+                return parse(out_json, fps=fps or 25.0, checkpoint=ckpt)
+        except (ValueError, KeyError, OSError):
+            pass  # unreadable cache is not an error; just recompute
     subprocess.run(
         [
             str(python),

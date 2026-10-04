@@ -41,6 +41,7 @@ import numpy as np
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 
+from seam.avatar.gltf_export import export_animated_glb, verify_glb_animation
 from seam.avatar.mesh import describe_mesh, smplx_mesh
 from seam.avatar.pose_map import mediapipe_to_smpl24, normalise_to_rest_frame
 from seam.avatar.render import Camera, render_frame
@@ -187,9 +188,11 @@ def landmark_arm(
     }
 
 
-def smplerx_arm(video: Path, model: dict, fps: float | None, batch: int) -> tuple[list, dict]:
+def smplerx_arm(
+    video: Path, model: dict, fps: float | None, batch: int, cache: Path
+) -> tuple[list, dict]:
     """Arm A: learned SMPL-X regression, made upright, with collapsed frames repaired."""
-    res = sx.run(video, fps=fps, batch=batch)
+    res = sx.run(video, fps=fps, batch=batch, work_dir=cache)
     res = sx.upright(res)
     res, repaired = sx.repair_outliers(res)
     res = sx.recentre_to_origin(res)
@@ -250,13 +253,23 @@ def main() -> int:
         # Arm A
         arm_fps = args.fps if args.fps > 0 else None
         try:
-            frames_a, met_a = smplerx_arm(vid, model, arm_fps, args.batch)
+            frames_a, met_a = smplerx_arm(vid, model, arm_fps, args.batch, args.out / f".{uid}")
             betas = np.zeros(n_betas)
             b = np.asarray(met_a["betas"])
             betas[: min(len(b), n_betas)] = b[:n_betas]
             seq_a = smplx_mesh(frames_a, model, betas=betas, use_posedirs=True)
             entry["arm_a_smplerx"] = {**met_a, "mesh": describe_mesh(seq_a)}
             mesh_a = seq_a
+            # A real skinned GLB with an animation clip. `mesh.export_glb` writes one
+            # static mesh per frame - 40 nodes, no skin, no animation - which opens fine
+            # and never moves. Verified against smplx_mesh before it ships.
+            glb = export_animated_glb(
+                frames_a, model, args.out / f"{uid}_A.glb", betas=betas, fps=out_fps
+            )
+            entry["arm_a_smplerx"]["glb"] = glb.name
+            entry["arm_a_smplerx"]["glb_check"] = verify_glb_animation(
+                glb, frames_a, model, frame=0, betas=betas
+            )
         except Exception as exc:
             print(f"    arm A FAILED: {type(exc).__name__}: {exc}")
             entry["arm_a_smplerx"] = {"error": f"{type(exc).__name__}: {exc}"}

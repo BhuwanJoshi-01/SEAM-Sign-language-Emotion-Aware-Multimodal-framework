@@ -1,0 +1,237 @@
+# SEAM — project breakdown
+
+**Sign Language Emotion-Aware Multimodal framework.** Monocular video → 3D SMPL-X avatar,
+with linguistic and non-manual analysis on the side.
+
+This document is the map: what each stage is, what is measured, what works, and what is
+still missing. Numbers here are reproducible with the commands shown; nothing is asserted
+without an artefact behind it.
+
+---
+
+## 0. The one-paragraph version
+
+Take a video of someone signing. A **learned regressor (SMPLer-X)** turns each frame into a
+full SMPL-X body — pose, hands, face, body shape — and a **skinned glTF with a real
+animation clip** is written for any 3D viewer or web page. Alongside that, **MediaPipe
+landmarks** feed a linguistic/affect analyser that reports brow, head and mouth activity as
+*measurements with known reliability*, not as confident labels. The honest state: the avatar
+pipeline works and is verified; the linguistic claims are partly refuted; **no human
+preference study has been run**, because there are no raters.
+
+---
+
+## 1. Architecture
+
+```
+video ─┬─► SMPLer-X (learned SMPL-X regressor) ─► SMPL-X params ─► LBS ─► skinned GLB + anim
+       │                                          (per frame)              │
+       │                                                              ▼
+       │                                                        web viewer / 3D app
+       │
+       └─► MediaPipe landmarks ─► syntactic/linguistic/affect features ─► SEAM analysis
+                                    (with per-cue reliability)
+```
+
+Two front ends, deliberately. SMPLer-X needs pixels and gives a body. MediaPipe gives
+landmarks and drives the linguistic analysis. They are not interchangeable: the landmark
+path's legs are noise (see §4), and the regressor says nothing about meaning.
+
+---
+
+## 2. Stage status
+
+| Stage | What it does | State | Evidence |
+|---|---|---|---|
+| **M0** | Reproducibility gate | **met** | `make readiness`, `make repro` |
+| **M1** | Causal claim on affect | **refuted** | `paper/EXPERIMENT_LOG.md` |
+| **M2** | Latency budget on RTX 3050 | **met**, marginal | 19.7–20.4 FPS, K6 |
+| **M3** | Non-manual instrumentation | **met** | 2,407 utterances, 100% mapped |
+| **M3b** | Label quality | **mixed** | kappa 0.639 / 0.734 usable, 0.028 / 0.038 at chance |
+| **M4** | Affect vs human labels | **refuted** | worst cross-AUC 0.7276 → 0.7031, still FAIL |
+| **M5a** | Gloss recognition | **refuted** | WER 0.916 = most-frequent baseline |
+| **M6** | Avatar retargeting | **superseded** | landmark arms replaced by SMPLer-X |
+| **M7a** | Avatar rendering | **working** | 4 clips, real geometry, animated glTF |
+| **M7** | Preference study | **blocked on humans** | stimuli + harness ready; **0 raters** |
+
+Two of nine stages are refuted hypotheses and one is at chance. That is the honest state and
+it is recorded rather than buried.
+
+---
+
+## 3. What works, and how it is verified
+
+### Perception — learned SMPL-X regression
+
+`src/seam/perception/smplerx.py`
+
+* Runs the read-only `Sapien_Pipeline` tree as a subprocess. **That tree is never written
+  to** — verified by mtime; only `main/nsl_runner.py` is executed and its JSON read.
+* Fits a 3.68 GiB laptop GPU at batch 4 (ViT-B, `smpler_x_b32`).
+* Measured on 4 EmoSign clips / 541 frames: detection coverage **1.00 / 1.00 / 0.99 / 1.00**.
+
+Three bugs here were only findable by rendering and looking, and each is documented where it
+lives:
+
+1. **Upside-down bodies.** SMPLer-X emits `global_orient` in its own convention (x averages
+   **129°**), putting the head at y = −0.69 m. Upstream never rotates these, so there was no
+   conversion to copy. Fixed by deriving it from two anatomical invariants — head above
+   pelvis, front toward the viewer — both measured before and after. A first attempt
+   rendered a *convincing back view*, which is how that class of bug hides.
+2. **Empty frames.** The regressor works at a real camera distance: mesh centroid **22.6 m**
+   from the origin, renderer at 2.6 m. The first run produced a 2.9 KB MP4 containing
+   **two unique colours** while every measurement reported success.
+3. **Collapsed frames.** Detected on head-above-pelvis distance (sharply bimodal: 0.68 m for
+   frames 0–39, then 0.17 m for 40–42). A median-deviation test was tried first and found
+   **zero** outliers in a clip that visibly has three. Repaired frames are interpolated, and
+   reported as interpolated.
+
+### Avatar — skinned glTF with animation
+
+`src/seam/avatar/gltf_export.py`
+
+The old exporter wrote **one static mesh per frame** — 40 nodes, 0 skins, no animation on
+clip 1372. A file that opens, shows a body, and never moves. That is a debug dump, not an
+asset.
+
+The new exporter writes what a viewer actually needs: **one mesh**, `JOINTS_4`/`WEIGHTS_4`,
+**55 joint nodes** in `kintree_table` order, `inverseBindMatrices`, and an animation clip
+keying every joint's TRS.
+
+It is verified by **re-deriving the vertices from the written file** and comparing against
+`smplx_mesh`, not against itself:
+
+| | |
+|---|---|
+| nodes / skins / animations | 56 / 1 / 1 |
+| channels / keyframes | 110 / 85 |
+| max error vs mesh pipeline | **6.4 mm** |
+| `JOINTS_4` weight mass dropped | 4.7% (SMPL-X has up to 10 influences; glTF carries 4) |
+
+The residual is the glTF 4-influence limit, and it is **reported** rather than absorbed into
+a loose tolerance.
+
+Four bugs in this file, all found by the verifier rather than by reading:
+
+* GLB container missing the chunk **type** field — plausible file, unparseable JSON.
+* `byteLength` assigned after the JSON was already serialised.
+* Samplers built as `[all translations] + [all rotations]` while channels index them
+  interleaved — surfaces only once something animates.
+* `global_transl` never written, so the body sat the wrong distance from the origin.
+
+Plus one in the *verifier*: reading glTF's column-major `MAT4` as row-major, and indexing
+animation rows as `frame*n_joints` instead of `frame*n_joints + joint`, which handed joint
+0's transform to every joint.
+
+### Kinematics cross-check
+
+`scripts/validate_fk_vs_blender.py`
+
+Our forward kinematics is checked against **Blender's own armature evaluation** on a
+90° transverse rotation of `spine1`:
+
+* bones outside the pivot's subtree: **0.000°**
+* bones inside it: **exactly 90.000°**
+* Blender: 76–90° on the same probe, because the fitted spine curves and ours is collinear
+
+So the rotation algebra is confirmed against an independent implementation, and the residual
+is quantified: **max 13.933° on `head`**, mean 1.10°. That number is the error budget for
+landmark-derived head/neck tilt and was previously unknown.
+
+---
+
+## 4. What does not work, and why
+
+**Landmark legs are noise.** Hip→knee distance spans **0.06–1.42 torso-lengths** across 200
+EmoSign clips. Two 2D points per bone do not determine monocular depth for a leg. This is not
+a bug to tune; it is the ceiling of the method, and it is why the front end was replaced.
+
+**Gloss recognition does not beat its baseline.** WER **0.916** against a most-frequent
+baseline of **0.916** (shuffled control 0.911; closed-vocab 0.875). 1,563 tokens, 499
+glosses, 3.1 per gloss, 284 hapax.
+
+**Affect does not separate on human labels.** Worst cross-AUC 0.7276 → 0.7031 with human
+`y_L`, still failing the gate. Signer control is 0.973 in both arms, so the split is finding
+*who* is signing, not *what*.
+
+**No avatar preference result exists.** Both study scripts refuse to invent a baseline,
+correctly. The comparison arm is now defined (§5) and both arms render, but **no human has
+rated anything**, and no ratings are simulated.
+
+---
+
+## 5. The M7 comparison, decided
+
+| Arm | Pose source |
+|---|---|
+| **A** | SMPLer-X — learned whole-body regression |
+| **B** | MediaPipe landmarks → per-joint rotation solve (this project's own previous front end) |
+
+Both arms are real existing code. A stand-in baseline would answer a question about the
+renderer rather than about this project's contribution.
+
+Fairness is enforced in code, each point because it was got wrong first:
+
+* **One camera for both arms.** Fitting each separately gave 5.92 m vs 4.28 m, so the arms
+  appeared at different scales — and a viewer asked which looks better answers "the bigger
+  one".
+* **Camera distance from the 99th percentile** of vertex radius over both arms. `max` let one
+  stray vertex shrink both arms to specks.
+* **Identical frame rate**, side-by-side truncated to the shorter arm. Resampling one arm
+  silently doubles the other's playback speed.
+* **No arm label drawn on any frame** — the same files feed the blinded study.
+
+---
+
+## 6. The web product
+
+```bash
+make demo-avatar     # video → SMPL-X → mesh → animated .glb + .mp4 + manifest
+make serve           # then open http://127.0.0.1:8000/avatar
+```
+
+`/avatar` loads the **animated GLB** in three.js (skinned mesh, real clip, transport
+controls, orbit camera, skeleton toggle) beside the per-clip measurements, and states
+plainly at the top that **no ratings exist**. Routes:
+
+| Route | Purpose |
+|---|---|
+| `/avatar` | product page |
+| `/api/demo/manifest` | what `make demo-avatar` produced |
+| `/api/demo/{name}` | one artefact; path traversal is rejected |
+
+The renderer loads three.js from a CDN. If it cannot load, the page says so explicitly rather
+than showing a blank canvas — a blank stage reads as "the model failed" when the viewer
+never started.
+
+---
+
+## 7. Provenance and honesty rules
+
+* **SMPL-X parameters are licence-gated** and deliberately not vendored. The loader takes a
+  path; `SMPLX ?= ...` in the Makefile is overridable.
+* **SMPLer-X weights are not vendored either.** Third-party, trained on mocap, knows nothing
+  about sign language. Nothing derived from it may be presented as evidence about linguistic
+  content.
+* **No human preference data is fabricated, ever.** `make_rater_kit.py` emits a blank sheet
+  and refuses to write `trials.csv` if a condition label would leak. That refusal stays.
+* **ASLLRP data is not redistributed**; `*.xml` is gitignored as a licence safeguard.
+* **A provenance guard** (`tests/test_provenance.py`) fails on any number in
+  `EXPERIMENT_LOG.md` / `CLAIMS_LEDGER.md` that has no artefact behind it.
+* Every table above is **pipeline measurement, not quality measurement.** A confidently
+  wrong pipeline produces a similar table.
+
+---
+
+## 8. Reproducing the numbers
+
+```bash
+make lint typecheck test                       # 469 tests
+make demo-avatar                               # 4 clips, ~15 min (SMPLer-X on GPU)
+make serve                                     # /avatar
+PYTHONPATH=src python scripts/validate_fk_vs_blender.py    # needs blender
+SEAM_SMPLX_MODEL=... pytest tests/test_gltf_export.py -q    # animated-GLB checks
+```
+
+Run from the repo root. `SEAM_SMPLX_MODEL` is only needed for the model-dependent tests; they
+skip loudly without it rather than passing quietly.
