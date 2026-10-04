@@ -55,6 +55,10 @@ def main() -> int:
             failures.append("page does not load client-side MediaPipe")
         if b"api/analyse" not in page:
             failures.append("page does not post to /api/analyse")
+        # The landing page must point at the avatar page. `/` used to be the only thing
+        # reachable and advertised, which is how a working feature stayed invisible.
+        if b'href="/avatar"' not in page:
+            failures.append("index does not link to /avatar")
 
         health = json.loads(
             urllib.request.urlopen(f"http://127.0.0.1:{PORT}/api/health", timeout=15).read()
@@ -64,6 +68,67 @@ def main() -> int:
             failures.append(
                 f"health contract mismatch: NM_DIM={NM_DIM}, got {got!r}; body={health!r}"
             )
+
+        # ── /avatar ──────────────────────────────────────────────────────────
+        # This page was unlisted and unchecked for its whole life, and it was broken the
+        # whole time. A route that is not in the smoke test is a route nobody looks at.
+        av = urllib.request.urlopen(f"http://127.0.0.1:{PORT}/avatar", timeout=15).read()
+        print(f"GET /avatar           {len(av)} bytes")
+        if b"<!doctype html>" not in av[:64].lower():
+            failures.append("/avatar did not serve an HTML document")
+        for needle, why in (
+            (b"/api/demo/manifest", "/avatar never fetches the manifest"),
+            (b"importmap", "/avatar has no import map, so bare `three` specifiers cannot resolve"),
+        ):
+            if needle not in av:
+                failures.append(why)
+        if b"cdn.jsdelivr" in av:
+            failures.append(
+                "/avatar loads three.js from a CDN; a product page that needs the network "
+                "to render is not a product page"
+            )
+        if b"cdn.jsdelivr" in av or b"unpkg.com" in av:
+            failures.append("/avatar must not reference a CDN")
+
+        # Vendored three.js must actually be reachable, or the page is a red screen.
+        for asset in (
+            "/static/vendor/three/three.module.js",
+            "/static/vendor/three/examples/jsm/controls/OrbitControls.js",
+            "/static/vendor/three/examples/jsm/loaders/GLTFLoader.js",
+        ):
+            try:
+                body = urllib.request.urlopen(f"http://127.0.0.1:{PORT}{asset}", timeout=30).read()
+            except urllib.error.HTTPError as e:
+                failures.append(f"{asset} -> HTTP {e.code}; /avatar cannot load three.js")
+                continue
+            if len(body) < 1000:
+                failures.append(f"{asset} served {len(body)} bytes; that is not a library")
+            else:
+                print(f"GET {asset:52.52} {len(body)} bytes")
+
+        # Path containment on both file routes. `{path:path}` patterns match `../`, so the
+        # guard has to be on the resolved path rather than trusted from the route shape.
+        for route in ("/static/vendor/", "/api/demo/"):
+            url = f"http://127.0.0.1:{PORT}{route}..%2f..%2f..%2fetc%2fpasswd"
+            try:
+                body = urllib.request.urlopen(url, timeout=10).read()
+                if b"root:" in body:
+                    failures.append(f"{route} served /etc/passwd")
+            except urllib.error.HTTPError as e:
+                if e.code not in (400, 404):
+                    failures.append(f"{route} traversal gave HTTP {e.code}, expected 400/404")
+
+        # The manifest endpoint must degrade to a 200 with a reason, never a 500: the page
+        # renders that reason, and a traceback would replace it.
+        mf = json.loads(
+            urllib.request.urlopen(f"http://127.0.0.1:{PORT}/api/demo/manifest", timeout=15).read()
+        )
+        if not isinstance(mf.get("clips"), list):
+            failures.append(f"/api/demo/manifest has no clips list: {list(mf)}")
+        elif mf["clips"] and not any(c.get("arm_a_smplerx", {}).get("glb") for c in mf["clips"]):
+            failures.append("manifest lists clips but none carry a .glb")
+        else:
+            print(f"GET /api/demo/manifest      {len(mf['clips'])} clip(s)")
 
         rng = np.random.default_rng(0)
         payload = {

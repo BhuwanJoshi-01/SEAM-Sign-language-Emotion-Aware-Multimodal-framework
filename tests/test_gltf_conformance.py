@@ -38,7 +38,6 @@ import os
 import shutil
 import socket
 import subprocess
-import sys
 import threading
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -155,9 +154,8 @@ def test_attribute_names_are_in_the_spec_enum(tmp_path: Path) -> None:
         if base in SPEC_INDEXED_ATTRIBUTES:
             assert suffix.isdigit(), f"{name!r} needs a semantic index, got {suffix!r}"
 
-    assert SKINNING_ATTRIBUTES <= set(attrs), (
-        f"skinning attributes missing: {sorted(SKINNING_ATTRIBUTES - set(attrs))}"
-    )
+    missing = SKINNING_ATTRIBUTES - set(attrs)
+    assert not missing, f"skinning attributes missing: {sorted(missing)}"
 
 
 def test_every_index_in_the_file_is_in_range(tmp_path: Path) -> None:
@@ -350,7 +348,7 @@ document.getElementById('r').textContent = '__RESULT__' + JSON.stringify(out) + 
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
     t.start()
     try:
-        proc = subprocess.run(  # noqa: S603
+        proc = subprocess.run(
             [
                 _chrome(),
                 "--headless=new",

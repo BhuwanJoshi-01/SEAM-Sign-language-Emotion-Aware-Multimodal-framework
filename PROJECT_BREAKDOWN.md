@@ -94,34 +94,55 @@ The old exporter wrote **one static mesh per frame** — 40 nodes, 0 skins, no a
 clip 1372. A file that opens, shows a body, and never moves. That is a debug dump, not an
 asset.
 
-The new exporter writes what a viewer actually needs: **one mesh**, `JOINTS_4`/`WEIGHTS_4`,
+The new exporter writes what a viewer actually needs: **one mesh**, `JOINTS_0`/`WEIGHTS_0`,
 **55 joint nodes** in `kintree_table` order, `inverseBindMatrices`, and an animation clip
 keying every joint's TRS.
 
-It is verified by **re-deriving the vertices from the written file** and comparing against
-`smplx_mesh`, not against itself:
+It is verified **twice, by two readers that share no code**:
 
 | | |
 |---|---|
 | nodes / skins / animations | 56 / 1 / 1 |
 | channels / keyframes | 110 / 85 |
 | max error vs mesh pipeline | **6.4 mm** |
-| `JOINTS_4` weight mass dropped | 4.7% (SMPL-X has up to 10 influences; glTF carries 4) |
+| 4-influence weight mass dropped | 4.7% (SMPL-X has up to 10 influences; glTF carries 4) |
 
 The residual is the glTF 4-influence limit, and it is **reported** rather than absorbed into
 a loose tolerance.
 
-Four bugs in this file, all found by the verifier rather than by reading:
+**The second reader is the one that matters**, and it was added because the first one had
+been agreeing with the writer. `tests/test_gltf_conformance.py` loads the file through
+**three.js's own `GLTFLoader` and its own skinning** in headless Chrome and asserts the
+result is one `SkinnedMesh` with 55 bones, 110 tracks, the right duration, a human-sized
+skinned pose, and vertices that actually move. Three.js is vendored, so this needs no
+network. Two bugs were invisible to every offline check and obvious there:
+
+* `JOINTS_4`/`WEIGHTS_4` are not glTF 2.0 attribute names (the spec says `JOINTS_0`/
+  `WEIGHTS_0`). Every index and byte range was valid, and three.js stored them as custom
+  attributes, leaving `skinWeight` undefined — so nothing could open the file.
+* **All 110 samplers shared one frame-major `(n_frames, n_joints, C)` block**, so each
+  sampler's output accessor held 220 values for 4 keyframes. The spec requires one value per
+  keyframe *per channel*. Every index was in range; three.js paired the 4-element time
+  accessor with the front of the block, so all 55 joints read frame 0 of joints 0–3 and the
+  body rendered as a mangled sliver.
+
+Both were reported as `agrees: true` by `verify_glb_animation`, because it indexed the block
+with the same convention the writer used. **A verifier that shares the writer's assumptions
+cannot detect either class of bug** — that is the generalisable lesson here, and it is why
+the exporter now has a reader it does not control.
+
+Six bugs in the exporter, four found by the verifier and two only by a real runtime:
 
 * GLB container missing the chunk **type** field — plausible file, unparseable JSON.
 * `byteLength` assigned after the JSON was already serialised.
 * Samplers built as `[all translations] + [all rotations]` while channels index them
   interleaved — surfaces only once something animates.
 * `global_transl` never written, so the body sat the wrong distance from the origin.
+* `JOINTS_4`/`WEIGHTS_4` instead of `JOINTS_0`/`WEIGHTS_0` — unloadable in any viewer.
+* One shared keyframe block across all samplers — spec-violating and mis-assigns every joint.
 
-Plus one in the *verifier*: reading glTF's column-major `MAT4` as row-major, and indexing
-animation rows as `frame*n_joints` instead of `frame*n_joints + joint`, which handed joint
-0's transform to every joint.
+Plus two in the *verifier*: reading glTF's column-major `MAT4` as row-major, and indexing
+animation rows as `frame*n_joints + joint` — the index that made the sampler bug invisible.
 
 ### Kinematics cross-check
 
@@ -196,13 +217,28 @@ plainly at the top that **no ratings exist**. Routes:
 
 | Route | Purpose |
 |---|---|
+| `/` | webcam demo; links to `/avatar` |
 | `/avatar` | product page |
-| `/api/demo/manifest` | what `make demo-avatar` produced |
+| `/api/demo/manifest` | what `make demo-avatar` produced, including `status` while it runs |
 | `/api/demo/{name}` | one artefact; path traversal is rejected |
+| `/static/vendor/{path}` | vendored three.js; path traversal is rejected |
 
-The renderer loads three.js from a CDN. If it cannot load, the page says so explicitly rather
-than showing a blank canvas — a blank stage reads as "the model failed" when the viewer
-never started.
+**three.js is vendored, not fetched.** It lives in `src/seam/web/vendor/three` and is served
+from `/static/vendor/`. The first version imported `examples/jsm/*` from a CDN's raw path,
+where the bare `three` specifier inside those modules cannot resolve — every import failed,
+and the page's own error handler reported it as "CDN unreachable", which was a
+**misdiagnosis**: the CDN was fine, the specifier was wrong. A CDN import was tried first and
+is wrong for a product anyway: it makes the page fail whenever the CDN is unreachable and it
+cannot be pinned or audited by the repo.
+
+`make serve-check` asserts the whole contract — both pages, all three vendored assets, both
+traversal guards, and the manifest shape. `/avatar` was unlisted and unchecked for its whole
+life, which is most of why a working feature read as a broken website.
+
+`make demo-avatar` takes ~15 minutes on the GPU and now **publishes a `status` into the
+manifest while it runs**. It used to write the manifest only at the end, so for the whole
+run the page said "No clips. Run `make demo-avatar`" — which is exactly what it says to
+someone who never ran it.
 
 ---
 
@@ -226,12 +262,15 @@ never started.
 ## 8. Reproducing the numbers
 
 ```bash
-make lint typecheck test                       # 469 tests
+make lint typecheck test                       # 476 tests
+make serve-check                               # HTTP contract of both pages
 make demo-avatar                               # 4 clips, ~15 min (SMPLer-X on GPU)
-make serve                                     # /avatar
+make serve                                     # / and /avatar
 PYTHONPATH=src python scripts/validate_fk_vs_blender.py    # needs blender
-SEAM_SMPLX_MODEL=... pytest tests/test_gltf_export.py -q    # animated-GLB checks
+SEAM_SMPLX_MODEL=... pytest tests/test_gltf_export.py tests/test_gltf_conformance.py -q
 ```
 
 Run from the repo root. `SEAM_SMPLX_MODEL` is only needed for the model-dependent tests; they
-skip loudly without it rather than passing quietly.
+skip loudly without it rather than passing quietly. `tests/test_gltf_conformance.py` also
+needs a `google-chrome` binary and skips without one — and when Chrome *is* present but
+fails, it fails with the browser's message rather than passing quietly.

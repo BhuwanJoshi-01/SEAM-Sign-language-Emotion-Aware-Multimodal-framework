@@ -151,6 +151,17 @@ try {
 }
 
 const tbody = document.querySelector('#mtab tbody');
+/* `make demo-avatar` takes ~15 min on the GPU and publishes a `status` while it runs.
+   "Still working" and "never run" used to render as the same sentence, which is why a
+   populated pipeline read as an empty one. */
+const running = manifest && manifest.status === 'running';
+const why = manifest && manifest.reason
+  ? manifest.reason
+  : running
+    ? `Rendering ${manifest.done}/${manifest.total} clip(s)`
+      + (manifest.in_progress ? ` — on ${manifest.in_progress}` : '') + '. This takes ~15 min;'
+        + ' reload when it finishes.'
+    : 'No clips. Run <code>make demo-avatar</code>.';
 tbody.innerHTML = clips.length ? clips.map(c => {
   const a = c.arm_a_smplerx;
   return `<tr data-id="${c.utterance_id}" style="cursor:pointer">
@@ -159,7 +170,7 @@ tbody.innerHTML = clips.length ? clips.map(c => {
     <td class="num ${a.collapsed_frames_interpolated.length?'warn':''}">${a.collapsed_frames_interpolated.length}</td>
     <td class="num">${a.frames}</td>
     <td class="num ${a.upright.frames_head_below_pelvis?'bad':'ok'}">${a.upright.frames_head_below_pelvis?'FAIL':'100%'}</td></tr>`;
-}).join('') : `<tr><td colspan="5" style="color:var(--dim)">No clips. Run <code>make demo-avatar</code>.</td></tr>`;
+}).join('') : `<tr><td colspan="5" style="color:var(--dim)">${why}</td></tr>`;
 
 function showDetail(c){
   const a = c.arm_a_smplerx;
@@ -178,7 +189,7 @@ function showDetail(c){
   tbody.querySelectorAll('tr').forEach(r => r.style.background = r.dataset.id === c.utterance_id ? '#1f2937' : '');
 }
 if (clips.length) showDetail(clips[0]);
-else document.getElementById('det').innerHTML = '<dd style="color:var(--dim)">No manifest.</dd>';
+else document.getElementById('det').innerHTML = `<dd style="color:var(--dim)">${why}</dd>`;
 
 /* Renderer is vendored (src/seam/web/vendor/three) so the page works with no network.
    A CDN import was tried first and is wrong for a product: it makes the page fail whenever
@@ -269,11 +280,11 @@ async function loadClip(id){
   if (!clip) { show('That .glb has no animation clip.', true); return; }
   action = mixer.clipAction(clip); action.reset().play();
 
-  /* Frame the body only after the skeleton is bound and posed. Before this,
-     `SkinnedMesh.computeBoundingBox()` measures an identity skeleton - the joint nodes
-     carry no static TRS, their transforms live in the animation - and returns a collapsed
-     box: measured 0.40 x 0.46 x 0.31 m for a 1.72 x 1.72 x 0.29 m body, which parks the
-     camera ~0.8 m from the subject and fills the stage with the inside of its head. */
+  /* Bind and pose the skeleton before framing anything. `fit()` reads geometry bounds,
+     which are correct at any time, but `Box3.setFromObject` on a SkinnedMesh calls
+     `computeBoundingBox()`, and that measures the *current* pose - against an identity
+     skeleton it returns 0.40 x 0.46 x 0.31 m for a 1.72 x 1.72 x 0.29 m body, which parks
+     the camera ~0.8 m from the subject and fills the stage with the inside of its head. */
   mixer.update(0);
   gltf.scene.updateMatrixWorld(true);
 

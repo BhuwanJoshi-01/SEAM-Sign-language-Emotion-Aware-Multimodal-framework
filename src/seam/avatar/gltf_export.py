@@ -537,7 +537,6 @@ def verify_glb_animation(
     # matrix and moves every vertex somewhere else.
     ibm = ibm.reshape(-1, 4, 4).transpose(0, 2, 1)
     n_nodes = len(gj["nodes"])
-    n_joints = ibm.shape[0]
 
     # Walk the node hierarchy to each joint's world matrix at the requested keyframe.
     nodes = gj["nodes"]

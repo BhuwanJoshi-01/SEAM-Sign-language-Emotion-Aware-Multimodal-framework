@@ -243,12 +243,39 @@ def main() -> int:
         print(f"no videos in {args.videos}")
         return 2
     entries = []
+    out_fps = args.fps if args.fps > 0 else 24.0
+
+    def write_manifest(status: str, done: int = 0, **extra) -> None:
+        """Publish progress, not just the finished result.
+
+        The manifest used to be written once at the end, so for the ~15 minutes this takes
+        on the GPU the page read "No clips. Run `make demo-avatar`" - which is exactly what
+        it says to someone who never ran it. Writing it up front makes "still working" and
+        "never run" distinguishable on screen.
+        """
+        m = {
+            "status": status,
+            "done": done,
+            "total": len(videos),
+            "purpose": "M7 arm comparison. Arm A = SMPLer-X regression; Arm B = the "
+            "project's own MediaPipe landmark retargeting.",
+            "no_ratings": "This produces stimuli and measurements only. No human "
+            "preference result is produced, simulated or implied anywhere in this run.",
+            "render": {"width": args.width, "height": args.height, "fps": out_fps},
+            "model": str(args.model),
+            "smplerx": {"checkpoint": "smpler_x_b32", "third_party": True, "vendored": False},
+            "clips": list(entries),
+            **extra,
+        }
+        (args.out / "manifest.json").write_text(json.dumps(m, indent=2))
+
+    write_manifest("running", 0)
     for i, vid in enumerate(videos, 1):
         uid = vid.stem
         print(f"[{i}/{len(videos)}] {uid} ...", flush=True)
+        write_manifest("running", i - 1, in_progress=uid)
         npz = args.landmarks / f"{uid}.npz"
         entry: dict = {"utterance_id": uid, "video": str(vid)}
-        out_fps = args.fps if args.fps > 0 else 24.0
 
         # Arm A
         arm_fps = args.fps if args.fps > 0 else None
@@ -333,6 +360,9 @@ def main() -> int:
             print(f"    wrote {uid}_A.mp4 / {uid}_B.mp4 / {uid}_AB.mp4")
 
     manifest = {
+        "status": "done",
+        "done": len(entries),
+        "total": len(videos),
         "purpose": "M7 arm comparison. Arm A = SMPLer-X regression; Arm B = the project's "
         "own MediaPipe landmark retargeting. Both are real existing code.",
         "baseline_rationale": "Arm B is this project's previous front end, so any "

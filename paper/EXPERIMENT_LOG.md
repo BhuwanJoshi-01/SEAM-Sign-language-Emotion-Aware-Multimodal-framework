@@ -1305,3 +1305,56 @@ refuted hypotheses with sound instruments, a measured result about pseudo-label 
 in sign-language affect work, and a reusable adversarial/probe harness that passes its own
 positive control. That is a thinner paper than the plan assumed, and thinner than anyone
 should want — but it is one that reproduces.
+
+---
+
+## 2026-10-04 — The animated GLB was never loadable by a real viewer
+
+**Trigger.** `/avatar` showed a stage full of geometry and a clock that would not move. Every
+offline check on the exporter was green, including `verify_glb_animation` reporting
+`agrees: true` at 6.4 mm on all four clips.
+
+**Measurement.** The file was loaded through three.js's own `GLTFLoader` in headless Chrome.
+The mesh never became a `SkinnedMesh` at all: `JOINTS_4`/`WEIGHTS_4` are not glTF 2.0
+attribute names — the spec names them `JOINTS_0`/`WEIGHTS_0` — so three.js stored them as
+custom attributes, left `skinWeight` undefined, and threw inside
+`SkinnedMesh.normalizeSkinWeights`. Every index in the file was in range and every byte range
+valid, which is why no structural check objected.
+
+**Second bug, found only after fixing the first.** With the names corrected the file loaded,
+skinned, and animated — and rendered as a mangled sliver. All 110 animation samplers pointed
+at **one shared** frame-major `(n_frames, n_joints, C)` block, so every sampler's output
+accessor held `n_frames × 55` values for `n_frames` keyframes. glTF 2.0 §3.6.2.1 requires one
+value per keyframe *per channel*. three.js pairs the 4-element time accessor with the front of
+the block, so all 55 joints read frame 0 of joints 0–3.
+
+Measured on clip 1372 (85 keyframes): sampler output accessor `count = 4675` where the spec
+requires `85`. Before/after, through three.js's own CPU skinning at t = 1.0 s:
+
+| | before | after |
+|---|---|---|
+| skinned extent (m) | 3.20 × 3.38 × 1.70 | 0.59 × 1.38 × 0.76 |
+| bind extent (m) | 1.72 × 1.71 × 0.29 | 1.72 × 1.71 × 0.29 |
+| render | sliver | seated human, correct anatomy |
+
+The bind extent is unchanged, which is the point: the geometry was always right and only the
+skinning assignment was wrong.
+
+**Why it survived.** `verify_glb_animation` re-read the file with the *writer's* indexing
+convention (`frame * n_joints + joint`). It therefore agreed with a file no viewer could pose.
+This is the same failure family as the two earlier front-end bugs in this project: an
+instrument that shares its subject's assumptions cannot detect that subject's error.
+
+**Fix.** One accessor per channel, `count = n_frames`. The verifier now reads row `frame` per
+the spec and **raises** if a sampler's output length does not equal the keyframe count, so the
+old layout cannot be reintroduced silently.
+
+**New instrument.** `tests/test_gltf_conformance.py` — spec-enum attribute names, index
+bounds, node-tree acyclicity, plus a headless-Chrome load through three.js asserting one
+`SkinnedMesh`, 55 bones, 110 tracks, correct duration, a human-sized skinned pose, and
+non-zero vertex displacement across the clip. Three.js is vendored, so this needs no network.
+All four demo clips regenerated and re-verified: max error vs `smplx_mesh` 6.4–7.5 mm.
+
+**Also fixed on the page, both found by rendering rather than by reading:**
+`new AnimationMixer()` with no scene root made `clipAction` throw; and framing before the
+skeleton was bound measured an identity skeleton (0.40 × 0.46 × 0.31 m for a 1.72 m body).
