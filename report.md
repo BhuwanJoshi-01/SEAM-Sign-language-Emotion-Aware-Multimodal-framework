@@ -456,6 +456,53 @@ see a seated signer standing upright. Needs an author decision.
 
 **No ratings exist and none have been simulated.**
 
+### 2026-10-04 — `rig_profiles.py` cannot improve pose accuracy, and here is what it did instead
+
+Asked to use `blender_scripts/rig_profiles.py` "for accurate body control". Read it
+first, because the request contains a wrong premise worth correcting.
+
+`rig_profiles.py` is a **retargeting adapter**: it takes SMPL-X pose data that has already
+been computed and writes it onto a *different rig*. It does not estimate pose, so it cannot
+make body control more accurate. Pose accuracy here is bounded by MediaPipe landmark
+estimation — and per Q4 above, the legs are not usable at all. `rig_profiles` changes what
+the avatar **looks like**, not whether the pose is right.
+
+For the mesh we actually use it is a no-op wrapper. Its `classic` profile is
+`mode: "direct"`, `bone_map: None`, `loc_scale: 1.0` — i.e. "apply SMPL axis-angles
+directly as bone-local quaternions", which is exactly what
+`synthesis.forward_kinematics` + `avatar/mesh.py` already do. Its `realistic` profile is
+the part with real content: conjugating into a Renderpeople Nathan rig's rest frames,
+including a documented finger-rest correction (SMPL's rest hand splays; Nathan's does
+not, so pure world-delta transfer lands distal joints 3–5 cm off and digits cross).
+
+**What it did produce: an independent validation of our kinematics.** Blender is
+installed and both `.blend` files are present, so `scripts/validate_fk_vs_blender.py` can
+ask Blender's own armature evaluation for the answer and compare. Result:
+
+- Bones outside the pivot's subtree move **0.000°** in ours (1.2e-06 numerically).
+- Bones inside it rotate **exactly 90.000°**.
+- Blender reports 76–90° on the same probe, because the fitted SMPL-H spine curves while
+  our canonical rest spine is collinear.
+
+So the rotation algebra is confirmed against a completely separate implementation, and the
+residual is **quantified**: max 13.933° on `head`, mean 1.10°. That 13.9° is the error
+budget for head and neck tilt recovered from landmarks, and it was previously unknown.
+
+Two methodology traps, both recorded in the script's docstring because both produced
+confident nonsense first:
+
+- Comparing per-joint displacement vectors with a Kabsch fit gave an **89° "residual."**
+  Invalid — displacement vectors point in each joint's own rest frame, so one global
+  rotation cannot align them unless the rest frames already coincide.
+- The first probe rotated `spine1` about **Y**, and every spine offset is exactly
+  `[0, +y, 0]` — parallel to the axis, therefore invariant. It reported that `spine2`,
+  `spine3`, `neck` and `head` failed to move. They move correctly; the probe was
+  degenerate. Rotating about Z instead shows both implementations moving an identical set
+  of joints.
+
+**A degraded probe is worse than no probe**, because it reads as a finding. Both of these
+would have been committed as bugs in code that is in fact correct.
+
 | Field | Entry |
 |---|---|
 | Owner (study coordinator) | |
