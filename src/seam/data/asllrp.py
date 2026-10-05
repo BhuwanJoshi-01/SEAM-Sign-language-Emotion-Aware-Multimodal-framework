@@ -27,7 +27,7 @@ token count cannot be trusted.
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -315,59 +315,59 @@ class GlossVocab:
         return cls(itos=itos, stoi={g: i for i, g in enumerate(itos)})
 
 
+#: Frame rate of the timeline every ASLLRP frame index is expressed in.
+#:
+#: Not documented in the token table, so it was measured two independent ways on the 200
+#: EmoSign utterances (2026-10-05, `scripts/check_signstream_alignment.py`):
+#:
+#: * utterance span over extracted frame count is bimodal at 1.00 and 1.25 - 62 clips are
+#:   30 fps and 138 are 24 fps re-encodes of the same footage;
+#: * human blink annotations against the eye-blink blendshape: on the 24 fps clips a
+#:   frame-for-frame mapping scores AUC 0.554 and a 24/30 rescale 0.710, with the sweep
+#:   over scale peaking at 0.80-0.82 and falling to chance on either side; on the 30 fps
+#:   clips frame-for-frame scores 0.807 and is the peak.
+SESSION_FPS = 30.0
+
+
 @dataclass(slots=True)
 class AlignmentReport:
     """Whether the token frame indices line up with a given set of landmark frames.
 
-    **Corrected 2026-09-29: the alignment IS recoverable, and my first conclusion here
-    was wrong.**
+    **Corrected 2026-10-05: the mapping needs the clip's frame rate, and until now it
+    did not have it.** Token indices are positions on a 30 fps session timeline
+    (:data:`SESSION_FPS`). 138 of the 200 EmoSign clips are 24 fps, so the
+    frame-for-frame mapping this class used to document,
 
-    The original version compared the token's absolute frame indices against the
-    extracted clip length and concluded the labels were unusable. That compared two
-    different things. The token indices are absolute positions in a long session
-    recording, *and the same file records where each utterance starts in that
-    recording* - so the offset is right there in the data:
+        crop frame index = session frame - utterance_start + 1,
 
-        crop frame index = session frame - utterance_start + 1
+    is right only for the other 62. On a 24 fps clip it runs 25% fast: a token that
+    belongs at frames 80-88 was read from frames 100-110. That is what the "10% of tokens
+    overshoot their crop by a frame or two" residual was - the last fifth of every 24 fps
+    utterance falling off the end - and the tokens that stayed in range were labelling
+    the wrong frames. M5a was trained on that mapping. The mapping is now
 
-    Measured over 3,464 tokens against the published DWPose frame counts, that
-    mapping lands in range for **89.5%** of them; the rest overshoot the crop end by
-    one to two frames at the boundary. The earlier "1,725 of 1,738 tokens fall outside
-    the video" figure was true of a naive comparison and misleading about the
-    conclusion: those tokens were not misaligned, they were expressed in a frame space
-    that had not been converted.
+        crop frame index = round((session frame - utterance_start) * clip_fps / 30) + 1.
 
-    So M5a is **unblocked**, with a stated caveat: roughly one token in ten runs past
-    the end of its crop and must be truncated or dropped, and that drop rate is
-    reported per split rather than absorbed.
-
-    The ASLLRP token table's frame indices are *absolute positions in a long session
-    recording*: across the EmoSign utterances the ``containing utterance`` start values
-    run monotonically upward (5000, 287, 1372, 1491, 1599, 1710, 3287, ...) and the
-    median utterance span is 5,123 frames, about 2.8 minutes at 30 fps. The EmoSign
-    clips are 4.6-second *excerpts* with a median of 109 frames. The ratio between them
-    is not a constant rescale - measured across 200 utterances it runs from 1.00 to
-    222.33 with a coefficient of variation above 0.9 - so it cannot be recovered by
-    rescaling, and the excerpt's offset into the session is not recorded anywhere.
-
-    Consequence, measured: **1,725 of 1,738 EmoSign-overlapping tokens have a frame
-    range that falls entirely outside the extracted video.** A model trained on those
-    labels would be learning the wrong frames and the resulting CER would be a number
-    about the misalignment.
-
-    The route forward is the ``Sign video filename`` column: 17,522 *isolated* sign
-    clips, each with one gloss and its own frame bounds, downloadable and alignable by
-    construction. That avoids the session-offset problem entirely.
+    History, kept because each step was a measurement compared against the wrong
+    reference: 2026-09-28 concluded no mapping existed (absolute indices against clip
+    length); 2026-09-29 found the per-utterance offset and concluded the mapping held
+    for 89.5% of tokens (in range is not the same as aligned); this correction found the
+    frame-rate mismatch by testing alignment against an independent signal instead of
+    against frame counts.
     """
 
     n_utterances: int = 0
     n_tokens: int = 0
-    #: Tokens whose offset-mapped range fits inside the published frame count.
+    #: Tokens whose mapped range fits inside the clip.
     n_tokens_aligned: int = 0
-    #: Tokens that overshoot the crop end once the offset is applied.
+    #: Tokens that run past the clip end, or start before it, once mapped.
     n_tokens_overshoot: int = 0
-    ratio_median: float = float("nan")
-    ratio_cv: float = float("nan")
+    #: Median of (utterance span on the session timeline) / (frames in the clip), per
+    #: clip frame rate. 1.00 at 30 fps and 1.25 at 24 fps is what a 30 fps timeline means.
+    span_ratio_median_by_fps: dict[str, float] = field(default_factory=dict)
+    n_utterances_by_fps: dict[str, int] = field(default_factory=dict)
+    #: The same tokens under the frame-for-frame mapping, for the size of the correction.
+    n_tokens_aligned_one_to_one: int = 0
     aligned: bool = False
 
     def as_dict(self) -> dict[str, object]:
@@ -379,74 +379,107 @@ class AlignmentReport:
             "aligned_fraction": round(self.n_tokens_aligned / max(self.n_tokens, 1), 4),
             "aligned_percent": round(100.0 * self.n_tokens_aligned / max(self.n_tokens, 1), 1),
             "overshoot_percent": round(100.0 * self.n_tokens_overshoot / max(self.n_tokens, 1), 1),
-            "absolute_index_over_frame_ratio_median": None
-            if self.ratio_median != self.ratio_median
-            else round(self.ratio_median, 2),
-            "absolute_index_over_frame_ratio_cv": None
-            if self.ratio_cv != self.ratio_cv
-            else round(self.ratio_cv, 3),
+            "n_tokens_in_range_one_to_one": self.n_tokens_aligned_one_to_one,
+            "n_utterances_by_fps": dict(self.n_utterances_by_fps),
+            "span_over_frames_ratio_median_by_fps": {
+                k: round(v, 3) for k, v in self.span_ratio_median_by_fps.items()
+            },
             "aligned": self.aligned,
-            "mapping": "crop frame index = session frame - utterance_start + 1",
+            "session_fps": SESSION_FPS,
+            "mapping": MAPPING,
             "conclusion": (
-                "the utterance_start offset maps the absolute session frame indices onto "
-                "the per-utterance crop frames for the large majority of tokens; tokens "
-                "that overshoot the crop end must be truncated or dropped, and that rate "
-                "is reported rather than absorbed"
+                "token indices are on a 30 fps session timeline and are rescaled by the "
+                "clip's own frame rate; in range is necessary and not sufficient, so the "
+                "mapping is validated against an independent signal in "
+                "artifacts/m3/frame_alignment.json rather than by this count"
             ),
         }
 
 
-def check_alignment(tokens: Sequence[SignToken], frame_counts: dict[str, int]) -> AlignmentReport:
-    """Test whether token frame indices fit clips of the given frame counts.
+MAPPING = "crop frame index = round((session frame - utterance_start) * clip_fps / 30) + 1"
+
+
+def check_alignment(
+    tokens: Sequence[SignToken],
+    frame_counts: Mapping[str, int],
+    clip_fps: Mapping[str, float],
+) -> AlignmentReport:
+    """Test whether token frame indices fit clips of the given frame counts and rates.
 
     ``frame_counts`` maps utterance id to the number of frames actually extracted for
-    it. Returns an :class:`AlignmentReport` whose ``aligned`` flag is the only thing a
-    training script should consult before using these labels.
+    it and ``clip_fps`` to the frame rate of that clip. An utterance missing from either
+    is not checked. "Fits" is a necessary condition only - see :class:`AlignmentReport`.
     """
-    rows = [t for t in tokens if t.utterance_id in frame_counts]
+    rows = [t for t in tokens if t.utterance_id in frame_counts and t.utterance_id in clip_fps]
     if not rows:
         return AlignmentReport(aligned=False, n_tokens=0)
     aligned_n = 0
-    overshoot = 0
-    ratios: list[float] = []
+    one_to_one = 0
+    ratios: dict[str, list[float]] = {}
+    seen: dict[str, str] = {}
     for t in rows:
-        fc = frame_counts[t.utterance_id]
-        # The offset mapping, not an absolute comparison. See the class docstring:
-        # the first version of this function compared the two directly and reached a
-        # conclusion the data does not support.
-        rel_start = t.start_frame - t.utterance_start
-        rel_end = t.end_frame - t.utterance_start
-        if rel_start >= 0 and rel_end < fc:
+        fc = int(frame_counts[t.utterance_id])
+        fps = float(clip_fps[t.utterance_id])
+        span = crop_frame_range(t, clip_fps=fps)
+        if span is not None and span[1] <= fc:
             aligned_n += 1
-        else:
-            overshoot += 1
-        if t.utterance_end > 0:
-            ratios.append(t.utterance_end / max(fc, 1))
-    r = np.asarray(ratios, dtype=float) if ratios else np.zeros(1)
-    cv = float(r.std() / r.mean()) if r.mean() > 0 else float("nan")
+        if t.start_frame >= t.utterance_start and t.end_frame - t.utterance_start < fc:
+            one_to_one += 1
+        if t.utterance_id not in seen and t.utterance_end > t.utterance_start:
+            key = f"{fps:g}"
+            seen[t.utterance_id] = key
+            ratios.setdefault(key, []).append(
+                (t.utterance_end - t.utterance_start + 1) / max(fc, 1)
+            )
     return AlignmentReport(
         n_utterances=len({t.utterance_id for t in rows}),
         n_tokens=len(rows),
         n_tokens_aligned=aligned_n,
-        n_tokens_overshoot=overshoot,
-        ratio_median=float(np.median(r)),
-        ratio_cv=cv,
+        n_tokens_overshoot=len(rows) - aligned_n,
+        span_ratio_median_by_fps={k: float(np.median(v)) for k, v in sorted(ratios.items())},
+        n_utterances_by_fps={k: len(v) for k, v in sorted(ratios.items())},
+        n_tokens_aligned_one_to_one=one_to_one,
         # Aligned when the overwhelming majority map cleanly. Not requiring 100% would
         # be wrong in the other direction - a mapping that only works half the time is
         # not a mapping - so the threshold is high and the residual is reported.
-        aligned=bool(rows) and (aligned_n / len(rows)) >= 0.80,
+        aligned=(aligned_n / len(rows)) >= 0.80,
     )
 
 
-def crop_frame_index(token: SignToken, index_in_window: int) -> int | None:
+def crop_frame_position(session_frame: float, utterance_start: float, clip_fps: float) -> float:
+    """0-based, fractional position in a clip of a frame on the session timeline.
+
+    The one place the session-to-clip conversion lives. Token bounds and SignStream
+    non-manual events both go through it, so they cannot be mapped two different ways.
+    """
+    if clip_fps <= 0:
+        raise ValueError(f"clip_fps must be positive, got {clip_fps}")
+    return (float(session_frame) - float(utterance_start)) * (float(clip_fps) / SESSION_FPS)
+
+
+def crop_frame_index(token: SignToken, index_in_window: int, *, clip_fps: float) -> int | None:
     """Map a session-frame position to a 1-based crop-frame index.
 
-    ``None`` when the position falls outside the utterance, which is a real case:
-    roughly one token in ten runs past the end of its crop and must be truncated or
-    dropped rather than clamped, since clamping would silently label the wrong frame.
+    ``clip_fps`` is required and has no default. The mapping is frame-for-frame only for a
+    30 fps clip, and a default of 30 would silently reproduce the misalignment this
+    function carried until 2026-10-05 for every 24 fps clip.
+
+    ``None`` when the position falls before the utterance. A position past the end of
+    the clip is returned as it is: the caller knows the clip length and must drop the
+    token rather than clamp it, since clamping would label the wrong frame.
     """
-    rel = int(index_in_window) - int(token.utterance_start) + 1
+    pos = crop_frame_position(index_in_window, token.utterance_start, clip_fps)
+    rel = int(np.floor(pos + 0.5)) + 1
     return rel if rel >= 1 else None
+
+
+def crop_frame_range(token: SignToken, *, clip_fps: float) -> tuple[int, int] | None:
+    """1-based inclusive ``(start, end)`` crop frames of a token, or ``None`` if before it."""
+    start = crop_frame_index(token, token.start_frame, clip_fps=clip_fps)
+    end = crop_frame_index(token, token.end_frame, clip_fps=clip_fps)
+    if start is None or end is None:
+        return None
+    return start, max(end, start)
 
 
 def describe(report: dict) -> str:

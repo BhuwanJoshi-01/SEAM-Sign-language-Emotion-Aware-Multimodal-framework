@@ -40,16 +40,22 @@ CLAIMED_DOCS = ("EXPERIMENT_LOG.md", "CLAIMS_LEDGER.md")
 #: facts - a remote file size, a byte count - which are not measurements of this project.
 #: What it must not do is quote a project measurement wrongly, so it gets a targeted
 #: check against the specific values it asserts instead.
+#:
+#: The three M4 values changed on 2026-10-05, when M4 was re-run on yaw-fixed code with the
+#: baseline-weighting and checkpoint-selection defects corrected (0.7276 / 0.9729 / 0.5048
+#: before). The gate still fails; see that date in EXPERIMENT_LOG.md.
 REPORT_QUOTED = {
-    "worst_cross_auc": 0.7276,
-    "signer_control_max": 0.9729,
-    "cross_a_to_l": 0.5048,
-    "n_tokens": 1563,
-    "n_glosses": 499,
-    "hapax_types": 284,
-    "wer_mean": 0.916,
-    "wer_baseline": 0.916,
-    "wer_shuffled": 0.911,
+    "worst_cross_auc": 0.6944,
+    "signer_control_max": 0.9812,
+    "cross_a_to_l": 0.5891,
+    # M5a, re-run 2026-10-05 with the 30 fps -> clip-rate frame mapping and a classifier
+    # that can predict more than one gloss (1563 / 499 / 284 / 0.916 / 0.916 / 0.911 before).
+    "n_tokens": 1736,
+    "n_glosses": 546,
+    "hapax_types": 306,
+    "wer_mean": 0.92,
+    "wer_baseline": 0.92,
+    "wer_shuffled": 0.91,
     "tar_bytes": 1169520640,
 }
 

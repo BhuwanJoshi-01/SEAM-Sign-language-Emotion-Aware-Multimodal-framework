@@ -46,6 +46,16 @@ Added or replaced in v2:
 17. **Every null carries its power.** No result is reported as "no effect" without the minimum
     detectable effect beside it, in the same units. A null without its MDE is an absence of
     measurement, and the two are indistinguishable to a reader who is not told which it is.
+18. **A result does not outlive the code that produced it.** Every result artifact carries a
+    stamp of the modules it depends on (`seam.provenance.stamp`), and
+    `tests/test_artifact_staleness.py` fails when one no longer matches the tree. A result
+    that is overtaken is moved to `artifacts/superseded/` and registered in
+    `paper/artifact_status.json`, never overwritten in place and never cited again. This rule
+    exists because the yaw fix of 2026-10-04 left three cited results standing on the broken
+    code for a day, one of them a headline verdict.
+19. **A comparison arm is trained by the same function as the thing it is compared with.**
+    Rule 16 for models rather than front ends: M4's entangled baseline had its own
+    unweighted losses, and the five-fold gap that produced read as a finding.
 
 ---
 
@@ -54,19 +64,19 @@ Added or replaced in v2:
 v1 assumed several resources that are not what it said. This table is the ground truth; every
 milestone plans against it, not against v1.
 
-| Resource | Status | Size | Unlocks |
-|---|---|---|---|
-| EmoSign labels `catfang/emosign` | **ungated**, fetched | 43 KB, 200 rows | sentiment-7, 10 emotions, 600 free-text Deaf-annotator cue strings |
-| EmoSign video via `FangSen9000/ASLLRP_utterances_results` | **200/200 IDs join** to `crop_original_video.mp4` | ~113 MB | **the affect benchmark — v1's critical path is resolved** |
-| ASLLRP gloss tokens `asllrp_sentence_signs_2025_06_28.csv` | ungated | 17,522 tokens, frame-aligned, signer-tagged | continuous recognition + gloss sequences |
-| ASLLRP SignStream non-manual XML | **not in mirror** | — | `L` labels → heuristics + BU request (async) |
-| ASLLRP English sentences | **not in mirror** | — | gloss→English → ladder in M5 |
-| How2Sign `Kavitha/how2sign_user3_mediapipe_pose` | ungated, published keypoints | — | gloss-free SLT + published BLEU-4 10.06 to hit |
-| WLASL local `/home/bhuwan/Videos/wlasl` | 3,863 mp4 / 668 glosses | 7 GB | recognition backbone + label-free confound audit |
-| ASL Citizen `SorensenAI/asl-citizen-poses` | ungated MediaPipe `.pose`, **no blendshapes** | 81 GB, 1000/batch | K1/K2 without the 403 |
-| `Pelmeshek/raf-db-7emotions-mediapipe-768` | ungated | 2.7 GB | non-signer FER baseline to audit |
-| NSL / INCLUDE local | present | 8.6 GB | cross-lingual ablation |
-| `face_landmarker.task` | **already cached locally** | 3.7 MB | blendshape extraction, zero download |
+| Resource                                                    | Status                                                    | Size                                        | Unlocks                                                            |
+| ----------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------ |
+| EmoSign labels`catfang/emosign`                           | **ungated**, fetched                                | 43 KB, 200 rows                             | sentiment-7, 10 emotions, 600 free-text Deaf-annotator cue strings |
+| EmoSign video via`FangSen9000/ASLLRP_utterances_results`  | **200/200 IDs join** to `crop_original_video.mp4` | ~113 MB                                     | **the affect benchmark — v1's critical path is resolved**   |
+| ASLLRP gloss tokens `asllrp_sentence_signs_2025_06_28.csv` | ungated | 17,522 tokens, signer-tagged, frame bounds on a **30 fps session timeline** | continuous recognition + gloss sequences; map to clip frames with `asllrp.crop_frame_range(clip_fps=...)` |
+| ASLLRP SignStream non-manual XML | **obtained 2026-10-01** via the DAI Download Cart (not in the mirror; licence-gated, never committed) | 51 collections, 2,407 utterances, 43,038 non-manual events | human `L` labels, frame-level, for all 200 EmoSign utterances — on a **30 fps timeline**, so they must be rescaled for the 138 clips that are 24 fps (`signstream.frame_mask`) |
+| ASLLRP English sentences | **in the SignStream XML** (found 2026-10-05; not in the mirror) | a translation on 2,403 of 2,407 utterances, 200/200 EmoSign | gloss→English with real references — the first rung of the M5 ladder is available |
+| How2Sign `martinctl/how2sign-asl-landmarks` | ungated, **on disk** (corrected 2026-10-04: the `Kavitha/how2sign_user3_mediapipe_pose` repo first named here holds JPEGs and a constant caption — no keypoints, no English) | 4.8 GB, 991 shards, 35,176 sentences | gloss-free SLT; MediaPipe features, so the published BLEU-4 10.06 (MMPose) is a quoted reference, not like-for-like |
+| WLASL local`/home/bhuwan/Videos/wlasl`                    | 3,863 mp4 / 668 glosses                                   | 7 GB                                        | recognition backbone + label-free confound audit                   |
+| ASL Citizen`SorensenAI/asl-citizen-poses`                 | ungated MediaPipe`.pose`, **no blendshapes**      | 81 GB, 1000/batch                           | K1/K2 without the 403                                              |
+| `Pelmeshek/raf-db-7emotions-mediapipe-768`                | ungated                                                   | 2.7 GB                                      | non-signer FER baseline to audit                                   |
+| NSL / INCLUDE local                                         | present                                                   | 8.6 GB                                      | cross-lingual ablation                                             |
+| `face_landmarker.task`                                    | **already cached locally**                          | 3.7 MB                                      | blendshape extraction, zero download                               |
 
 **How the EmoSign join works.** EmoSign's `video_name` is not a filename — its trailing numeric
 token *is* the ASLLRP utterance ID. `Jonathan_2012-11-27_sc93_5572615` → `5572615` →
@@ -108,10 +118,9 @@ every published baseline ran on an 80 GB A100 or a 300M-parameter model.
 ## §3 Milestone map
 
 ### M0 — Data spine & engineering foundation
-Repo `src/seam/` (`data/ perception/ preprocess/ features/ models/ affect/ translate/ avatar/
-serve/ export/ eval/`); fetcher with SHA256 manifests, **hard-linking local data rather than
-re-downloading**; download the 200 EmoSign clips; `pyproject.toml` exact pins; `Makefile:
-setup lint test train bench repro paper`; pytest + ruff + mypy + pre-commit green; W&B project.
+
+Repo `src/seam/` (`data/ perception/ preprocess/ features/ models/ affect/ translate/ avatar/ serve/ export/ eval/`); fetcher with SHA256 manifests, **hard-linking local data rather than
+re-downloading**; download the 200 EmoSign clips; `pyproject.toml` exact pins; `Makefile: setup lint test train bench repro paper`; pytest + ruff + mypy + pre-commit green; W&B project.
 
 **Face-visibility gate:** the mirror's `crop_*` videos may be signer-centred or face-occluded.
 Validate blendshape extractability on ≥20 sampled clips *before* committing the pipeline. If the
@@ -128,6 +137,10 @@ from measurement (median top-1 confidence was 0.29), never from intuition.
 
 **Gate:** readiness table published · 200/200 clips local · blendshape extraction validated ·
 `make test` green.
+**Status 2026-10-05: OPEN at 7/10 resources, on two reviewer-owned decisions** — ASL Citizen
+(81 GB, not fetched) and NSL provenance. Face-visibility gate passed 24/24. WLASL is 3,771 of
+3,775 indexed clips usable (88 substituted, 4 lost), and `make readiness` now reports that
+from the index over every file rather than demanding a repair pass from a 300-file sample.
 **Kill switch:** none.
 **Survives:** everything.
 
@@ -147,6 +160,23 @@ a powered null, not an absence of measurement.
 
 **Gate:** met. Measured, 3 models, 2,565 clips (≥500), CIs + effect sizes + MDE, marker→emotion
 table, `mouth_positive` control null in all three, uniform-random null model null in all six rows.
+**Correction 2026-10-05.** The audit ran before two changes to the head path (the oscillation
+threshold on 09-28 and the yaw decomposition on 10-04). Re-run from the cached FER scores
+(`artifacts/audit/confound_audit.json`): the four blendshape markers are unchanged to
+the last digit, which is the control, and **`head_shake` and `head_nod` each have one matched
+pair**, down from 251 and 13. So the refutation covers brow raise, brow furrow and mouth
+morphemes on isolated signs. It says nothing about head shake, for which there is no working
+instrument, and nothing about continuous signing.
+**Tested on continuous signing 2026-10-05, and not supported there either.** The test this
+section asks for was run on the 200 EmoSign utterances with *human* frame-level markers
+(`scripts/run_confound_audit_continuous.py`), design and decision rule fixed before the first
+run: 0.5 s windows inside the signing span, within-clip matched pairs, placebo and null
+controls, support requiring a corrected positive shift in two of three models. **No marker
+meets the rule.** Brow furrow — the wh-question example the hypothesis is usually stated
+with — leans the *other* way in all three models. Brow raise and rhetorical questions lean
+positive in two models and do not survive correction; they do reach significance if the
+resting frames at the clip edges are included, which is a signing-versus-resting contrast
+and not the claim. Yes/no and wh-questions have too few clips (8 and 4) to estimate.
 **Kill switch, taken:** the null is the result. It is published as a localisation, not a failure.
 **Survives:** the feature stack for every later milestone, plus a real negative result.
 
@@ -180,16 +210,16 @@ instrument that records the conditions it was measured under.
 **Gate:** measured p50/p95/p99 + peak VRAM on the 3050 for the perception stage; CI test that
 fails above the ceiling.
 
-| element | result |
-|---|---|
-| p50 / p95 / p99, perception, on the 3050 | **41.8 / 73.2 / 78.1 ms** over 900 individually-timed calls |
-| sustained rate | **20.4 FPS** (repeats: 19.7, 20.0, 20.3) |
-| sequential baseline, same instrument | 73.0 ms p50, 12.8 FPS — **concurrency worth 1.75x** |
-| peak VRAM, perception | 90 MB |
-| peak VRAM, **6 models live at once** | **186 MB against the 2500 MB ceiling (7%)**, 20.3 FPS |
-| CI gate that fails above the ceiling | `make bench` exits non-zero; 185 tests, 24 on the guards |
-| FP32↔INT8 parity harness | met, and it rejected `fer_cnn_a` INT8 |
-| `onnxruntime-gpu` CUDA EP | met, after preloading the bundled CUDA 13 libraries |
+| element                                   | result                                                            |
+| ----------------------------------------- | ----------------------------------------------------------------- |
+| p50 / p95 / p99, perception, on the 3050  | **41.8 / 73.2 / 78.1 ms** over 900 individually-timed calls |
+| sustained rate                            | **20.4 FPS** (repeats: 19.7, 20.0, 20.3)                    |
+| sequential baseline, same instrument      | 73.0 ms p50, 12.8 FPS —**concurrency worth 1.75x**         |
+| peak VRAM, perception                     | 90 MB                                                             |
+| peak VRAM,**6 models live at once** | **186 MB against the 2500 MB ceiling (7%)**, 20.3 FPS       |
+| CI gate that fails above the ceiling      | `make bench` exits non-zero; 185 tests, 24 on the guards        |
+| FP32↔INT8 parity harness                 | met, and it rejected`fer_cnn_a` INT8                            |
+| `onnxruntime-gpu` CUDA EP               | met, after preloading the bundled CUDA 13 libraries               |
 
 - **K6 is met marginally, and is reported that way.** Four reportable runs give
   19.7–20.4 FPS against a ≥20 target: it meets the target at the median and does not
@@ -235,18 +265,33 @@ The pseudo-label limitation is lifted for these clips.
 **But measuring the old pseudo-labels against the human ones found most of them
 unusable** (`artifacts/m3/label_agreement.json`, Cohen's kappa):
 
-| category | kappa | verdict |
-|---|---|---|
-| interrogative ~ rhetorical question | +0.734 | usable |
-| negation | +0.639 | usable |
-| topicalization ~ topic/focus | +0.141 | weak |
-| interrogative (wh + yes/no) | +0.028 | **chance** |
+| category                                   | kappa  | verdict                                                                                       |
+| ------------------------------------------ | ------ | --------------------------------------------------------------------------------------------- |
+| interrogative ~ rhetorical question        | +0.734 | usable                                                                                        |
+| negation                                   | +0.639 | usable                                                                                        |
+| topicalization ~ topic/focus               | +0.141 | weak                                                                                          |
+| interrogative (wh + yes/no)                | +0.028 | **chance**                                                                              |
 | reference-establishment ~ conditional/when | +0.038 | **chance** (`reference_establishment` over-fires: 93 heuristic positives vs 37 human) |
 
 So M3 is now on human labels rather than guesses, and separately has a published result
-about how unreliable the pseudo-labels were. The earlier duration-controlled finding
-(r = 0.554 for negation ↔ head shake) is consistent with this: negation was the one
-heuristic label with genuine signal to detect.
+about how unreliable the pseudo-labels were.
+
+**Withdrawn 2026-10-04, confirmed by re-run 2026-10-05:** the duration-controlled finding
+r = 0.554 for negation ↔ head shake, quoted in three bullets below, was produced by a yaw
+decomposition that read the wrong matrix entries. On fixed code `head_shake` is zero on 90%
+of clips and the pairing is reported as *not interpretable*
+(`artifacts/audit/marker_labels.json`). The bullets are kept as the record of what
+was claimed; none of them may be cited. The human annotations mark a head shake in 89 of the
+200 clips, so the visual marker is missing most of what is there. The current marker set is
+**1 usable (`brow_furrow`), 3 degenerate, 2 blind** — a clip-prevalence classification.
+
+**Validated against human frame labels 2026-10-05, and the picture inverts**
+(`artifacts/m3/marker_validation.json`, leave-one-signer-out, within-clip AUC, gate 0.80 on
+the three large folds). **`brow_raise` is validated**: 0.838 / 0.822 / 0.878 — the marker
+M3 called degenerate. `brow_furrow`, the one M3 called usable, is **not** (0.599 on the
+largest fold). `head_shake` and `head_nod` are unreadable even by a supervised detector on
+head pose and its dynamics, so that is a limit of the signal on 256-pixel crops, not of the
+thresholds. One trustworthy visual marker exists; negation has none.
 
 - **The syntactic track now has a real input.** `asllrp_utterance_map` and
   `asllrp_gloss_tokens` were declared in `sources.py` but never fetched and marked
@@ -292,7 +337,7 @@ heuristic label with genuine signal to detect.
   inherits that mechanically. On a per-frame mean, interrogative/brow_raise went
   **+0.414 → −0.045** — the whole association was clip length, and reporting it would
   have been a false positive.
-- **Result (partial correlation on log-duration, permutation, Bonferroni ×3):**
+- **[WITHDRAWN — yaw bug] Result (partial correlation on log-duration, permutation, Bonferroni ×3):**
   **negation ↔ head_shake r=0.554, p=0.011, p×3=0.033, MDE 0.411** — the canonical ASL
   negation marker, and the one effect that survives. Interrogative ↔ brow_raise
   −0.084 (p=0.62) and ↔ brow_furrow 0.199 (p=0.24) are **powered nulls** against an
@@ -309,7 +354,7 @@ heuristic label with genuine signal to detect.
   **None of 15 cue/feature tests survives Bonferroni** (duration-controlled,
   permutation, MDE reported). The assumed feature set is not validated, which is the
   point of running the check.
-- **One channel is corroborated by two independent ground truths.** `head_shake` gives
+- **[WITHDRAWN — yaw bug] One channel is corroborated by two independent ground truths.** `head_shake` gives
   r=+0.275 (p=0.077) against annotator text and r=+0.554 (p=0.011) against lexical
   negation from the ASLLRP gloss. The brow and mouth channels return nulls *and* are
   the channels measured as firing on 79-95% of clips, so those nulls are statements
@@ -322,13 +367,45 @@ heuristic label with genuine signal to detect.
   `head_tilt`, `eye_widen`, `blink_close`, `gaze_shift`, `fingerspelling`,
   `body_posture`. The first two of the eye cues are recoverable from blendshape
   coefficients already being computed and simply not read.
-- **Track B (BU access for real SignStream non-manual XML) remains outstanding** and is
-  the only M3 item not closed; it is external.
-- Artefact `artifacts/audit/marker_labels.json`; 177 tests pass.
+- **Track B is closed** (2026-10-01): 51 SignStream collections, 43,038 human non-manual
+  events, 200/200 EmoSign utterances joined.
+- Current artefact `artifacts/audit/marker_labels.json`; the pre-fix file is kept under
+  `artifacts/superseded/pre_yawfix/` (`paper/artifact_status.json`).
 
 ### M4 — Factorized non-manual encoder + EmoSign LOSO ★ CORE CONTRIBUTION
 
 **Status: GATE NOT MET, AND THE NEGATIVE RESULT IS CONFIRMED — decision taken 2026-10-01: report as a refuted hypothesis (option (a)), not a deferred gate.**
+
+**Re-run 2026-10-05, and these are the numbers to cite.** Every figure further down this
+section was measured before the yaw fix and with two defects in M4's own instrument: the
+entangled baseline was trained without the class and positive-label weights the factorized
+model had, and checkpoints were selected on a softmax over a multi-label head. All three
+are corrected (`paper/EXPERIMENT_LOG.md`, 2026-10-05).
+
+| | as logged 2026-10-01 | **current** | target |
+| --- | --- | --- | --- |
+| worst-fold cross-AUC, heuristic `y_L` | 0.7276 | **0.6944** | ≤ 0.60 |
+| worst-fold cross-AUC, human `y_L` | 0.7031 | **0.7264** | ≤ 0.60 |
+| worst-fold cross-AUC, 3 seeds | — | **0.710 ± 0.014** | ≤ 0.60 |
+| signer positive control | 0.9729 | **0.9812** | ≥ 0.80 |
+| cross A→L | 0.5048 | 0.601 ± 0.017 | — |
+| affect micro-F1, factorized / entangled baseline | 0.359 / 0.059 | 0.324 ± 0.019 / 0.308 | no drop |
+| affect balanced accuracy | 0.497 | 0.481–0.507 | reference 0.5 |
+
+- **The verdict is unchanged and is more robust than before:** the gate fails for every
+  ablation variant in every one of three seeds, with the control passing.
+- **Three claims made below are withdrawn.** "Cross A→L reached chance" was a mean over
+  folds on both sides of 0.5. "The full model is best on all three target metrics" and
+  "the separation terms work, monotonically" do not survive three seeds and a like-for-like
+  baseline: no lever moves cross L→A, and the factorized model's affect micro-F1 is inside
+  the seed spread of the baseline's. Claim C2 is not supported.
+- **The linguistic task was chosen on a withdrawn result.** `LINGUISTIC_TASK = "negation"`
+  was picked "because it is the one M3 found a real effect for". That effect was the yaw
+  bug. The label itself is sound (kappa 0.639 against human annotation); whether any
+  visual signal for it reaches the encoder is not established.
+- **A limit of the gate metric, left as registered:** it takes the larger cross-AUC per
+  fold, so a fold at 0.30 counts as separated, and one fold's value swings from 0.30 to
+  0.65 across seeds.
 
 **Why this is now a finding rather than a failure.** Two things had to be excluded before
 "the factorisation does not hold" was a claim anyone could act on, and both are now
@@ -339,13 +416,13 @@ excluded:
    human ASLLRP annotations downloaded 2026-10-01, on the same 200 clips
    (`artifacts/m3/label_agreement.json`, Cohen's kappa):
 
-   | category | human + | heuristic + | kappa | verdict |
-   |---|---|---|---|---|
-   | negation | 39 | 27 | **+0.639** | usable |
-   | interrogative ~ rhetorical question | 40 | 46 | **+0.734** | usable |
-   | topicalization ~ topic/focus | 86 | 84 | +0.141 | weak |
-   | interrogative (wh + yes/no) | 31 | 46 | **+0.028** | chance |
-   | reference-establishment ~ conditional/when | 37 | 93 | **+0.038** | chance |
+   | category                                   | human + | heuristic + | kappa            | verdict |
+   | ------------------------------------------ | ------- | ----------- | ---------------- | ------- |
+   | negation                                   | 39      | 27          | **+0.639** | usable  |
+   | interrogative ~ rhetorical question        | 40      | 46          | **+0.734** | usable  |
+   | topicalization ~ topic/focus               | 86      | 84          | +0.141           | weak    |
+   | interrogative (wh + yes/no)                | 31      | 46          | **+0.028** | chance  |
+   | reference-establishment ~ conditional/when | 37      | 93          | **+0.038** | chance  |
 
    Three of the four are at or near chance, and `reference_establishment` over-fires on
    93 clips against 37 human positives. That is a plausible cause of leakage on its own:
@@ -355,18 +432,17 @@ excluded:
    **It is not the cause.** Re-running the whole experiment with the *human* labels in the
    same four slots, same folds, same features (`artifacts/m4/factorizer_human_labels.json`):
 
-   | | heuristic `y_L` | human `y_L` |
-   |---|---|---|
-   | worst-fold cross-AUC | 0.7276 | **0.7031** |
-   | cross L→A | 0.6911 | 0.7004 |
-   | cross A→L | 0.5048 | **0.6174** |
-   | GRL head accuracy | 0.500 | 0.507 |
-   | signer control | 0.9729 | 0.9731 |
-   | gate | FAIL | FAIL |
+   |                      | heuristic`y_L` | human`y_L`     |
+   | -------------------- | ---------------- | ---------------- |
+   | worst-fold cross-AUC | 0.7276           | **0.7031** |
+   | cross L→A           | 0.6911           | 0.7004           |
+   | cross A→L           | 0.5048           | **0.6174** |
+   | GRL head accuracy    | 0.500            | 0.507            |
+   | signer control       | 0.9729           | 0.9731           |
+   | gate                 | FAIL             | FAIL             |
 
    Marginal improvement in the worst fold, and the *other* direction got worse. The gate
    is not missed because the target was noise.
-
 2. **The instrument works.** The signer control sits at 0.973 against a ≥0.80 floor in
    both arms, so the pipeline detects signer identity far better than chance. A negative
    result from an instrument that cannot see anything would be worthless.
@@ -390,16 +466,16 @@ not separate the factors and does not learn either task.
 
 **Rerun with multi-label affect** (run `m4-factorizer-002`) — the framing was the bug:
 
-| | single-expr | **multi-label** | target |
-|---|---|---|---|
-| trainable windows | 314 | **1,765** | — |
-| cross A→L (linguistic from z_A) | 0.695 | **0.505** (chance) | — |
-| cross L→A (affect from z_L), weighted | 0.879 | **0.691** | ≤ 0.60 |
-| worst fold | — | **0.884** (Ben) | ≤ 0.60 |
-| affect micro-F1 | n/a | **0.359** | no drop |
-| balanced acc, linguistic | 0.547 | 0.529 | — |
-| balanced acc, affect | 0.173 | 0.497 (ref 0.5) | — |
-| signer positive control | 0.971 | **0.973** (passes) | ≥ 0.80 |
+|                                        | single-expr | **multi-label**    | target  |
+| -------------------------------------- | ----------- | ------------------------ | ------- |
+| trainable windows                      | 314         | **1,765**          | —      |
+| cross A→L (linguistic from z_A)       | 0.695       | **0.505** (chance) | —      |
+| cross L→A (affect from z_L), weighted | 0.879       | **0.691**          | ≤ 0.60 |
+| worst fold                             | —          | **0.884** (Ben)    | ≤ 0.60 |
+| affect micro-F1                        | n/a         | **0.359**          | no drop |
+| balanced acc, linguistic               | 0.547       | 0.529                    | —      |
+| balanced acc, affect                   | 0.173       | 0.497 (ref 0.5)          | —      |
+| signer positive control                | 0.971       | **0.973** (passes) | ≥ 0.80 |
 
 - **The gate still fails**, on the worst fold: 0.884 (Ben) against ≤ 0.60. The control
   passes, so the failure is the model's, not the instrument's.
@@ -416,7 +492,6 @@ not separate the factors and does not learn either task.
   verdict instead of a number, or merged small-signer folds. (b) Residual affect in
   `z_L` at 0.691 may be genuine — M3 measured a real head-shake/negation association, and
   the brow and mouth channels remain saturated.
-
 - **The control passes, so the failure is real and not a blind instrument.** That was the
   point of rule 13: a metric that cannot detect entanglement when it exists would pass
   a completely entangled model.
@@ -450,14 +525,28 @@ not separate the factors and does not learn either task.
   it is what the M4 rerun needs.
 
 ### M5 — Recognition + translation
+
 **M5a continuous recognition:** train on the 17,522 frame-aligned ASLLRP gloss tokens with
 signer-disjoint splits — real gloss supervision and real temporal alignment, no download risk.
-**M5b gloss-free SLT:** 255-dim pose → single linear layer → T5-small on How2Sign published
-keypoints, at **24 fps and 12 fps** to reproduce the frame-rate trade-off against the published
-BLEU-4 10.06 / 9.53. M5b is the translation claim with a citable published reference; M5a feeds
+**M5b gloss-free SLT:** pose → single linear layer → T5-small on the How2Sign landmark cache
+now on disk (§1), at **24 fps and 12 fps** to reproduce the frame-rate trade-off. The published
+BLEU-4 10.06 / 9.53 used 255-dim MMPose keypoints; ours are MediaPipe-derived, so those figures
+are a quoted reference and the paper must say so. M5b is the translation claim with a citable published reference; M5a feeds
 the demo.
-**Known gap:** ASLLRP English is not in the mirror. Ladder: BU English → How2Sign English
-(gloss-free path) → LLM gloss back-translation, **disclosed as synthetic**.
+**Known gap, closed 2026-10-05:** ASLLRP English is not in the mirror, but the SignStream XML
+downloaded for M3 carries a translation for 2,403 of its 2,407 utterances, including all 200
+EmoSign clips. The ladder's first rung (BU English) is therefore available; How2Sign English
+remains the gloss-free path, and no synthetic back-translation is needed.
+
+**M5a status 2026-10-05: gate not met, on a corrected instrument.** The first run (WER 0.916
+= most-frequent baseline 0.916) is superseded: its model predicted a single gloss in every
+fold, and its token frames were misaligned on the 138 clips that are 24 fps, because ASLLRP
+frame indices are on a 30 fps timeline. Both are fixed and tested (a positive control for the
+recogniser; an independent blink-based check for the mapping). Re-run: 1,736 tokens over 546
+glosses, WER 0.920 against a most-frequent baseline of 0.920. Still no better than the
+baseline, and now a measurement. It is a data-scale verdict — 3.18 tokens per gloss — and the
+1,354 crop videos on disk are the fair test.
+**M5b status:** not started; `src/seam/translate/` is empty; data on disk.
 
 **Gate:** BLEU-4 at ≤80M params on How2Sign, 3 seeds, signer-disjoint, with the 24-vs-12 fps FLOPs
 table.
@@ -465,6 +554,7 @@ table.
 **Survives:** the translation section and the demo backbone.
 
 ### M6 — Emotion-conditioned generation
+
 LLM-built emotion-styled paraphrase corpus from neutral references, semantic-equivalence filtered,
 **procedure disclosed**. Inject `A` into T5-small as control tokens / prefix. Three independent
 axes: style accuracy (held-out classifier), semantic preservation (BERTScore-F1 ≥ 0.90), degeneracy
@@ -476,6 +566,7 @@ must change style output while semantics hold).
 **Survives:** the demo.
 
 ### M7 — Expressive avatar + live demo
+
 Pose → VRM bone rotations with joint-limit clamping and quaternion continuity — **gimbal flips
 and finger distortion are a documented MediaPipe-retargeting trap; test explicitly.** 52
 blendshapes → VRM/ARKit expression targets, near-1:1, no training. **Emotion modulation from `A`:**
@@ -495,7 +586,8 @@ reported; **if no signer participates, that is stated in Limitations, not glosse
   input provenance.
 - **It refuses to display what this build cannot support**, with the measured reason
   inline: affect is withheld because M4 measured 0.497 balanced accuracy against a 0.5
-  reference, and gloss recognition is withheld because M5a's labels are misaligned.
+  reference (0.481–0.507 over three seeds as re-measured 2026-10-05), and gloss recognition
+  is withheld because M5a does not beat its most-frequent baseline.
 - **A blind feature is rendered as blind** (zero fraction in the payload), so "no marker"
   and "this instrument cannot tell" stay distinct on screen.
 - **Outstanding for the M7 gate:** the blinded pairwise human-preference study (≥5 raters,
@@ -506,6 +598,7 @@ reported; **if no signer participates, that is stated in Limitations, not glosse
 **Survives:** the demo video and system section.
 
 ### M8 — Cross-lingual ISL ablation
+
 ASL-trained encoders → INCLUDE/NSL zero-shot then few-shot, using the 8.6 GB already local.
 Re-audit integrity first (v1's `.part` finding is stale — that path no longer exists). If the
 official split cannot be reproduced, restrict to intact categories **and say which in the paper**.
@@ -515,6 +608,7 @@ official split cannot be reproduced, restrict to intact categories **and say whi
 **Survives:** one ablation table.
 
 ### M9 — Paper, repro, release
+
 `scripts/repro_all.sh` regenerates every table and figure; **CI test that fails if any results
 table contains a number absent from `EXPERIMENT_LOG.md`.** Model cards for every checkpoint
 (training data, signer demographics, failure modes, **α-bounded reliability of low-agreement
@@ -532,19 +626,19 @@ a run ID + commit SHA. arXiv + workshop submission. 3-minute demo video. Public 
 
 Never fill a cell from an estimate. Every cell cites a run ID.
 
-| # | KPI | Reference | Target | Current | Milestone |
-|---|---|---|---|---|---|
-| **K1** | Non-signer FER bias from grammatical markers | 0 = no bias | ≠ 0, 2+ models, CIs | **refuted on WLASL: −0.008…+0.002, MDE 0.003–0.008** | M1 |
-| **K2** | Disentanglement cross-prediction AUC | 0.5 = perfect | **≤ 0.60**, no affect loss | — | M4 |
-| **K3** | Positive control: signer probe AUC | — | ≥ 0.80 | — | M4 |
-| **K4** | EmoSign emotion macro-F1, video-only, LOSO | **eJSL EANwH 21.09**; GPT-4o 20.76 | **> 21.09** | — | M4 |
-| **K5** | Peak inference VRAM / p95 latency on the 3050 | 4096 MB hard limit | **< 2500 MB / < 400 ms** | **186 MB, 6 models live / 73.2 ms p95 perception** | M2, M7 |
-| K6 | Sustained capture FPS | — | ≥ 20 | **20.4 (repeats 19.7-20.4)** | M2 |
-| K7 | How2Sign BLEU-4 at ≤80M params | 10.06 published | ≥ 8.0 | — | M5 |
-| K8 | Conditioned-gen style acc. @ BERTScore ≥0.90 | — | ≥ 80% | — | M6 |
-| K9 | Avatar preference vs neutral | 50% = tie | ≥ 60% | — | M7 |
-| K10 | ISL zero-shot Top-1 | chance | report honestly | — | M8 |
-| K11 | Reproducibility | — | 1 command, all tables | — | M9 |
+| #            | KPI                                           | Reference                                | Target                            | Current                                                       | Milestone |
+| ------------ | --------------------------------------------- | ---------------------------------------- | --------------------------------- | ------------------------------------------------------------- | --------- |
+| **K1** | Non-signer FER bias from grammatical markers | 0 = no bias | ≠ 0, 2+ models, CIs | **no support, measured twice.** Isolated signs (WLASL, heuristic markers): −0.008…+0.002, MDE 0.003–0.008. Continuous signing (EmoSign, human frame-level markers, 2026-10-05): no marker meets the pre-registered rule; brow-marker MDE 0.012–0.037 against baselines of 0.40–0.46 | M1 |
+| **K2** | Disentanglement cross-prediction AUC | 0.5 = perfect | **≤ 0.60**, no affect loss | **not met: 0.6944 heuristic `y_L`, 0.7264 human `y_L`; 0.710 ± 0.014 over 3 seeds** (`artifacts/m4/`, 2026-10-05) | M4 |
+| **K3** | Positive control: signer probe AUC | — | ≥ 0.80 | **met: 0.9812** | M4 |
+| **K4** | EmoSign emotion macro-F1, video-only, LOSO | **eJSL EANwH 21.09**; GPT-4o 20.76 | **> 21.09** | **never measured on a comparable protocol.** Affect balanced accuracy 0.481–0.507 against 0.5, so no affect signal is learned yet | M4 |
+| **K5** | Peak inference VRAM / p95 latency on the 3050 | 4096 MB hard limit                       | **< 2500 MB / < 400 ms**    | **186 MB, 6 models live / 73.2 ms p95 perception**      | M2, M7    |
+| K6           | Sustained capture FPS                         | —                                       | ≥ 20                             | **20.4 (repeats 19.7-20.4)**                            | M2        |
+| K7 | How2Sign BLEU-4 at ≤80M params | 10.06 published | ≥ 8.0 | not started; data on disk | M5 |
+| K8 | Conditioned-gen style acc. @ BERTScore ≥0.90 | — | ≥ 80% | not started | M6 |
+| K9 | Avatar preference vs neutral | 50% = tie | ≥ 60% | stimuli ready, **0 raters** | M7 |
+| K10 | ISL zero-shot Top-1 | chance | report honestly | blocked on NSL terms | M8 |
+| K11 | Reproducibility | — | 1 command, all tables | partial: `scripts/repro_all.sh` (15 stages) + provenance and staleness guards; paper tables not yet generated from it | M9 |
 
 **Bold KPIs are the paper.** If K1, K2, K4 or K5 misses, that is the only agenda item at the next
 review — do not paper over it.
@@ -575,9 +669,19 @@ These are long-lead and never block code. Each needs a named owner and a weekly 
   later. **Open item, owner: reviewer, due before M9 submission.** Before the paper is submitted
   the Ethics section must state the provenance, and we confirm the BU terms or obtain author
   permission. Never redistributed — IDs, labels, weights only.
-- **EmoSign video framing quality** — the `crop_*` framing is unvalidated until M0's face-visibility
-  gate runs.
-- **ASLLRP English absent** — M5 ladder, decide at M5.
+- ~~**EmoSign video framing quality**~~ — closed: the face-visibility gate passed 24/24 sampled
+  clips and the full census found a usable face in 200/200.
+- ~~**ASLLRP English absent**~~ — closed 2026-10-05: translations are in the SignStream XML
+  for 2,403 of 2,407 utterances.
+- **Frame-level use of ASLLRP annotations requires the clip frame rate.** Indices are on a
+  30 fps timeline; 138 of 200 EmoSign clips and about two-thirds of the wider mirror are
+  24 fps. Any new consumer must go through `asllrp.crop_frame_position`.
+- **One open experiment has never been run** and has all its inputs: K4 on a protocol
+  comparable to the published 20.76 / 21.09. (Run on 2026-10-05: C1 on continuous signing —
+  not supported; marker validation against human frames — `brow_raise` validated, the other
+  three not.)
+- **C1 for question marking is untested for want of clips.** The 1,354 crop videos on disk
+  would supply them; they need perception run over them and the frame-rate-aware mapping.
 - **Single-person execution** — `team.md` RACI is superseded; reviewer sign-off is the only gate.
 
 ---

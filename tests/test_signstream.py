@@ -316,3 +316,90 @@ def test_rule_keys_are_unique_and_marker_shaped() -> None:
     # A rule must not be reachable only through a value that no label can produce.
     for marker, (labels, values) in MARKER_RULES.items():
         assert labels or not values, f"{marker} constrains values with no label to match"
+
+
+# --- events onto the clip's own frames ------------------------------------------------
+
+
+def _utt(*events: tuple[int, int, str]) -> object:
+    from seam.data.signstream import NonManual, Utterance
+
+    return Utterance(
+        utterance_id="1",
+        participant="Cory",
+        collection="c",
+        collection_id="0",
+        start_frame=1000,
+        end_frame=1100,
+        non_manuals=[
+            NonManual(label="eye brows", value="raised", start_frame=a, end_frame=b, markers=[m])
+            for a, b, m in events
+        ],
+    )
+
+
+def test_frame_mask_is_frame_for_frame_on_a_30fps_clip() -> None:
+    from seam.data.signstream import marker_frame_mask
+
+    mask = marker_frame_mask(_utt((1010, 1019, "brow_raise")), "brow_raise", 101, 30.0)  # type: ignore[arg-type]
+    assert mask.sum() == 10
+    assert mask[10] and mask[19] and not mask[9] and not mask[20]
+
+
+def test_frame_mask_rescales_on_a_24fps_clip() -> None:
+    """The case that was wrong: 138 of the 200 EmoSign clips are 24 fps.
+
+    Session frames 1050-1060 are 50-60 frames into the utterance, which is clip frames
+    40-48 at 24 fps. A frame-for-frame mapping puts the label on 50-60, where on a
+    two-second clip there is by then nothing left of the event.
+    """
+    from seam.data.signstream import marker_frame_mask
+
+    mask = marker_frame_mask(_utt((1050, 1060, "brow_raise")), "brow_raise", 81, 24.0)  # type: ignore[arg-type]
+    assert mask[40] and mask[48]
+    assert not mask[39] and not mask[49]
+    assert not mask[50:61].any()
+
+
+def test_frame_mask_selects_by_marker_and_clips_to_the_clip() -> None:
+    from seam.data.signstream import marker_frame_mask
+
+    u = _utt((1000, 1004, "brow_raise"), (1095, 1300, "head_shake"), (2000, 2010, "head_shake"))
+    brow = marker_frame_mask(u, "brow_raise", 101, 30.0)  # type: ignore[arg-type]
+    shake = marker_frame_mask(u, "head_shake", 101, 30.0)  # type: ignore[arg-type]
+    assert brow[:5].all() and brow.sum() == 5
+    # Runs past the end: marks the frames that exist. Wholly outside: marks none.
+    assert shake[95:].all() and shake.sum() == 6
+
+
+def test_a_one_frame_event_is_not_rounded_away() -> None:
+    from seam.data.signstream import marker_frame_mask
+
+    mask = marker_frame_mask(_utt((1033, 1033, "blink")), "blink", 81, 24.0)  # type: ignore[arg-type]
+    assert mask.sum() >= 1
+
+
+def test_the_frame_mapping_is_validated_against_an_independent_signal() -> None:
+    """In range is necessary; this is the check that can fail.
+
+    Annotated blink frames against the eyeBlink blendshape share nothing but the video.
+    Each clip-rate group must peak at the scale its frame rate implies, and on the
+    24 fps clips the frame-rate mapping must beat frame-for-frame by a wide margin -
+    0.710 against 0.554 when this was written.
+    """
+    import json
+
+    path = Path(__file__).resolve().parents[1] / "artifacts" / "m3" / "frame_alignment.json"
+    if not path.is_file():
+        pytest.skip("frame_alignment.json not built; run scripts/check_signstream_alignment.py")
+    groups = json.loads(path.read_text())["by_clip_fps"]
+    assert set(groups) == {"24", "30"}
+
+    slow = groups["24"]
+    assert slow["frame_rate_mapping"]["auc"] - slow["frame_for_frame"]["auc"] >= 0.10
+    assert slow["frame_for_frame"]["auc"] < 0.60, "frame-for-frame should be near chance here"
+    assert max(slow["by_scale"], key=slow["by_scale"].get) in ("0.80", "0.82")
+
+    fast = groups["30"]
+    assert max(fast["by_scale"], key=fast["by_scale"].get) == "1.00"
+    assert fast["frame_rate_mapping"]["auc"] >= 0.75

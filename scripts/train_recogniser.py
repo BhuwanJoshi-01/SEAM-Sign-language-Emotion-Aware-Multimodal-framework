@@ -32,22 +32,37 @@ from pathlib import Path
 import numpy as np
 
 from seam.data import asllrp
-from seam.eval.recogniser import fit_logreg, oov_floor, predict, wer
+from seam.eval.recogniser import LAMBDA_GRID, fit_predict, oov_floor, wer
 from seam.features.signpose import Part, feature_dim, token_feature
 from seam.paths import default_data_root
+from seam.provenance import KEY as PROVENANCE_KEY
+from seam.provenance import stamp
 from seam.seed import set_seed
 
 REPO = Path(__file__).resolve().parents[1]
 OUT = REPO / "artifacts" / "m5a" / "recogniser.json"
 
 
-def load_landmarks(root: Path) -> dict[str, np.ndarray]:
+def load_landmarks(root: Path) -> dict[str, tuple[np.ndarray, float]]:
+    """Landmarks and the clip's own frame rate, per utterance.
+
+    The frame rate is not optional: token bounds are on a 30 fps session timeline and
+    138 of the 200 clips are 24 fps. A clip whose sidecar does not state its rate is
+    skipped rather than assumed to be 30 fps, which is the assumption that misaligned
+    every 24 fps clip in the first M5a run.
+    """
     lm = root / "emosign" / "landmarks"
-    out: dict[str, np.ndarray] = {}
+    out: dict[str, tuple[np.ndarray, float]] = {}
     for p in sorted(lm.glob("*.npz")):
         uid = p.stem
+        side = p.with_suffix(".json")
+        if not side.is_file():
+            continue
+        fps = json.loads(side.read_text()).get("native_fps")
+        if not fps:
+            continue
         with np.load(p) as d:
-            out[uid] = np.asarray(d["landmarks"], dtype=np.float32)
+            out[uid] = (np.asarray(d["landmarks"], dtype=np.float32), float(fps))
     return out
 
 
@@ -68,15 +83,16 @@ def build(
     drops: collections.Counter[str] = collections.Counter()
 
     for t in toks:
-        lm = lms.get(t.utterance_id)
-        if lm is None:
+        got = lms.get(t.utterance_id)
+        if got is None:
             drops["no_landmarks"] += 1
             continue
-        start = asllrp.crop_frame_index(t, t.start_frame)
-        end = asllrp.crop_frame_index(t, t.end_frame)
-        if start is None or end is None:
+        lm, fps = got
+        span = asllrp.crop_frame_range(t, clip_fps=fps)
+        if span is None:
             drops["before_utterance"] += 1
             continue
+        start, end = span
         if end > lm.shape[0]:
             drops["overshoots_crop"] += 1
             continue
@@ -109,9 +125,7 @@ def evaluate(X: np.ndarray, y: np.ndarray, sg: np.ndarray, use_duration: bool, s
         if not use_duration:
             Xtr, Xte = Xtr[:, :-1], Xte[:, :-1]
         set_seed(seed)
-        W = fit_logreg(Xtr, np.asarray(y)[tr], classes, lam=1.0)
-
-        hyp = predict(W, classes, Xte)
+        hyp, fit = fit_predict(Xtr, np.asarray(y)[tr], sg[tr], Xte)
         ref = list(np.asarray(y)[te])
         # Most-frequent baseline on the same split.
         top = train_glosses.most_common(1)[0][0]
@@ -145,9 +159,18 @@ def evaluate(X: np.ndarray, y: np.ndarray, sg: np.ndarray, use_duration: bool, s
                 "wer_closed_vocab": round(closed, 4),
                 "top1": round(float(np.mean([a == b for a, b in zip(ref, hyp, strict=True)])), 4),
                 "wer_most_frequent_baseline": round(wer(ref, base), 4),
+                "lambda": fit["lambda"],
+                "n_distinct_predictions": fit["n_distinct_predictions"],
+                "constant_predictor": fit["constant"],
             }
         )
-    return {"folds": rows, "signers": signers}
+    return {
+        "folds": rows,
+        "signers": signers,
+        # A model that says one thing cannot be scored against a most-frequent
+        # baseline: it *is* one. Reported so its WER is not read as a measurement.
+        "degenerate": all(r["constant_predictor"] for r in rows),
+    }
 
 
 def shuffled_control(X: np.ndarray, y: np.ndarray, sg: np.ndarray, seed: int) -> dict:
@@ -195,18 +218,24 @@ def main() -> int:
             "hapax_types": sum(1 for v in vocab.values() if v == 1),
             "dropped": drops,
             "seed": args.seed,
+            "frame_mapping": asllrp.MAPPING,
+            "features": "z-scored with training-split statistics",
+            "lambda_grid": list(LAMBDA_GRID),
+            "lambda_selection": "leave-one-signer-out inside the training signers",
         },
         "real": real,
         "real_without_duration": no_dur,
         "shuffled_label_control": ctrl,
         "caveat": (
-            "Smoke experiment on 1,738 tokens over 547 gloss types. The open-vocabulary "
-            "WER is dominated by the OOV floor reported per fold, not by the model; read "
-            "wer_closed_vocab and the shuffled-label control before drawing any "
-            "conclusion about pose features. Duration is excluded in one arm because clip "
-            "duration correlates with syntactic class on this corpus."
+            f"Smoke experiment on {len(y)} tokens over {len(vocab)} gloss types. The "
+            "open-vocabulary WER is dominated by the OOV floor reported per fold, not by "
+            "the model; read wer_closed_vocab, n_distinct_predictions and the "
+            "shuffled-label control before drawing any conclusion about pose features. "
+            "Duration is excluded in one arm because clip duration correlates with "
+            "syntactic class on this corpus."
         ),
     }
+    out[PROVENANCE_KEY] = stamp(__file__)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(out, indent=2) + "\n")
 
@@ -223,6 +252,16 @@ def main() -> int:
         f"most-frequent baseline {mean('wer_most_frequent_baseline'):.3f}"
     )
     print(f"shuffled-label control WER {mean('wer', ctrl):.3f}")
+    print(
+        f"closed-vocab WER: real {mean('wer_closed_vocab'):.3f}, "
+        f"shuffled {mean('wer_closed_vocab', ctrl):.3f}"
+    )
+    for name, arm in (("real", real), ("shuffled", ctrl)):
+        d = [f["n_distinct_predictions"] for f in arm["folds"]]  # type: ignore[index]
+        lams = [f["lambda"] for f in arm["folds"]]  # type: ignore[index]
+        print(f"{name}: distinct glosses predicted per fold {d}, lambda per fold {lams}")
+    if real["degenerate"]:
+        print("DEGENERATE: the model predicts one gloss in every fold; its WER is the baseline's")
     print(f"without duration: {mean('wer', no_dur):.3f}")
     print(f"\nwrote {OUT.relative_to(REPO)}")
     return 0

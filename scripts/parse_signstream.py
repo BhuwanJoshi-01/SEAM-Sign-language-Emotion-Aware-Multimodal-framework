@@ -21,6 +21,8 @@ from pathlib import Path
 
 from seam.data.signstream import parse_directory
 from seam.paths import default_data_root
+from seam.provenance import KEY as PROVENANCE_KEY
+from seam.provenance import stamp
 
 REPO = Path(__file__).resolve().parents[1]
 OUT = REPO / "artifacts" / "m3" / "signstream_report.json"
@@ -71,6 +73,14 @@ def main() -> int:
             "hapax_types": sum(1 for v in vocab.values() if v == 1),
             "top_20": vocab.most_common(20),
         },
+        # The mirror carries no English, and the plan recorded ASLLRP English as absent.
+        # The XML has it: counted here so that statement has a number behind it.
+        "translations": {
+            "utterances_with_an_english_translation": sum(
+                1 for u in utterances if u.translation.strip()
+            ),
+            "utterances": len(utterances),
+        },
         "sample_utterance": None,
     }
     if utterances:
@@ -95,6 +105,7 @@ def main() -> int:
             ],
         }
 
+    out[PROVENANCE_KEY] = stamp(__file__)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(out, indent=2) + "\n")
 

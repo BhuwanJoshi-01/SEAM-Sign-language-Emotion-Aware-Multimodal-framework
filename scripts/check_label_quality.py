@@ -27,6 +27,8 @@ from seam.data.signstream import parse_directory
 from seam.eval.labels import cohen_kappa
 from seam.features import syntactic as SY
 from seam.paths import default_data_root
+from seam.provenance import KEY as PROVENANCE_KEY
+from seam.provenance import stamp
 
 REPO = Path(__file__).resolve().parents[1]
 OUT = REPO / "artifacts" / "m3" / "label_agreement.json"
@@ -185,6 +187,7 @@ def main() -> int:
             "the target it defines is not the construct the name denotes."
         ),
     }
+    out[PROVENANCE_KEY] = stamp(__file__)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(out, indent=2) + "\n")
     print(f"\nwrote {OUT.relative_to(REPO)}")

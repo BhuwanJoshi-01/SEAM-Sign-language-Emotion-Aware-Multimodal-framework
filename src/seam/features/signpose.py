@@ -180,8 +180,8 @@ def token_feature(
     """Summarise one gloss token's frames into a fixed-length vector.
 
     `start`/`end` are **1-based inclusive crop-frame indices**, as returned by
-    `asllrp.crop_frame_index`. Out-of-range positions are a real case (about 10% of
-    tokens overshoot their crop) and are reported by raising rather than clamped:
+    `asllrp.crop_frame_range`, which rescales the 30 fps session timeline to the clip's
+    own frame rate. Out-of-range positions are reported by raising rather than clamped:
     clamping would silently label the wrong frames, which is the failure this whole
     module exists downstream of.
 

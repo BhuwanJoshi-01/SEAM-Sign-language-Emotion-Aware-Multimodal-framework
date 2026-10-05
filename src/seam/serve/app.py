@@ -18,10 +18,10 @@ requirement and not an implementation detail:
 the same code the research uses (`seam.features.markers`), and it attaches the
 linguistic context for the utterance when the client supplies an ASLLRP utterance id —
 that part is a real annotation, not a model output. It does **not** return affect
-predictions, because M4 measured that model at balanced accuracy 0.497 against a 0.5
-reference: it does not learn, so shipping its output in a demo would be presenting a
-number that carries no information. The reason is returned in the payload so the UI can
-say so rather than showing an empty panel.
+predictions, because M4 measured that model's affect head at balanced accuracy 0.481 to
+0.507 over three seeds against a 0.5 reference: it does not learn, so shipping its output
+in a demo would be presenting a number that carries no information. The reason is
+returned in the payload so the UI can say so rather than showing an empty panel.
 """
 
 from __future__ import annotations
@@ -48,14 +48,25 @@ POSE_DIM = 9
 #: meaningless and the magnitude is noise.
 MIN_FRAMES = 8
 
+#: Balanced accuracy of the M4 affect head, lowest and highest of three seeds, from
+#: ``artifacts/m4/factorizer_multilabel_ablation.json`` (variant ``full``). Quoted in the
+#: refusal below; ``tests/test_serve.py`` fails if it drifts from that artifact. The
+#: figure quoted here until 2026-10-05 was 0.497, from a run made before the yaw fix.
+M4_AFFECT_BALANCED_ACCURACY = (0.481, 0.507)
+
+#: Mean WER of the M5a gloss recogniser and of its most-frequent-gloss baseline, from
+#: ``artifacts/m5a/recogniser.json``; ``tests/test_serve.py`` fails if they drift from it.
+M5A_WER_AND_BASELINE = (0.920, 0.920)
+
 #: The honest answer when a caller asks for a prediction this build cannot support.
 NOT_SUPPORTED = {
     "supported": False,
     "reason": (
-        "M4's factorized encoder was measured at 0.497 balanced accuracy against a 0.5 "
-        "reference, so it does not learn either task. Its output is withheld rather than "
-        "displayed. See plan.md (M4 GATE NOT MET) and paper/EXPERIMENT_LOG.md run "
-        "m4-factorizer-002."
+        "M4's factorized encoder was measured at "
+        f"{M4_AFFECT_BALANCED_ACCURACY[0]:.3f} to {M4_AFFECT_BALANCED_ACCURACY[1]:.3f} "
+        "balanced accuracy on affect over three seeds, against a 0.5 reference, so it "
+        "does not learn the task. Its output is withheld rather than displayed. See "
+        "plan.md (M4, refuted) and the 2026-10-05 entry of paper/EXPERIMENT_LOG.md."
     ),
     "instead": "marker magnitudes, which are measured signal, and the linguistic annotation",
 }
@@ -259,10 +270,11 @@ def analyse(payload: dict[str, Any]) -> dict[str, Any]:
     out["recognition"] = {
         "supported": False,
         "reason": (
-            "M5a needs the isolated sign clips from the ASLLRP 'Sign video filename' "
-            "column. The frame indices in the token table index long session recordings, "
-            "not the clips we hold, so 99.3% of overlapping tokens are misaligned and no "
-            "recogniser has been trained on them."
+            "M5a's gloss recogniser does not beat always predicting the most frequent "
+            f"gloss: WER {M5A_WER_AND_BASELINE[0]:.3f} against a baseline of "
+            f"{M5A_WER_AND_BASELINE[1]:.3f}, signer-disjoint, on 200 utterances with about "
+            "three tokens per gloss. Its output is withheld rather than displayed. See the "
+            "2026-10-05 entries of paper/EXPERIMENT_LOG.md."
         ),
     }
     out["server_ms"] = round((time.perf_counter() - t0) * 1000, 2)

@@ -127,6 +127,40 @@ _SIZE_TOLERANCE = 0.02
 _SIZE_FLOOR_BYTES = 50_000_000
 
 
+@dataclass(frozen=True, slots=True)
+class _WlaslIndex:
+    """What `wlasl.index_on_disk` binds, summarised for the gate."""
+
+    keys: int
+    usable: int
+    substituted: int
+    lost: int
+    #: Root-relative paths the index binds to a real container. A file outside this set
+    #: is either never opened or already counted in `lost`.
+    read: frozenset[str]
+
+
+def _wlasl_index(resource: Resource, manifest: Manifest) -> _WlaslIndex | None:
+    """Index the WLASL tree the manifest was built over, or None for any other resource."""
+    if resource.id != "wlasl_local":
+        return None
+    from seam.data import wlasl
+
+    root = Path(manifest.root)
+    substitutions: dict[str, str] = {}
+    index = wlasl.index_on_disk(root, substitutions)
+    if not index:
+        return None
+    lost = {path for path in index.values() if wlasl.is_placeholder(path)}
+    return _WlaslIndex(
+        keys=len(index),
+        usable=len(index) - len(lost),
+        substituted=len(substitutions),
+        lost=len(lost),
+        read=frozenset(str(p.relative_to(root)) for p in index.values() if p not in lost),
+    )
+
+
 def _state_for(resource: Resource, manifest: Manifest | None) -> tuple[State, str, str]:
     """Return ``(state, integrity_summary, blocker)`` for one resource."""
     if not resource.usable:
@@ -167,6 +201,42 @@ def _state_for(resource: Resource, manifest: Manifest | None) -> tuple[State, st
         # a fact and its negation. A gate that contradicts itself in its own output is
         # worse than one that is vague, because a reviewer cannot tell which half to
         # believe.
+        owner = OWNERS.get(resource.id, "implementer")
+        index = _wlasl_index(resource, manifest)
+        if index is not None:
+            # A sampled file that fails to decode is only a defect if something would
+            # read it. 88 of WLASL's 92 undecodable files are HTML error pages whose
+            # decodable sibling `wlasl.index_on_disk` already binds instead, so the old
+            # "a repair pass is required" blocker asked for work the indexer performs on
+            # every run. What is really wrong is counted from the index, over every file.
+            unread = {
+                f.relpath
+                for f in manifest.files
+                if f.status not in ("ok", "unchecked") and f.relpath not in index.read
+            }
+            bad -= len(unread)
+            good = checked - len(unread) - bad
+            considered = checked - len(unread)
+            detail = (
+                f"{index.usable}/{index.keys} indexed clips usable; {index.substituted} HTML "
+                f"placeholders substituted by a decodable sibling, {index.lost} lost; "
+                f"{good}/{considered} sampled in-use files decode; {total} files total"
+            )
+            if bad == 0 and index.lost == 0:
+                return State.REUSED if resource.reuse_path else State.OK, detail, ""
+            if bad == 0:
+                return (
+                    State.PARTIAL,
+                    detail,
+                    f"{index.lost} of {index.keys} clips are HTML error pages with no decodable "
+                    f"sibling; no repair can recover them, only a re-download. The other "
+                    f"{index.usable} are usable as they are (owner: {owner})",
+                )
+            return (
+                State.PARTIAL,
+                detail,
+                f"{bad} of {considered} sampled in-use files do not decode (owner: {owner})",
+            )
         if bad:
             good = checked - bad
             return (

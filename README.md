@@ -49,7 +49,7 @@ make demo-avatar      # video -> SMPLer-X -> SMPL-X mesh -> animated .glb + .mp4
 
 make readiness        # the M0 gate: every dataset, its real state, and a named owner
 make wlasl-index      # WLASL on-disk index, incl. HTML-placeholder substitutions
-make fetch-how2sign   # 31 How2Sign pose shards, 14.1 GB, resumable
+make fetch-how2sign   # How2Sign landmarks + English, 991 shards, 4.8 GB, resumable
 ```
 
 `/avatar` loads the animated GLB in three.js. **three.js is vendored** under
@@ -111,13 +111,13 @@ what survives if everything after it is cut. See `plan.md`.
 
 | Milestone | Gate | State | Evidence |
 |---|---|---|---|
-| **M0** data spine | readiness table · 200/200 clips · face gate · tests green | **REGRESSED to OPEN** | `make readiness` reports **6/10 resources**; see the note below |
-| **M1** confound audit | measured FER bias, 2+ models, CIs | **met — hypothesis REFUTED** | 2,565 clips, 3 FER models, −0.008…+0.002, MDE 0.003–0.008 |
+| **M0** data spine | readiness table · 200/200 clips · face gate · tests green | **OPEN on two reviewer decisions** | `make readiness` reports **7/10 resources**; ASL Citizen and NSL terms outstanding, see the note below |
+| **M1** confound audit | measured FER bias, 2+ models, CIs | **met — hypothesis NOT SUPPORTED, measured twice** | Isolated signs: 2,565 WLASL clips, 3 FER models, −0.008…+0.002, MDE 0.003–0.008 (head-shake rows withdrawn on re-run). Continuous signing, human frame-level markers, pre-registered rule (2026-10-05): no marker meets it; brow furrow leans the other way in all three models |
 | **M2** efficiency | 3050 p95 + peak VRAM, CI-enforced | **met, K6 marginal** | 73.2 ms p95 · 186 MB for 6 live models · 20.4 FPS (repeats 19.7–20.4) |
-| **M3** `L` labels | marker labels with provenance + cue correlation | **met** | 43,038 human non-manual annotations, 200/200 joined; negation ↔ head-shake r=0.554 |
-| **M4** factorized encoder ★ | cross-pred AUC ≤0.60, no affect loss, positive control | **REFUTED — contribution WITHDRAWN** | worst-fold cross-AUC 0.7276 (heuristic `y_L`) → 0.7031 (human `y_L`), vs ≤0.60. Signer control 0.973 passes, so the failure is the model's |
-| **M5a** gloss recognition | WER beats its baseline | **negative** | WER 0.916 = most-frequent baseline 0.916 (shuffled 0.911) |
-| **M5b** translation | How2Sign BLEU-4 at ≤80M params | **not started** | `how2sign_mediapipe_pose` not fetched |
+| **M3** `L` labels | marker labels with provenance + cue correlation | **met on human labels; one visual marker validated** | 43,038 human non-manual annotations, 200/200 joined. Against human frame labels (leave-one-signer-out): `brow_raise` validated at within-clip AUC 0.82–0.88; `brow_furrow` not (0.60); head shake and nod unreadable even with supervision. The earlier negation ↔ head-shake r=0.554 was a yaw bug and is **withdrawn** |
+| **M4** factorized encoder ★ | cross-pred AUC ≤0.60, no affect loss, positive control | **REFUTED — contribution WITHDRAWN** | re-run 2026-10-05 on corrected code: worst-fold cross-AUC 0.694 (heuristic `y_L`) and 0.726 (human `y_L`), vs ≤0.60; 0.710 ± 0.014 over three seeds. Signer control 0.98 passes, so the failure is the model's |
+| **M5a** gloss recognition | WER beats its baseline | **not met** | WER 0.920 vs most-frequent baseline 0.920, on correctly aligned frames with a model that passes a positive control. The first run (0.916 = 0.916) was a constant predictor on misaligned frames and is superseded |
+| **M5b** translation | How2Sign BLEU-4 at ≤80M params | **not started; data on disk** | 35,176 sentences with English, 991 landmark shards (`martinctl/how2sign-asl-landmarks`); `src/seam/translate/` is empty |
 | **M6** conditioned generation | style acc ≥80% @ BERTScore ≥0.90 | **not started** | — |
 | **M7** avatar + live demo | preference ≥60%, browser smoke test | **avatar working; study blocked on 0 raters** | animated skinned glTF, verified against a real glTF runtime |
 | **M8** cross-lingual | zero-shot Top-1 vs chance | **not started** | NSL provenance/terms not established |
@@ -130,14 +130,28 @@ instruments**: two refuted hypotheses, a measured result on how unreliable heuri
 pseudo-labels are in this domain, a reusable adversarial/probe harness that passes its own
 positive control, and a working SMPL-X avatar system. See `PROJECT_BREAKDOWN.md`.
 
-**M0 closed 2026-09-26, and has since regressed** — but for one reason only, and it was
-three false negatives in the gate rather than lost data:
+**Review of 2026-10-05.** Every cited result was re-run on corrected code
+and the verdicts above did not change, but several finer claims were withdrawn and four
+instrument defects were removed: results computed before the yaw fix; an M4 baseline trained
+unlike the model it was compared with, and M4 checkpoints chosen by a softmax over a
+multi-label head; ASLLRP frame indices read at 30 fps on clips that are 24 fps; and an M5a
+classifier that could only predict one gloss. A result can no longer silently outlive the
+code that produced it (`tests/test_artifact_staleness.py`). **C1 was then run where M1 said it had
+to be** — continuous signing, human frame-level markers, a rule fixed in advance — and is
+not supported there either. The visual markers were then checked against the
+human frame labels for the first time: brow raise holds, the other three do not. **One
+experiment the project needs has still never been run:** K4 on a protocol comparable to the
+published baselines. See the 2026-10-05 entries in
+`paper/EXPERIMENT_LOG.md`.
+
+**M0 closed 2026-09-26 and was later reported as regressed.** That was three false
+negatives in the gate rather than lost data, all since fixed:
 
 | resource | reported before | actually on disk |
 |---|---|---|
 | `wlasl_local` | "reuse path absent" | **3,863 clips, 7.43 GB** at the very path named |
 | `rafdb_mediapipe` | "not fetched yet" | **2.72 GB, 6/6 shards readable** (14,329 train rows) |
-| `how2sign_mediapipe_pose` | "not fetched yet" | genuinely absent; 31 shards, 14.12 GB, ungated — `make fetch-how2sign` |
+| `how2sign_mediapipe_pose` | "not fetched yet" | now fetched: 991 shards, 4.8 GB. The repo `plan.md` v2 originally named holds JPEGs and a constant caption, so a different one is used — see `scripts/fetch_how2sign.py` |
 
 The dataset spine still resolves: the EmoSign join is **200/200** and the face-visibility gate
 passed **24/24** sampled clips (face in 94–100% of frames, median 30 of 52 blendshapes with
@@ -160,8 +174,9 @@ section owes the reader an answer on provenance; owner is the reviewer. A parall
 request runs as the clean fallback for the linguistic non-manual annotations, which the mirror
 does **not** contain.
 
-WLASL is local (3,863 clips / 668 glosses / 7.4 GB) but needs a repair pass: a 300-file sample
-found 2 undecodable, truncated `.part` containers. M1 repairs before extracting.
+WLASL is local (3,863 files / 668 glosses / 7.4 GB) and needs no repair pass: **3,771 of 3,775
+indexed clips are usable**, 88 of them through an automatic substitution, and 4 are lost. `make
+readiness` reports exactly this.
 
 ## Ethics summary
 

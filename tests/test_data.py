@@ -346,6 +346,67 @@ def test_video_sample_reports_how_much_was_actually_decoded(tmp_path: Path) -> N
     assert "undecodable of 2" not in row.integrity
 
 
+def _real_mp4(path: Path) -> Path:
+    import subprocess
+
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=duration=1:size=128x128:rate=24",
+            "-pix_fmt",
+            "yuv420p",
+            "-f",
+            "mp4",
+            str(path),
+        ],
+        check=True,
+        timeout=120,
+        stdin=subprocess.DEVNULL,
+    )
+    return path
+
+
+def test_a_substituted_placeholder_does_not_demand_a_repair_pass(tmp_path: Path) -> None:
+    """The gate must not ask for work the indexer already does.
+
+    It read "2 of 300 sampled files do not decode; a repair pass is required before
+    extraction" for a corpus where `index_on_disk` binds the decodable sibling of every
+    such file but four. The sampled failures were real and irrelevant: nothing reads them.
+    """
+    import shutil
+
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("ffmpeg unavailable")
+
+    root = tmp_path / "wlasl"
+    (root / "about").mkdir(parents=True)
+    _html_mp4(root / "about" / "0.mp4")
+    _real_mp4(root / "about" / "0_yt.mp4.part.mp4")
+
+    row = {r.resource_id: r for r in readiness_mod.build(_root_where(root))}["wlasl_local"]
+    assert row.state is readiness_mod.State.REUSED, (row.integrity, row.blocker)
+    assert row.blocker == ""
+    assert "1/1 indexed clips usable" in row.integrity
+    assert "1 HTML placeholders substituted" in row.integrity
+
+    # A placeholder with no sibling is the one thing that is genuinely wrong, and it is
+    # counted over the whole index rather than left to whether the sample happened to hit it.
+    (root / "corn").mkdir()
+    _html_mp4(root / "corn" / "0.mp4")
+    row = {r.resource_id: r for r in readiness_mod.build(_root_where(root))}["wlasl_local"]
+    assert row.state is readiness_mod.State.PARTIAL
+    assert "1/2 indexed clips usable" in row.integrity
+    assert "1 lost" in row.integrity
+    assert "repair pass is required" not in row.blocker
+    assert "re-download" in row.blocker
+
+
 def test_wlasl_is_configured_for_sampled_video_verification() -> None:
     from seam.data.sources import Verify
 

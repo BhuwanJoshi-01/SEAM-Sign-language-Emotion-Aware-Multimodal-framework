@@ -1,5 +1,12 @@
 # SEAM — Contributor Guide
 
+> **State on 2026-10-05, so you do not redo finished work.** Tasks 1 (SMPL-X weights),
+> 2 (M4 decision), 3 (SignStream XML) and 4 (the DWPose download, which turned out to hold
+> video and no pose) are **done**; their sections below are kept as the record of how.
+> What is still open for a person: **task 0** (the password rotation has no confirmation
+> recorded) and **task 5** (the preference study, which now has stimuli and needs only
+> raters). `report.md` holds the per-task status and `plan.md` the project state.
+
 **Read this first.** These are the tasks that cannot be completed by the code alone.
 Everything here is deliberately explicit: each step says what to type, what you should
 see, and what to send back. If a step does not produce the stated output, **stop and

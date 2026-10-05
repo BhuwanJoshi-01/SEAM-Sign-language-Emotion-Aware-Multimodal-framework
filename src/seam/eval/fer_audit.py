@@ -31,7 +31,7 @@ manufacture a shift out of the matching itself.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -86,9 +86,20 @@ class Window:
     probs: list[float] | None
     #: True when the FER read-out for this window is usable at all
     scored: bool
+    #: What each entry of ``markers`` refers to. The heuristic visual markers by default;
+    #: the human-annotated ones when the windows were built from SignStream events.
+    names: tuple[str, ...] = M.MARKERS
+    #: Markers this window is neither clearly bearing nor clearly free of - a human
+    #: event that covers part of the window. Such a window is on neither side of the
+    #: contrast for that marker. Always empty for heuristic markers.
+    partial: tuple[str, ...] = ()
 
     def marker(self, name: str) -> bool:
-        return bool(self.markers[M.MARKERS.index(name)])
+        return bool(self.markers[self.names.index(name)])
+
+    def free_of(self, name: str) -> bool:
+        """Usable as the marker-free side of a pair: not bearing it, and not ambiguous."""
+        return not self.marker(name) and name not in self.partial
 
     def prob_vector(self) -> np.ndarray:
         """The window's FER distribution, or zeros when it is not scorable.
@@ -208,12 +219,25 @@ def build_windows(
     face_probs: np.ndarray,
     *,
     thresholds: M.MarkerThresholds = M.DEFAULT_THRESHOLDS,
+    window: int = WINDOW,
+    stride: int = STRIDE,
+    frame_markers: Mapping[str, np.ndarray] | None = None,
+    bearing_min: float = 0.5,
 ) -> list[Window]:
     """Turn one clip's shard plus its FER probabilities into analysis windows.
 
     The shard is resampled to ``TARGET_FPS`` first, because window length is a
     property of the analysis rate: a 64-frame window is 2.7 s at 24 fps and 5.3 s
     at 12 fps, and mixing the two would compare different spans of signing.
+
+    ``frame_markers`` replaces the heuristic visual markers with per-frame boolean
+    tracks on the clip's *native* frames - in practice the human SignStream
+    annotations, already mapped to the clip's frame rate. A window then bears a marker
+    when the track covers at least ``bearing_min`` of it, is free of the marker when the
+    track does not touch it at all, and is ``partial`` - on neither side of the contrast
+    - in between. Everything else about the window (resampling, normalisation, prosody,
+    the scorability rule) is the same code, so a result on continuous signing and one on
+    isolated signs differ in the marker source and the window length and nothing else.
     """
     landmarks = arrays["landmarks"].astype(np.float32)
     blendshapes = arrays["blendshapes"].astype(np.float64)
@@ -236,8 +260,19 @@ def build_windows(
         else np.zeros((len(idx), len(fer.EMOSIGN_LABELS)), np.float32)
     )
 
+    names: tuple[str, ...] = M.MARKERS
+    tracks: dict[str, np.ndarray] = {}
+    if frame_markers is not None:
+        names = tuple(frame_markers)
+        for name, track in frame_markers.items():
+            track = np.asarray(track, dtype=bool)
+            if len(track) != n:
+                raise ValueError(
+                    f"{clip_key}: marker track {name!r} has {len(track)} frames, the clip has {n}"
+                )
+            tracks[name] = track[idx]
     sig = M.signals(blendshapes, rotation, fps=TARGET_FPS, thresholds=thresholds)
-    edges = N.window_indices(len(idx), WINDOW, STRIDE)
+    edges = N.window_indices(len(idx), window, stride)
     if len(edges) == 0:
         # A clip shorter than one window is its own window. For an isolated sign
         # that is the natural unit anyway, and dropping the clip would bias the
@@ -247,7 +282,7 @@ def build_windows(
 
     windows: list[Window] = []
     for i, start in enumerate(edges):
-        sl = slice(int(start), min(int(start) + WINDOW, len(idx)))
+        sl = slice(int(start), min(int(start) + window, len(idx)))
         width = sl.stop - sl.start
         chunk = landmarks[sl]
         # The centroid statistic needs hands, not a filled-in guess, so the
@@ -265,18 +300,25 @@ def build_windows(
         # frames is a measurement of the other 80%.
         scored = face_frac >= 0.5
         row = wp.mean(axis=0) if scored else None
+        if frame_markers is None:
+            fired = [bool(x) for x in M.window_fired(sig, edges[i : i + 1], window, thresholds)[0]]
+            partial: tuple[str, ...] = ()
+        else:
+            cover = {name: float(tracks[name][sl].mean()) for name in names}
+            fired = [cover[name] >= bearing_min for name in names]
+            partial = tuple(name for name in names if 0.0 < cover[name] < bearing_min)
         windows.append(
             Window(
                 clip=clip_key,
                 index=i,
                 start=int(start),
                 n_frames=width,
-                markers=[
-                    bool(x) for x in M.window_fired(sig, edges[i : i + 1], WINDOW, thresholds)[0]
-                ],
+                markers=fired,
                 prosody=[float(v) for v in pv],
                 probs=None if row is None else [float(v) for v in row],
                 scored=scored and hands_ok,
+                names=names,
+                partial=partial,
             )
         )
     return windows
@@ -331,7 +373,7 @@ def match_windows(
     pairs: list[tuple[Window, Window]] = []
     for group in by_clip.values():
         marked = [w for w in group if w.marker(marker)]
-        clean = [w for w in group if not w.marker(marker)]
+        clean = [w for w in group if w.free_of(marker)]
         if not marked or not clean:
             continue
         amp = np.array([w.prosody[amp_i] for w in clean])[None, :]
@@ -450,9 +492,11 @@ def marker_emotion_table(windows: Iterable[Window]) -> dict[str, dict[str, float
     is the confound stated in numbers.
     """
     out: dict[str, dict[str, float]] = {}
-    for marker in M.MARKERS:
+    windows = list(windows)
+    names = windows[0].names if windows else M.MARKERS
+    for marker in names:
         on = [w for w in windows if w.scored and w.marker(marker)]
-        off = [w for w in windows if w.scored and not w.marker(marker)]
+        off = [w for w in windows if w.scored and w.free_of(marker)]
         if not on or not off:
             continue
         out[marker] = {

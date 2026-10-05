@@ -1597,3 +1597,509 @@ trusted, and that audit has not been done.
   re-run and unchanged.
 
 464 tests pass (was 484 with 3 fewer tests in the new head-path set).
+
+---
+
+## 2026-10-05 — Three cited results were computed before the head-path fixes, and M4 had two more instrument defects
+
+**Why this entry exists.** The yaw decomposition was corrected on 2026-10-04 and that entry
+ended by saying the audit of everything downstream "has not been done". This is that audit.
+Three artifacts the log, the plan and the README were still citing had been written by the
+broken code, and re-running M4 exposed two further defects in its own instrument. Every
+result below was re-run; the overtaken files were moved to `artifacts/superseded/`, not
+deleted, because earlier entries cite their numbers.
+
+| artifact | written | what it depended on | current file |
+|---|---|---|---|
+| M3 marker labels | 2026-09-28 | `head_shake` evidence, via the yaw column | `artifacts/audit/marker_labels.json` |
+| M1 confound audit | 2026-09-27 | `head_shake` and `head_nod` windows, before *both* head-path changes | `artifacts/audit/confound_audit.json` |
+| M4 factorizer, heuristic and human labels | 2026-10-01 | each window's frame is chosen by `brow_raise + head_shake` evidence | `artifacts/m4/factorizer_multilabel.json`, `factorizer_human_labels.json` |
+
+### M3 — the negation / head-shake association does not exist on the corrected signal
+
+`scripts/label_markers.py`, same 200 clips, same labels, same permutation seed.
+
+| pairing | recorded 2026-09-28 | re-run |
+|---|---|---|
+| interrogative ↔ brow_raise | r = −0.084, p = 0.621 | identical |
+| interrogative ↔ brow_furrow | r = +0.199, p = 0.244 | identical |
+| negation ↔ head_shake | r = **+0.554**, p = 0.011 | **not interpretable** — magnitude is zero on 90% of clips |
+| `head_shake` clip prevalence | 0.785 | 0.100 |
+
+The two brow rows reproduce to the last digit, which is the control: they never read the
+rotation. The head row is now withheld rather than reported, by the same blindness rule
+`scripts/cue_grounding.py` uses. The two scripts previously disagreed about this channel -
+this one printed a correlation and a p-value for it while the grounding report called it
+blind - so the rule is now shared. For the record, the statistic that is being withheld is
+of the opposite sign to the withdrawn one.
+
+**The human annotations say what the instrument is missing.** The SignStream annotators mark
+a head shake on 89 of the 200 clips and a head nod on 79; the visual markers fire on 20 and
+34. So this is not a rare event that a small corpus cannot power. It is a common event that
+the detector does not see, and that is a statement about the detector. It also means the
+duration-controlled M3 analysis, which until now existed only as prose in this log and was
+carried as a provenance exemption, is finally persisted - in the form of a withheld row.
+
+### M1 — the brow and mouth nulls stand; the head rows are withdrawn
+
+`scripts/run_confound_audit.py --stages audit`, from the cached per-frame FER probabilities,
+so only the marker side changed. 4,244 windows, 4,168 scorable, as before.
+
+| marker | pairs / clips, 2026-09-27 | pairs / clips, re-run | verdict |
+|---|---|---|---|
+| brow_raise | 251 / 202 | 251 / 202 | unchanged in all three models |
+| brow_furrow | 268 / 232 | 268 / 232 | unchanged |
+| mouth_morpheme | 369 / 329 | 369 / 329 | unchanged |
+| mouth_positive (control) | 289 / 249 | 289 / 249 | unchanged |
+| head_shake | 251 / 210 | **1 / 1** | too few clips; no estimate |
+| head_nod | 13 / 9 | **1 / 1** | too few clips; no estimate |
+
+Four markers identical, two collapsed: the same signature as the M3 re-run. `head_nod` moved
+as well, although its pitch formula was never wrong, because this audit also predates the
+2026-09-28 oscillation-threshold fix - a second change that was never propagated to it.
+
+**What C1's refutation now covers.** Brow raise, brow furrow and mouth morphemes, on isolated
+dictionary signs, with the MDEs already recorded. It no longer covers head shake: the M1
+entry reported two head-shake rows as nulls, and they were nulls measured on an offset. And
+it still does not cover continuous signing, which M1 itself named as the real test and which
+has not been run, although the inputs for it - three FER models and human frame-aligned
+markers on the same 200 utterances - have existed since 2026-10-01.
+
+### M4 — the gate still fails; several finer claims do not survive
+
+Three generations, so that each change can be read on its own:
+
+| run (seed 0, `full`) | worst-fold cross-AUC, heuristic `y_L` | human `y_L` | cross A→L | signer control |
+|---|---|---|---|---|
+| A. as logged 2026-10-01 | 0.7276 | 0.7031 | 0.5048 | 0.9729 |
+| B. yaw fix only | 0.7183 | 0.7017 | 0.5753 | 0.9789 |
+| C. B + shared losses and checkpoint criterion (**current**) | **0.6944** | **0.7264** | 0.5891 | 0.9812 |
+
+Target ≤ 0.60, control ≥ 0.80. **The gate fails in every row and the control passes in every
+row**, so the 2026-10-01 decision to report M4 as a refuted hypothesis is unchanged. B is kept
+at `artifacts/superseded/yawfix_softmax_selection/` because it isolates the yaw fix.
+
+**Two defects found by reading the re-run instead of only comparing its headline.**
+
+1. **The entangled baseline was not trained like the model it is compared with.** Its
+   docstring said the only difference was the absence of separation pressure. It used
+   unweighted cross-entropy and unweighted BCE, while the factorized model had class weights
+   on the linguistic head and a per-batch `pos_weight` on the affect head. With a quarter of
+   affect labels positive, the unweighted baseline predicted almost no label at threshold
+   0.5, and its affect micro-F1 came out near 0.06 against 0.33 for the factorized model - a
+   five-fold gap that reads as "factorization helps affect" and is a loss-weighting artefact.
+2. **Checkpoints were selected on a softmax over the affect logits.** The training loss moved
+   to eight independent binary targets on 2026-09-28; the validation criterion that picks the
+   checkpoint did not. A softmax is invariant to shifting every logit, so it cannot tell
+   calling the right two emotions from calling all eight, and a clip with no emotion above
+   threshold contributes exactly zero to it whatever is predicted. 130 of the 1,765 windows
+   are such clips.
+
+Both now go through one function, `seam.affect.encoder.direct_task_losses`, used by the
+factorized objective, the baseline and checkpoint selection. `tests/test_affect_factorizer.py`
+pins the equality and both softmax failure cases.
+
+**With the comparison made like-for-like, three seeds, and the per-seed spread reported**
+(`artifacts/m4/factorizer_multilabel_ablation.json`; mean ± sd over seeds 0, 1, 2):
+
+| variant | worst-fold cross-AUC | cross A→L | cross L→A | affect micro-F1 |
+|---|---|---|---|---|
+| **full** | 0.710 ± 0.014 | 0.601 ± 0.017 | 0.689 ± 0.023 | 0.324 ± 0.019 |
+| no_grl_on_a | 0.721 ± 0.009 | 0.644 ± 0.007 | 0.690 ± 0.015 | 0.310 ± 0.017 |
+| no_mi | 0.717 ± 0.004 | 0.603 ± 0.009 | 0.691 ± 0.019 | 0.323 ± 0.014 |
+| no_orthogonality | 0.713 ± 0.016 | 0.600 ± 0.031 | 0.687 ± 0.013 | 0.328 ± 0.021 |
+| no_separation | 0.747 ± 0.053 | 0.645 ± 0.040 | 0.687 ± 0.007 | 0.316 ± 0.014 |
+| entangled baseline | — | — | — | 0.308 |
+
+What this supports, and what it withdraws:
+
+- **Stands:** the gate fails for every variant in every seed. The lowest per-seed worst-fold
+  value anywhere in the grid is 0.694, against a target of 0.60.
+- **Withdrawn: "cross A→L reached chance, so the affect factor no longer carries linguistic
+  information"** (entry 81). The 0.505 was a test-size-weighted mean over one seed that
+  included a fold well below 0.5 and two well above it. On the Jonathan fold the same
+  quantity is 0.30, 0.65 and 0.49 across three seeds of the `full` model. A mean of values
+  on both sides of 0.5 is not evidence of separation, and a per-fold cross-AUC whose seed
+  range is a third of the scale cannot carry a per-fold claim.
+- **Withdrawn: "the full model is best on all three target metrics; removing any separation
+  term lowers micro-F1 by 0.024-0.060"** (entry 82). Every variant's micro-F1 lies inside
+  the others' seed spread, and with the baseline weighted properly the factorized model's
+  advantage over it is inside that spread too. Claim C2 is not supported.
+- **Withdrawn: "the separation terms work, monotonically"** (entry 74). Cross L→A, the
+  direction the gate fails on, does not move under any lever. The one lever with a visible
+  effect is gradient reversal on the affect branch, which lowers cross A→L by about 0.04 -
+  two to three seed standard deviations, from three seeds. That is a lead, not a result.
+- **Unchanged:** neither task is learned. Affect balanced accuracy over the three seeds of
+  the `full` model is 0.481 to 0.507 against a reference of 0.5.
+
+**A limit of the gate metric that this exposed and that is not fixed.** The gate takes the
+larger cross-AUC per fold, so a fold at 0.30 counts as well separated. An AUC that far below
+0.5 means the probe's direction learned on three signers inverts on the fourth. Whether that
+is information or noise cannot be decided from one seed, and the gate as pre-registered does
+not ask. It is left as registered, and recorded here so the next reader does not have to
+rediscover it.
+
+### The mechanism, so this does not depend on someone remembering
+
+- **`seam.provenance.stamp`** writes the git commit and a fingerprint of each module a result
+  depends on into the artifact. The fingerprint is over the AST with docstrings removed, so
+  a comment does not invalidate a result and a swapped index does.
+- **`tests/test_artifact_staleness.py`** fails when a stamped result no longer matches the
+  code in the tree, when a superseded file names no current successor, or when a new result
+  appears without a stamp. `paper/artifact_status.json` is the register.
+- **`tests/test_fer_front_end_parity.py`** asserts rule 16 for the FER front end, which had
+  been true only by inspection: both paths call one function object, every sample on both
+  paths passes through it, the same pixels give the same tensor, and the check is shown to
+  fail when one path skips equalisation.
+- **The readiness gate no longer asks for a repair the indexer already does.** It reported
+  "2 of 300 sampled files do not decode; a repair pass is required" for WLASL. Counted from
+  `wlasl.index_on_disk` over every file: 3,771 of 3,775 indexed clips usable, 88 HTML
+  placeholders substituted by a decodable sibling, 4 lost. The gate stays OPEN at 7 of 10
+  resources, on ASL Citizen and NSL terms.
+- **`scripts/repro_all.sh` could not have completed.** `train_factorizer.py` exits 1 when
+  the M4 gate is not met, and the script treated that as a failed stage, so everything after
+  M4 was unreachable on a correct run. A measured gate failure is now recorded and the run
+  continues; only a crash stops it. The human-label arm, the SignStream parse, the label
+  agreement, M5a and the glTF checks were not in the script at all and are now.
+
+### Process note
+
+The yaw bug was found on 2026-10-04, written up carefully the same day, and the results built
+on it were still being cited a day later in four documents - including in the sentence that
+justified M4's linguistic task ("the one M3 found a real effect for"). The write-up was not
+the problem. Nothing connected a change in `markers.py` to the files computed from it. The
+same re-run then found two defects in M4 that every earlier pass had read straight past,
+because each pass compared the headline number with the previous headline number and both
+were wrong in the same way.
+
+---
+
+## 2026-10-05 — Frame indices are on a 30 fps timeline; 138 of the 200 clips are not
+
+Found while preparing to use the human frame-level annotations, by testing the alignment
+against an independent signal before trusting it. This supersedes the 2026-09-29 correction
+to items 81-84 and the M5a result built on it.
+
+### The defect
+
+Every ASLLRP frame index - gloss-token bounds in the token table, non-manual event bounds in
+the SignStream XML, which carry identical numbers - is a position on a 30 fps session
+timeline. The clips are not all 30 fps:
+
+| clip frame rate | EmoSign clips | median utterance span / frames in clip |
+|---|---|---|
+| 30 fps | 62 | 1.002 |
+| 24 fps | 138 | 1.254 |
+
+The mapping in use since 2026-09-29 was `crop frame = session frame - utterance_start + 1`.
+That is right for the 62. For the 138 it runs a quarter fast, so a token belonging at clip
+frames 80-88 was read from frames 100-110.
+
+**Why it survived.** It was validated by counting how many mapped tokens fell *inside* their
+clip: 89.9% locally, 89.5% against the mirror's frame counts. The shortfall was written up as
+"roughly one token in ten overshoots its crop by a frame or two" and asserted in a test as an
+expected property of the data. It was the last fifth of every 24 fps utterance falling off
+the end. In range is a necessary condition, and a mapping that is wrong by a constant factor
+below one passes it for most of the clip.
+
+### The check that can fail
+
+`scripts/check_signstream_alignment.py` → `artifacts/m3/frame_alignment.json`. The annotators
+marked blinks and eye closures with frame bounds; MediaPipe's `eyeBlink` blendshapes measure
+the same event from pixels. A blink lasts a few frames, so the AUC of the blendshape against
+the annotated frames reads alignment directly.
+
+| clips | frame-for-frame | scaled by clip fps / 30 | where the scale sweep peaks |
+|---|---|---|---|
+| 24 fps (138) | 0.554 | **0.710** | 0.80-0.82 |
+| 30 fps (62) | 0.807 | 0.807 | 1.00 |
+
+On the 24 fps clips the sweep falls to chance on both sides of 0.8 (0.556 at 0.70, 0.554 at
+1.00), and Cory's 52 clips go from 0.442 - below chance, the label sitting on the wrong
+frames - to 0.809. A second, cruder check agrees: with the corrected mapping 1,736 of 1,738
+local tokens fall inside their clip against 1,563 before, and 3,424 of 3,464 against the
+mirror's frame counts. Two-thirds of the wider mirror is 24 fps as well (262 of 410
+utterances).
+
+Both groups score slightly higher with a +2 frame offset. It is the same in both, so it is a
+property of the probe - a blink is annotated from the start of lid movement and the
+blendshape peaks at closure - and no offset is applied: it would be tuned on one cue.
+
+The conversion now lives in one function, `asllrp.crop_frame_position`, used by the token
+mapping and by `signstream.frame_mask`, with the clip's frame rate a required argument that
+has no default. A default of 30 would be silently right for 62 clips of 200.
+
+### M5a: the recorded negative result was not a measurement
+
+The M5a recogniser was trained on that mapping. Re-running it exposed a second, independent
+defect that mattered more.
+
+**The model predicted one gloss.** `fit_logreg` was called with a ridge of 1.0 on features
+that were never standardised. Pose statistics on this corpus have standard deviations below
+0.5, so the weights were held at zero and the bias did all the work. In every fold, with real
+labels and with shuffled ones, the model emitted exactly one distinct gloss: the most
+frequent one. Its WER equalled the most-frequent baseline to four decimals in all four folds
+because it *was* the most-frequent baseline. The log read that as "signing-space pose carries
+no usable lexical signal at this scale". The experiment could not have returned anything
+else, and it had no positive control that would have said so - rule 13, missed for M5a.
+
+`tests/test_recogniser.py` now has that control: a planted, signer-disjoint signal at the
+scale of real pose features, which the corrected pipeline recovers at better than 90% and on
+which the original configuration predicts the majority class for every token.
+
+**Re-run** (`artifacts/m5a/recogniser.json`): frame-rate-aware token frames, features
+z-scored with training-split statistics, ridge chosen from {1.0, 0.1, 0.01} by
+leave-one-signer-out *inside the training signers*, the same procedure applied to the
+shuffled-label control.
+
+| | first run | re-run |
+|---|---|---|
+| tokens / gloss types / hapax | 1,563 / 499 / 284 | 1,736 / 546 / 306 |
+| tokens dropped as out of range | 175 | 2 |
+| mean WER | 0.916 | 0.920 |
+| most-frequent baseline | 0.916 | 0.920 |
+| closed-vocabulary WER, real / shuffled | 0.875 / — | 0.881 / 0.888 |
+| distinct glosses predicted per fold, real | 1, 1, 1, 1 | 3, 4, 4, 3 |
+| distinct glosses predicted per fold, shuffled | 1, 1, 1, 1 | 1, 1, 1, 1 |
+
+**Verdict: the M5a gate is still not met, and this time that is a measurement.** A linear
+model on correctly aligned, standardised pose summaries does not beat always predicting the
+most frequent gloss, under signer-disjoint evaluation, on 1,736 tokens spread over 546
+glosses. The inner selection chose the strongest regulariser in every fold: asked using only
+the training signers whether leaning on the features helps transfer to an unseen signer, the
+data said no. The model is no longer a constant - it predicts three or four glosses on real
+labels and one on shuffled labels - but that difference is too small to call signal, and it
+is not claimed as one.
+
+What may be said is narrower than before and is a statement about data scale: 3.18 tokens
+per gloss, 306 of 546 glosses seen once, and 24.7% to 50% of each held-out signer's tokens
+using a gloss no other signer uses. What may not be said is that pose is uninformative. The
+1,354 crop videos on disk, two-thirds of them 24 fps, are the fair test, and they need the
+corrected mapping.
+
+### What else read the old mapping
+
+Nothing that is cited. M4's human-label arm and the label-agreement table use clip-level
+presence, not frames, and are unaffected; both were re-run today regardless. Every
+frame-level use of the SignStream annotations - a supervised marker detector, C1 on
+continuous signing - has not been built yet, which is how the bug was found before it could
+be used rather than after.
+
+### Stamps now come from the interpreter
+
+`seam.provenance.stamp` first took a hand-written list of the modules a result depended on.
+Within an hour one script's list had left out the SignStream parser its human-label run
+reads. The list is now every `seam` module loaded when the artifact is written, plus whether
+the tree had uncommitted changes, since a commit hash alone would claim more than is true.
+All result artifacts were regenerated through `scripts/repro_all.sh` with the new stamps and
+none is left unstamped.
+
+---
+
+## 2026-10-05 — `make repro` had never run its own guard
+
+Found by reading what the repro script actually executed instead of its stage headers, after
+the first full pass over the result stages "passed".
+
+`scripts/repro_all.sh` ran commands through a helper, `run <label> <command>`, that returned
+success **without running anything** when the label was not one of the requested stage names.
+The first command of each stage used the stage's own name, so it ran. Every other command had
+been given a label of its own:
+
+| label | command that never ran |
+|---|---|
+| `facegate` | the M0 face-visibility gate |
+| `ferdiag` | `diagnose_fer_affect.py`, the FER positive control M1's null rests on |
+| `fersens` | `diagnose_fer_sensitivity.py` |
+| `m4ablate` | the M4 ablation grid |
+| `benchseq` | the sequential benchmark behind the concurrency figure |
+| `prov` | **the provenance guard** - the last stage, whose header is printed just before "done" |
+
+So the script that exists to regenerate every cited number and then check that every cited
+number has a source had been printing the check's name and skipping it since it was written
+on 2026-09-29. Each of those commands had been run by hand at some point, which is why the
+artifacts existed; none had ever been run by the pipeline.
+
+Fixed: the helper runs what it is given, an unknown stage name is an error instead of a quiet
+skip, and `tests/test_repro_script.py` drives the script with a stand-in interpreter and
+asserts that every command of a requested stage is executed, that an unrequested stage is
+not, that an unmet M4 gate is recorded while a crash stops the run, and that a failing
+command fails the run.
+
+**Re-run through the fixed script**, stages `alignment` through `m5a` plus `provenance`:
+every result artifact was regenerated and is identical, value for value, to the one produced
+by hand earlier today, and both guards pass when actually executed. The FER positive control
+reproduces to the digit (Spearman +0.133, +0.035 and +0.128 against sentiment). All result
+artifacts now carry a stamp read from the interpreter, and `paper/artifact_status.json` lists
+none as unstamped.
+
+**Also found in the SignStream XML, by counting rather than assuming:** an English
+translation on 2,403 of the 2,407 utterances, including all 200 EmoSign clips. The plan had
+carried "ASLLRP English absent" as an open item since 2026-09-26 because the mirror has none;
+the XML downloaded for M3 on 2026-10-01 had it all along.
+
+---
+
+## 2026-10-05 — C1 on continuous signing, with human frame-level markers: not supported under the registered rule
+
+`scripts/run_confound_audit_continuous.py` → `artifacts/audit/confound_audit_continuous.json`.
+This is the test M1 said was the real one and that had never been run. The design, the
+controls and the decision rule were written into the script before its first execution, and
+the first execution is the result reported here.
+
+- **Data:** the 200 EmoSign utterances (Ben 7, Cory 87, Jonathan 54, Rachel 52), the three
+  RAF-DB FER models from M1, per-frame probabilities over every clip.
+- **Markers:** human SignStream annotations, mapped to each clip's own frames at its own
+  frame rate. Four forms (brow raise, brow furrow, head shake, head nod) and six grammatical
+  functions (negation, topic, conditional, yes/no question, wh-question, rhetorical question).
+- **Unit:** 0.5 s windows (6 frames at 12 fps, stride 3), because the annotated events are
+  about half a second long. A window bears a marker when the annotation covers at least half
+  of it and is free of it when the annotation does not touch it.
+- **Contrast:** within clip, bearing against the nearest free window on (amplitude, speed).
+  Clip-level affect is constant within a clip and cannot produce the difference.
+- **Primary analysis:** only windows wholly inside the signing span, from the first annotated
+  gloss to the last, so that a marker is not compared with the signer's resting face.
+  3,557 windows in all, 2,652 inside the span, 2,646 scorable.
+- **Rule:** supported for a marker when the shift in negative mass is positive with a
+  Bonferroni-corrected p below 0.05 in at least two of the three models and the placebo is not.
+
+### Primary result
+
+Shift in negative probability mass, bearing minus free; Bonferroni-corrected p in brackets;
+`*` marks corrected significance. Baselines are 0.397, 0.434 and 0.464 for the three models.
+
+| marker | pairs / clips | fer_cnn_a | fer_cnn_b | fer_cnn_c | MDE a / b / c |
+|---|---|---|---|---|---|
+| brow_raise | 610 / 141 | −0.0011 (1.000) | +0.0095 (0.232) | +0.0233 (0.116) | 0.012 / 0.014 / 0.031 |
+| brow_furrow | 536 / 100 | −0.0038 (1.000) | −0.0090 (1.000) | −0.0194 (1.000) | 0.016 / 0.016 / 0.037 |
+| head_shake | 323 / 82 | +0.0122 (0.056) | +0.0064 (0.676) | +0.0102 (1.000) | 0.015 / 0.015 / 0.037 |
+| head_nod | 223 / 66 | −0.0200 (0.040) * | −0.0092 (1.000) | −0.0466 (0.176) | 0.018 / 0.022 / 0.050 |
+| negation | 171 / 34 | +0.0108 (0.568) | +0.0085 (1.000) | +0.0077 (1.000) | 0.023 / 0.022 / 0.066 |
+| topic | 163 / 64 | −0.0042 (1.000) | +0.0011 (1.000) | −0.0050 (1.000) | 0.018 / 0.021 / 0.055 |
+| conditional | 218 / 36 | −0.0024 (1.000) | +0.0089 (1.000) | +0.0317 (0.324) | 0.024 / 0.024 / 0.056 |
+| question_yn | 23 / 8 | — | — | — | too few clips |
+| question_wh | 32 / 4 | — | — | — | too few clips |
+| question_rhetorical | 106 / 33 | −0.0001 (1.000) | +0.0294 (0.032) * | +0.0405 (0.136) | 0.022 / 0.035 / 0.063 |
+
+**No marker meets the rule. C1 is not supported on continuous signing.**
+
+Read marker by marker, because "not supported" covers four different situations:
+
+- **Brow furrow goes the other way in all three models.** This is the marker the motivating
+  example rests on - a wh-question furrow read as anger. Furrow-bearing windows are read as
+  *less* negative than matched furrow-free windows of the same clip, by 1% to 4% of baseline,
+  none of it significant. Shifts larger than the MDEs above are excluded.
+- **Brow raise and rhetorical questions lean positive in two models and not in the third.**
+  The raise is +0.0095 and +0.0233 in models b and c, uncorrected p 0.029 and 0.0145, and
+  −0.0011 in model a. Neither survives correction. The rhetorical-question shift survives it
+  in one model. This is the nearest thing to a signal in the table and it is not a result.
+- **Head nod is read as less negative**, significantly so in one model after correction and
+  with the same sign in all three.
+- **The two canonical question types cannot be tested here.** Inside the signing span only 8
+  clips contribute a yes/no-question pair and 4 a wh-question pair, below the 10 a cluster
+  bootstrap needs. That is a property of this corpus, and the wider one is the remedy.
+
+### What the controls say
+
+- **Placebo** (each track rolled within its clip): of 27 placebo tests with an interval, one
+  is significant after correction - negation in model a, −0.0195. The real markers give 8 of
+  24 tests below 0.05 uncorrected against 1 of 27 for the placebo, so marker-bearing windows
+  do differ from marker-free ones more than rolled tracks do. They differ in both directions.
+  The one significant placebo is a reminder that a bootstrap over a few dozen clips can
+  return a small p for a track with no meaning, which is why the rule asks for two models.
+- **Null model** (uniform-random classifier on the same pairs): nothing significant after
+  correction.
+- **Positive control:** a +0.05 shift planted on human-marked frames is recovered through
+  this code path with an interval that excludes zero (`tests/test_audit.py`).
+
+### The analysis that would have reported support
+
+The same audit over *all* windows, including the rest frames at the clip edges, is in the
+artifact as a sensitivity check:
+
+| marker | pairs / clips | fer_cnn_a | fer_cnn_b | fer_cnn_c |
+|---|---|---|---|---|
+| brow_raise | 815 / 155 | +0.0000 (1.000) | +0.0133 (0.002) * | +0.0381 (0.004) * |
+| question_rhetorical | 124 / 33 | −0.0033 (1.000) | +0.0282 (0.045) * | +0.0546 (0.004) * |
+| negation | 227 / 36 | +0.0205 (0.036) * | +0.0201 (0.126) | +0.0235 (1.000) |
+| conditional | 277 / 37 | −0.0024 (1.000) | +0.0137 (0.203) | +0.0525 (0.027) * |
+
+Under the same rule, brow raise and rhetorical question would both read **SUPPORTS C1**
+there. Restricting to the signing span - decided before either was run - cuts the brow-raise
+shift by about 30% to 40% and takes it below significance. Part of what the
+unrestricted analysis measures is therefore the difference between a signing face and a
+resting one, which is not the claim. This is recorded because it is the result a less
+careful design would have published, and because the residual inside the span, while not
+significant, has not gone to zero.
+
+### What may and may not be claimed
+
+- **May:** on 200 continuous ASL utterances with human frame-level annotation, three compact
+  non-signer FER models show no replicated tendency to read grammatical non-manual markers as
+  more negative. For brow raise and brow furrow, shifts above about 3% to 8% of baseline are
+  excluded; for the grammatical-function spans, above about 5% to 14%.
+- **May not:** that the confound does not exist. The models are small CNNs at 62-66% on
+  RAF-DB whose read-out tracks true affect only weakly on these clips (Spearman +0.035 to
+  +0.133 against sentiment); wh- and yes/no questions could not be tested; and there are four
+  signers. A stronger FER model or the 1,354-utterance corpus could change this.
+- **May not:** that brow raise "trends toward" the hypothesis as a finding. It is a lead that
+  did not meet a rule fixed in advance.
+
+Together with M1 this closes K1 as measured twice, on isolated and on continuous signing,
+with heuristic and with human markers: no support for C1 from these instruments.
+
+---
+
+## 2026-10-05 — The visual markers against human frame labels: one of four holds
+
+`scripts/validate_markers.py` → `artifacts/m3/marker_validation.json`. The first time any
+visual marker in this project has been checked against an annotator. Design and gate fixed
+before the first run: frame-level AUC against the human SignStream tracks, leave one signer
+out, verdict from the within-clip AUC on the three large folds (validated at 0.80, usable
+with caution at 0.70). Two detectors per marker: the existing heuristic's own per-frame
+signal, with nothing fitted, and a logistic regression on the 52 blendshapes plus head pose
+and its short-range dynamics.
+
+Within-clip AUC (the mean of per-clip AUCs, which cannot be earned by telling clips apart):
+
+| marker | detector | Cory (87) | Jonathan (54) | Rachel (52) | Ben (7) | verdict |
+|---|---|---|---|---|---|---|
+| brow_raise | heuristic signal | 0.838 | 0.822 | 0.878 | 0.647 | **validated** |
+| brow_raise | supervised | 0.701 | 0.788 | 0.866 | 0.599 | usable with caution |
+| brow_furrow | heuristic signal | 0.599 | 0.717 | 0.780 | 0.631 | not validated |
+| brow_furrow | supervised | 0.549 | 0.622 | 0.769 | 0.526 | not validated |
+| head_shake | heuristic signal | 0.500 | 0.502 | 0.500 | 0.500 | not validated (blind) |
+| head_shake | supervised | 0.566 | 0.464 | 0.526 | 0.539 | not validated |
+| head_nod | heuristic signal | 0.498 | 0.500 | 0.499 | 0.495 | not validated (blind) |
+| head_nod | supervised | 0.603 | 0.600 | 0.530 | 0.323 | not validated |
+
+**Brow raise is a working instrument, and M3 had written it off.** The mean of three brow
+blendshapes follows the human brow-raise track frame by frame at 0.82 to 0.88 on three
+signers it was never tuned on. M3 classed it "degenerate" because it fires on 86% of clips.
+The annotators mark a brow raise on 169 of the 200 clips. The clip-level rate was the
+language, not the detector; the defect was asking a per-clip question of a per-frame event.
+
+**Brow furrow falls short**, at 0.60 on the largest fold. It is the marker M3 had called the
+one "usable" detector, on the strength of a clip prevalence that happened to fall inside a
+band.
+
+**The head channel is not readable from this input at all.** The heuristic is at exactly
+chance because its signal is zero almost everywhere, which was known. What is new is that a
+fitted detector, given head roll, pitch and yaw with their rates and rolling spread, does
+not find annotated head shakes or nods either. That moves the diagnosis from the thresholds
+to the signal: the facial transformation matrix MediaPipe returns on 256-pixel crops does
+not carry these movements well enough for a linear model to use, on events about half a
+second long. Negation and affirmation therefore have no visual instrument here, and a better
+threshold will not supply one.
+
+**The fitted detector is worse than the three-coefficient mean for brow raise.** 61 features
+fitted on three signers transfer less well to the fourth than a fixed average does. On four
+signers, more capacity bought less generalisation - the same lesson as M4, in miniature.
+
+**Consequences.** M3's marker table (1 usable, 3 degenerate, 2 blind) described clip-level
+prevalence and is superseded as a statement about the instruments by the table above:
+brow raise validated at frame level, brow furrow not, head shake and head nod unreadable.
+The continuous-signing audit earlier today used human markers and does not depend on any of
+this. Anything that needs a marker *without* human annotation - the live demo, any corpus
+beyond the annotated 2,407 utterances - has exactly one that can be trusted.
+

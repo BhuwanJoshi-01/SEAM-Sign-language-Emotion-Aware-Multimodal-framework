@@ -39,6 +39,8 @@ from seam.features import markers as M
 from seam.logging import get, setup
 from seam.paths import artifacts_root
 from seam.perception import extract as extract_mod
+from seam.provenance import KEY as PROVENANCE_KEY
+from seam.provenance import stamp
 
 #: Module level, because the stage functions below use it and a logger
 #: created inside main() is invisible to them.
@@ -206,6 +208,8 @@ def null_windows(windows: list[A.Window]) -> list[A.Window]:
             prosody=w.prosody,
             probs=None,
             scored=True,
+            names=w.names,
+            partial=w.partial,
         )
         clone.probs = [float(v) for v in rng.dirichlet(np.ones(len(fer.EMOSIGN_LABELS)))]
         out.append(clone)
@@ -296,6 +300,7 @@ def main() -> int:
         "marker_emotion_table": ntable,
     }
 
+    report[PROVENANCE_KEY] = stamp(__file__)
     dest = out_dir / "confound_audit.json"
     dest.write_text(json.dumps(report, indent=1), encoding="utf-8")
     print(f"\nwrote {dest}")

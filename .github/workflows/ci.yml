@@ -75,11 +75,11 @@ jobs:
 
       - name: Provenance guard
         if: steps.cache.outputs.cache-hit == 'true'
-        run: python -m pytest tests/test_provenance.py -v
+        run: python -m pytest tests/test_provenance.py tests/test_artifact_staleness.py -v
 
       - name: Provenance guard (no artifacts)
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
           echo "::warning::No artifacts cache hit; the provenance guard was SKIPPED,"
           echo "::warning::not passed. Populate the cache from a full 'make repro' run."
-          python -m pytest tests/test_provenance.py -q --tb=line || true
+          python -m pytest tests/test_provenance.py tests/test_artifact_staleness.py -q --tb=line || true

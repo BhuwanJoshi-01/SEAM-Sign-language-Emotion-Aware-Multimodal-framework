@@ -93,8 +93,8 @@ train: ## Train from configs/
 repro: ## Regenerate every artifact the paper cites, in dependency order  [M9]
 	bash scripts/repro_all.sh
 
-provenance: ## Fail on any number in the paper with no artifact behind it
-	$(PY) -m pytest tests/test_provenance.py -v
+provenance: ## Fail on an untraced number, or a result written by code that has since changed
+	$(PY) -m pytest tests/test_provenance.py tests/test_artifact_staleness.py -v
 
 alignment: ## ASLLRP token-to-crop-frame alignment report (M5a gate)
 	$(PY) scripts/check_asllrp_alignment.py

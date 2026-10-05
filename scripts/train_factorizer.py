@@ -41,7 +41,9 @@ from seam.affect.encoder import (
     FactorizerConfig,
     class_weights,
     default_lambda_grid,
+    direct_task_losses,
     factorizer_loss,
+    selection_loss,
 )
 from seam.affect.vclub import (
     PairDiscriminator,
@@ -60,6 +62,8 @@ from seam.features import syntactic as SY
 from seam.logging import get, setup
 from seam.paths import artifacts_root, default_data_root
 from seam.perception.tasks_api import PART_SLICES
+from seam.provenance import KEY as PROVENANCE_KEY
+from seam.provenance import stamp
 from seam.seed import set_seed
 
 log = get("m4_factorizer")
@@ -96,9 +100,11 @@ class Window:
         }
 
 
-#: The linguistic task the encoder is trained on. Chosen because it is the one M3
-#: found a real effect for; training on a label with no signal would make a null
-#: uninterpretable, since nothing could ever be learned.
+#: The linguistic task the encoder is trained on. Originally chosen because M3 had found
+#: a real visual effect for it (negation <-> head_shake, r=0.554). That effect was a yaw
+#: bug and is withdrawn, so the choice now rests only on negation being one of the two
+#: heuristic labels that agree with human annotation (kappa 0.639). Whether any visual
+#: signal for it reaches the encoder is exactly what is not established.
 LINGUISTIC_TASK = "negation"
 
 #: Which label field each candidate linguistic task reads. Named explicitly because
@@ -402,10 +408,7 @@ def train_fold(
         model.eval()
         with torch.no_grad():
             out = model(t["nm"][va], t["p"][va])
-            vl = float(
-                torch.nn.functional.cross_entropy(out["logits_l"], y_l[va])
-                + torch.nn.functional.cross_entropy(out["logits_a"], y_a[va])
-            )
+            vl = selection_loss(out, y_l[va], y_a[va], cfg, weight_l=w_l)
         if vl < best_val:
             best_val = vl
             best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
@@ -614,18 +617,20 @@ def run_baseline_fold(
 ) -> dict[str, float]:
     """Train the entangled single-trunk control and score it the same way.
 
-    Same folds, same schedule, same seed, same inputs — the only difference is the
-    absence of any separation pressure. Given ``[NM, P]`` it is strictly better
-    informed than either factor, so a separation win cannot be attributed to the
-    baseline having less to work with.
-    """
-    from torch import nn as _nn
+    Same folds, same schedule, same seed, same inputs, **same supervised losses and the
+    same checkpoint criterion** — the only difference is the absence of any separation
+    pressure. Given ``[NM, P]`` it is strictly better informed than either factor, so a
+    separation win cannot be attributed to the baseline having less to work with.
 
+    The losses were not the same until 2026-10-05: this function used unweighted
+    cross-entropy and BCE while the factorized model was class- and ``pos_weight``-ed.
+    """
     set_seed(seed, deterministic_torch=True)
     model = EntangledBaseline(cfg)
     opt = torch.optim.AdamW(model.parameters(), lr=3e-3, weight_decay=1e-4)
     tr = torch.tensor(train_idx, dtype=torch.long)
     va = torch.tensor(val_idx, dtype=torch.long)
+    w_l = class_weights(t["y_l"][tr], cfg.n_linguistic)
     best_state, best_val = None, float("inf")
     for _epoch in range(epochs):
         model.train()
@@ -635,9 +640,8 @@ def run_baseline_fold(
             if len(b) < 4:
                 continue
             out = model(t["nm"][b], t["p"][b])
-            loss = _nn.functional.cross_entropy(
-                out["logits_l"], t["y_l"][b]
-            ) + _nn.functional.binary_cross_entropy_with_logits(out["logits_a"], t["y_a"][b])
+            loss_l, loss_a = direct_task_losses(out, t["y_l"][b], t["y_a"][b], cfg, weight_l=w_l)
+            loss = cfg.w_linguistic * loss_l + cfg.w_affect * loss_a
             opt.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -645,10 +649,7 @@ def run_baseline_fold(
         model.eval()
         with torch.no_grad():
             o = model(t["nm"][va], t["p"][va])
-            vl = float(
-                _nn.functional.cross_entropy(o["logits_l"], t["y_l"][va])
-                + _nn.functional.binary_cross_entropy_with_logits(o["logits_a"], t["y_a"][va])
-            )
+            vl = selection_loss(o, t["y_l"][va], t["y_a"][va], cfg, weight_l=w_l)
         if vl < best_val:
             best_val = vl
             best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
@@ -792,6 +793,7 @@ def main() -> int:
         for line in _render(agg):
             print("  " + line)
 
+    results[PROVENANCE_KEY] = stamp(__file__)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(results, indent=2, default=float), encoding="utf-8")

@@ -24,21 +24,25 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"
 
 PY="${PY:-/home/bhuwan/miniconda3/envs/slr/bin/python}"
-STAGES="${SEAM_REPRO_STAGES:-verify,alignment,landmarks,markers,fer,audit,grounding,m4,parity,bench,provenance}"
+STAGES="${SEAM_REPRO_STAGES:-verify,alignment,signstream,landmarks,markers,labels,fer,audit,grounding,m4,m5a,avatar,parity,bench,provenance}"
 
-ALL_STAGES=(verify alignment landmarks markers fer audit grounding m4 parity bench provenance)
+ALL_STAGES=(verify alignment signstream landmarks markers labels fer audit grounding m4 m5a avatar parity bench provenance)
 declare -A DESC=(
   [verify]="verify data resources and print the readiness table"
   [alignment]="ASLLRP token-to-crop-frame alignment report"
+  [signstream]="parse the SignStream XML: utterances, signs, human non-manual events"
   [landmarks]="EmoSign landmark extraction"
   [markers]="marker labelling with provenance"
+  [labels]="heuristic labels against human annotation: syntactic (kappa) and visual (frame-level AUC)"
   [fer]="FER models: train, export, parity"
-  [audit]="confound audit and instrument diagnosis"
+  [audit]="confound audit on isolated signs and on continuous signing, and instrument diagnosis"
   [grounding]="cue-grounding report"
-  [m4]="affect factorizer, LOSO folds, probes, ablation"
+  [m4]="affect factorizer under LOSO: heuristic labels, human labels, 3-seed ablation"
+  [m5a]="gloss recogniser against its most-frequent and shuffled-label baselines"
+  [avatar]="skinned glTF export, checked by an independent reader"
   [parity]="ONNX FP32/INT8 parity"
   [bench]="latency / VRAM benchmark"
-  [provenance]="fail on any number in the paper with no artifact behind it"
+  [provenance]="fail on an untraced number, or on a result written by code that has since changed"
 )
 
 log()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
@@ -46,7 +50,22 @@ note() { printf '    %s\n' "$*"; }
 die()  { printf '\n\033[31mFAILED: %s\033[0m\n' "$*" >&2; exit 1; }
 
 want() { [[ ",$STAGES," == *",$1,"* ]]; }
-run()  { want "$1" || return 0; shift; note "\$ $*"; "$@" || die "$*"; }
+
+# Echo a command and run it; a non-zero exit stops the whole run.
+#
+# This used to take a label as its first argument and return 0 without running anything
+# when that label was not a requested stage. Every call sits inside an `if want <stage>`
+# block already, so the check did nothing for the first command of a stage and silently
+# skipped every other one that had been given its own label: the face gate, both FER
+# diagnostics, the sequential benchmark, the ablation, and the provenance guard itself.
+# The script printed each stage header, ran the first command, and reported "done".
+run()  { note "\$ $*"; "$@" || die "$*"; }
+
+# A stage name that is not a stage is a typo, and a typo used to mean "skip it quietly".
+IFS=',' read -r -a _requested <<< "$STAGES"
+for _s in "${_requested[@]}"; do
+  [[ " ${ALL_STAGES[*]} " == *" $_s "* ]] || die "unknown stage '$_s'; stages are: ${ALL_STAGES[*]}"
+done
 
 log "SEAM repro — stages: $STAGES"
 note "repo: $REPO"
@@ -56,59 +75,107 @@ note "python: $PY"
 
 # ---------------------------------------------------------------- cheap, always safe
 if want verify; then
-  log "[1/11] $(printf '%s' "${DESC[verify]}")"
-  run verify "$PY" -m seam.cli data verify --all --table
+  log "[verify] ${DESC[verify]}"
+  run "$PY" -m seam.cli data verify --all --table
 fi
 
 if want alignment; then
-  log "[2/11] $(printf '%s' "${DESC[alignment]}")"
-  run alignment "$PY" scripts/check_asllrp_alignment.py
+  log "[alignment] ${DESC[alignment]}"
+  run "$PY" scripts/check_asllrp_alignment.py
+fi
+
+# The SignStream XML is licence-gated and lives outside the repository. Without it the
+# human-label stages cannot run, and saying so beats failing three stages later.
+XML_DIR="${SEAM_SIGNSTREAM_XML:-/mnt/DevProd/seam_data/asllrp_signstream_xml/raw}"
+if want signstream; then
+  log "[signstream] ${DESC[signstream]}"
+  [[ -d "$XML_DIR" ]] || die "SignStream XML not found at $XML_DIR (set SEAM_SIGNSTREAM_XML); see paper/provenance/STEP3_HANDOFF.md"
+  run "$PY" scripts/parse_signstream.py --path "$XML_DIR" --min-utterances 100
+  # In range is not aligned: validate the session-to-clip frame mapping against an
+  # independent signal (annotated blinks vs the eyeBlink blendshape) before any stage
+  # below reads a frame-level label.
+  run "$PY" scripts/check_signstream_alignment.py --xml "$XML_DIR"
 fi
 
 # ---------------------------------------------------------------- perception
 if want landmarks; then
-  log "[3/11] $(printf '%s' "${DESC[landmarks]}")"
-  run landmarks "$PY" -m seam.cli landmarks extract --dataset emosign
-  run facegate "$PY" -m seam.cli landmarks face-gate --sample 24
+  log "[landmarks] ${DESC[landmarks]}"
+  run "$PY" -m seam.cli landmarks extract --dataset emosign
+  run "$PY" -m seam.cli landmarks face-gate --sample 24
 fi
 
 if want markers; then
-  log "[4/11] $(printf '%s' "${DESC[markers]}")"
-  run markers "$PY" scripts/label_markers.py
+  log "[markers] ${DESC[markers]}"
+  run "$PY" scripts/label_markers.py
+fi
+
+if want labels; then
+  log "[labels] ${DESC[labels]}"
+  run "$PY" scripts/check_label_quality.py --xml "$XML_DIR"
+  # The visual markers against human frame labels, leave-one-signer-out.
+  run "$PY" scripts/validate_markers.py --xml "$XML_DIR"
 fi
 
 # ---------------------------------------------------------------- affect, no GPU needed
 if want fer; then
-  log "[5/11] $(printf '%s' "${DESC[fer]}")"
-  run fer "$PY" scripts/train_fer.py
+  log "[fer] ${DESC[fer]}"
+  run "$PY" scripts/train_fer.py
 fi
 
 if want audit; then
-  log "[6/11] $(printf '%s' "${DESC[audit]}")"
-  run audit "$PY" scripts/run_confound_audit.py
-  run ferdiag "$PY" scripts/diagnose_fer_affect.py
-  run fersens "$PY" scripts/diagnose_fer_sensitivity.py
+  log "[audit] ${DESC[audit]}"
+  run "$PY" scripts/run_confound_audit.py
+  run "$PY" scripts/diagnose_fer_affect.py
+  run "$PY" scripts/diagnose_fer_sensitivity.py
+  # C1 where M1 said it had to be tested: continuous signing, human frame-level markers.
+  # Its design and decision rule are fixed in the script; re-running reproduces the
+  # registered analysis, it does not re-open it.
+  run "$PY" scripts/run_confound_audit_continuous.py --xml "$XML_DIR"
 fi
 
 if want grounding; then
-  log "[7/11] $(printf '%s' "${DESC[grounding]}")"
-  run grounding "$PY" scripts/cue_grounding.py
+  log "[grounding] ${DESC[grounding]}"
+  run "$PY" scripts/cue_grounding.py
 fi
 
+# train_factorizer.py exits 1 when the M4 gate is not met. The gate is a measured result,
+# not a build failure - M4 is reported as refuted - so only a crash (exit >= 2) stops the
+# run here. Each invocation writes its own file; the ablation used to overwrite the
+# single-seed run because both defaulted to one name.
+m4run() {
+  note "\$ $*"
+  local rc=0
+  "$@" || rc=$?
+  [[ $rc -le 1 ]] || die "$* (exit $rc)"
+  [[ $rc -eq 0 ]] || note "gate not met (exit 1) - recorded as a result, not an error"
+}
 if want m4; then
-  log "[8/11] $(printf '%s' "${DESC[m4]}")"
-  run m4 "$PY" scripts/train_factorizer.py
-  run m4ablate "$PY" scripts/train_factorizer.py --ablate
+  log "[m4] ${DESC[m4]}"
+  m4run "$PY" scripts/train_factorizer.py
+  m4run "$PY" scripts/train_factorizer.py --labels human --xml-dir "$XML_DIR"
+  m4run "$PY" scripts/train_factorizer.py --ablate --seeds 0 1 2 --tag ablation
+fi
+
+if want m5a; then
+  log "[m5a] ${DESC[m5a]}"
+  run "$PY" scripts/train_recogniser.py
+fi
+
+# The glTF tests skip loudly without the licence-gated SMPL-X model or a Chrome binary;
+# a skip is printed, never counted as a pass.
+if want avatar; then
+  log "[avatar] ${DESC[avatar]}"
+  run "$PY" -m pytest tests/test_gltf_export.py tests/test_gltf_conformance.py -q -rs
 fi
 
 # ---------------------------------------------------------------- GPU
 if want parity; then
-  log "[9/11] $(printf '%s' "${DESC[parity]}")"
-  run parity "$PY" -m seam.cli export
+  log "[parity] ${DESC[parity]}"
+  run "$PY" -m seam.cli export
 fi
 
 if want bench; then
-  log "[10/11] $(printf '%s' "${DESC[bench]}")"
+  log "[bench] ${DESC[bench]}"
   # A benchmark on a loaded machine is worse than no benchmark: it produces a number
   # that looks like a measurement. Check load and refuse rather than record noise.
   load="$(cut -d' ' -f1 /proc/loadavg 2>/dev/null || echo 0)"
@@ -116,16 +183,14 @@ if want bench; then
   if [[ "$load" != "0" ]] && awk -v l="$load" 'BEGIN{exit !(l>1.5)}'; then
     die "load $load > 1.5; the K6 number would measure contention, not the model. Idle the machine, or skip with SEAM_REPRO_STAGES without 'bench'."
   fi
-  run bench "$PY" -m seam.cli bench
-  run benchseq "$PY" -m seam.cli bench --sequential
+  run "$PY" -m seam.cli bench
+  run "$PY" -m seam.cli bench --sequential
 fi
 
 # ---------------------------------------------------------------- the guard
 if want provenance; then
-  log "[11/11] $(printf '%s' "${DESC[provenance]}")"
-  if ! run prov "$PY" -m pytest tests/test_provenance.py -q; then
-    die "the paper cites a number no artifact produced — see tests/test_provenance.py"
-  fi
+  log "[provenance] ${DESC[provenance]}"
+  run "$PY" -m pytest tests/test_provenance.py tests/test_artifact_staleness.py -q
 fi
 
 log "done"

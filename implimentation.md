@@ -6,7 +6,7 @@ gates and KPIs. This file answers *how*: which files, which commands, which test
 
 Read both. If they ever disagree, `plan.md` wins and this file is the bug.
 
-- Status: **M0 in progress** (see §M0 for live state)
+- Status: **M0–M4 measured; M5b, M6, M8 not started; M9 partial.** `plan.md` §3 and §4 carry the live state. Phase 0 of the 2026-10-05 review (record reconciliation, yaw-fix re-runs) is logged at the end of `paper/EXPERIMENT_LOG.md`.
 - Executor: 1 AI implementer + 1 human reviewer
 - Machine: RTX 3050 4 GB · 16 vCPU · 15 GB RAM (~3 GB free) · env `slr` (Python 3.12.13)
 
@@ -300,7 +300,7 @@ dictionary signing with no discourse context. →
   in-place report overwriting)
 - [X] M1 instrument lesson resolved in code: one decoder, `seam.data.rafdb`, shared by the
   trainer and the parity harness, with the 768-space box mapping pinned by test
-- [ ] Resolve the M1 instrument lesson in code: one front end, asserted equal by test — **ACTIONABLE, cheap.** `seam.data.rafdb` *is* the single front end now (M1's fix), but `tests/test_rafdb_bbox.py` has 4 tests and none asserts the two FER paths decode identically. The lesson is half-landed. (rule 16)
+- [x] Resolve the M1 instrument lesson in code: one front end, asserted equal by test — **done 2026-10-05**, `tests/test_fer_front_end_parity.py`: both paths call the same function object, every sample on both paths passes through it, the same pixels give the same tensor, and the check is shown to fail when the fit path skips equalisation. (rule 16)
 
 ---
 
@@ -396,12 +396,16 @@ dictionary signing with no discourse context. →
 - [x] **positive control:** signer probe, asserted ≥ 0.80 — **done**, measured 0.973
 - [x] per-λ ablation harness — **done**, `scripts/train_factorizer.py --ablate` runs the full grid
 - [ ] qualitative neutral-affect wh-question/negation set — **not started.** Doable now that M3 has the interrogative/negation labels; needs a curated frame set.
+- [x] **M4 re-run on yaw-fixed code, with two instrument defects removed — done 2026-10-05.** The entangled baseline now uses the factorized model's weighted losses and checkpoints are selected on the training criterion instead of a softmax (`seam.affect.encoder.direct_task_losses`, `selection_loss`). Three-seed ablation in `artifacts/m4/factorizer_multilabel_ablation.json`. Gate fails in every variant and seed.
+- [ ] **K4 / claim C3 has never been run** — a plain affect model under LOSO on a protocol comparable to the quoted 20.76 / 21.09, with majority and prior baselines beside it. The largest open gap in the project.
+- [x] **C1 on continuous signing — run 2026-10-05, not supported.** `scripts/run_confound_audit_continuous.py`: three FER models against *human* frame-aligned markers on the 200 EmoSign utterances, 0.5 s windows inside the signing span, design and decision rule fixed before the first run. No marker meets the rule; brow furrow leans the other way in all three models; the unrestricted analysis (resting frames included) would have reported support for brow raise, which is why the restriction was registered first. wh- and yes/no questions have too few clips.
+- [x] **Visual markers validated against human frame labels — run 2026-10-05.** `scripts/validate_markers.py`, leave-one-signer-out, gate fixed in advance. `brow_raise`: **validated** (within-clip AUC 0.838 / 0.822 / 0.878) — the heuristic signal itself, which M3 had called degenerate. `brow_furrow`: not validated (0.599 on Cory). `head_shake`, `head_nod`: not readable even by a supervised detector on head pose and its dynamics. A fitted 61-feature detector transfers across signers worse than the 3-blendshape mean.
 
 ---
 
 ## M5 — Recognition + translation
 
-- [x] M4 gate decision — **decided 2026-10-01: option (c) attempted and refuted, so option (a).** The "more data" branch was tried as the decisive test, and the decisive move turned out to be *better labels* rather than more of them, available immediately after step 3. Re-running the whole experiment with human `y_L` in the same four slots moved worst-fold cross-AUC 0.7276 → **0.7031**, gate still failing, with cross A→L getting worse (0.505 → 0.617). The label-noise explanation is refuted. M4 is reported as a refuted hypothesis with a validated instrument; gate not moved to fit.
+- [x] M4 gate decision — **decided 2026-10-01: option (c) attempted and refuted, so option (a).** The "more data" branch was tried as the decisive test, and the decisive move turned out to be *better labels* rather than more of them, available immediately after step 3. Re-running the whole experiment with human `y_L` in the same four slots moved worst-fold cross-AUC 0.7276 → **0.7031**, gate still failing, with cross A→L getting worse (0.505 → 0.617). The label-noise explanation is refuted. M4 is reported as a refuted hypothesis with a validated instrument; gate not moved to fit. *(Figures as measured 2026-10-01. Re-run 2026-10-05 on corrected code: 0.6944 heuristic / 0.7264 human, gate still failing, decision unchanged — `plan.md` M4.)*
   - Underpinning it: three of four heuristic linguistic labels are at or near chance against human annotation (kappa 0.028 / 0.038 / 0.141; negation 0.639) — `artifacts/m3/label_agreement.json`, measured with Cohen's kappa rather than majority-dominated accuracy.
 - [x] M5a: continuous recognition on the 17,522 frame-aligned ASLLRP gloss tokens — **pipeline built and run 2026-09-29; result is NEGATIVE, and that is the finding.**
   - `src/seam/features/signpose.py` + `scripts/train_recogniser.py`; artifact `artifacts/m5a/recogniser.json`.
@@ -409,6 +413,7 @@ dictionary signing with no discourse context. →
   - **OOV floor 24-48% by fold** (30.6% on Cory): a third of one signer's tokens use a gloss the other three never use, so the open-vocabulary WER is bounded below by the data, not the model.
   - **WER 0.916 against a most-frequent baseline of 0.916 and a shuffled-label control of 0.911** - the model is indistinguishable from always predicting the most common gloss. Closed-vocabulary WER 0.875. Removing duration changes nothing (0.916).
   - So signing-space pose over these 200 utterances carries **no usable lexical signal** at this scale. The honest reading is that 200 utterances is too little to learn 499 classes from 3.1 tokens each; this is a data-scale verdict, not proof that pose is uninformative. Scaling to the 49k-frame DWPose corpus is the next test.
+  - **SUPERSEDED 2026-10-05 - the run above was not a measurement.** Two defects: (1) token frames were mapped frame-for-frame although ASLLRP indices are on a 30 fps timeline and 138 of the 200 clips are 24 fps, so most tokens were read from the wrong frames (the "175 overshooting" were the last fifth of every 24 fps utterance); (2) the classifier - ridge 1.0 on unstandardised features - predicted **one gloss in every fold**, with real and shuffled labels alike, so its WER equalled the baseline by construction. Fixed: `asllrp.crop_frame_range(clip_fps=...)`, validated by `scripts/check_signstream_alignment.py` (annotated blinks vs the eyeBlink blendshape: AUC 0.554 → 0.710 on the 24 fps clips); `eval/recogniser.fit_predict` standardises, selects the ridge on training signers only, and flags a constant predictor; `tests/test_recogniser.py` has the positive control the experiment lacked. **Re-run: 1,736 tokens / 546 glosses, WER 0.920 vs most-frequent 0.920 - gate still not met, now as a measurement.**
   - Four real bugs found and fixed en route, all of which had made the result look *better* than it was: an inverted `wer()`, a `predict` that argmaxed features instead of logits, a units bug reporting the 29.5% OOV floor as 0.1%, and a 180-degree-ambiguous levelling rotation. Each has a regression test.
 - [ ] M5b: 255-dim pose → linear → T5-small on How2Sign keypoints, 24 fps and 12 fps
 - [x] Step 4 (DWPose corpus) — **run 2026-10-03; the task as written was wrong.**
@@ -449,6 +454,8 @@ dictionary signing with no discourse context. →
 ## M9 — Paper, repro, release
 
 - [x] `scripts/repro_all.sh`; CI test that fails on any unlogged number — **done 2026-09-29.** `scripts/repro_all.sh` runs 11 stages in dependency order, refuses to benchmark on a loaded machine, and `make repro` now has a target that works. `tests/test_provenance.py` fails on any number in `EXPERIMENT_LOG.md`/`CLAIMS_LEDGER.md` that no artifact under `artifacts/` produced, with `paper/provenance_exemptions.json` as a ratchet: 44 audited historical lines are waived by stated reason, and both the waiver list and the value list self-clean when a line stops needing an exemption. `.github/workflows/ci.yml` runs lint/typecheck/tests plus the provenance guard.
+- [x] **`scripts/repro_all.sh` made to do what it says — 2026-10-05.** It could not have completed a correct run: `train_factorizer.py` exits 1 on an unmet gate and that was treated as a failed stage. And its `run` helper silently skipped every command given a label that was not a stage name - the face gate, both FER diagnostics, the sequential benchmark, the ablation, **and the provenance guard**. Now 15 stages (adds SignStream parse, frame-alignment check, label agreement, the human-label M4 arm, M5a, glTF checks), every command in a requested stage runs, an unknown stage name is an error, and `tests/test_repro_script.py` drives the control flow with a stand-in interpreter.
+- [x] **Staleness guard — 2026-10-05.** `seam.provenance.stamp` + `tests/test_artifact_staleness.py` + `paper/artifact_status.json`; superseded results live under `artifacts/superseded/`. `make provenance` runs both guards.
 - [ ] model cards; ethics, limitations, Deaf-community statement — **partial.** `paper/main.tex` carries ethics/limitations/Deaf text; there is no model card per component.
 - [ ] close the §6 provenance item — **not started.** Depends on the NSL/INCLUDE re-audit above.
 - [ ] arXiv + workshop submission — **not started**, and premature until M5a/M6 exist.

@@ -38,6 +38,8 @@ from seam.eval import fer_audit as A
 from seam.logging import get, setup
 from seam.paths import artifacts_root
 from seam.perception import extract as extract_mod
+from seam.provenance import KEY as PROVENANCE_KEY
+from seam.provenance import stamp
 
 
 def spearman(x: np.ndarray, y: np.ndarray) -> float:
@@ -161,6 +163,7 @@ def main() -> int:
             ci[1],
         )
 
+    report[PROVENANCE_KEY] = stamp(__file__)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(report, indent=1), encoding="utf-8")
     print(f"\nwrote {out_path}")

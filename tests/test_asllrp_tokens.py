@@ -110,107 +110,112 @@ def test_vocab_is_frequency_ordered() -> None:
     assert v.encode("NOT_A_GLOSS") == -1
 
 
-def test_utterance_start_offset_maps_session_frames_onto_crop_frames() -> None:
-    """The alignment IS recoverable, and the first version of this test was wrong.
-
-    It asserted the labels were unusable because absolute token frame indices
-    exceeded the extracted clip length. That compared two different frame spaces:
-    the indices are absolute session positions, and ``utterance_start`` - in the same
-    file - gives the offset, so ``crop index = session frame - utterance_start + 1``.
-
-    Checked against real published frame counts: the mapping lands in range for the
-    large majority of tokens, with the rest overshooting the crop end by a frame or
-    two. A test that asserted a wrong conclusion is worse than no test, so this one
-    now pins the mapping and the residual.
-    """
-    import collections
-    import json
-    import urllib.request
-
-    pytest.importorskip("pandas")
-
-    # Published DWPose frame counts per utterance.
-    try:
-        url = "https://huggingface.co/api/datasets/FangSen9000/ASLLRP_utterances_results"
-        sib = json.loads(urllib.request.urlopen(url, timeout=60).read())["siblings"]
-    except Exception:  # pragma: no cover - offline
-        pytest.skip("Hugging Face listing unavailable")
-    counts = collections.Counter(
-        p.split("/")[1] for p in (s["rfilename"] for s in sib) if "/results_dwpose/npz/" in p
-    )
-    if not counts:
-        pytest.skip("no published frame counts in the listing")
-
-    tokens, _ = asllrp.load()
-    rep = asllrp.check_alignment(tokens, counts)
-    d = rep.as_dict()
-    assert rep.aligned, f"the offset mapping should hold: {d}"
-    frac = d["aligned_fraction"]
-    assert frac >= 0.80, f"offset mapping covers only {frac:.1%} of tokens: {d}"
-    assert d["n_tokens_overshoot"] > 0, (
-        "tokens that overshoot the crop end are a real case and must be reported, "
-        "not silently clamped"
-    )
+def _token(**kw: object) -> asllrp.SignToken:
+    base: dict[str, object] = {
+        "video_id": "1",
+        "gloss": "A",
+        "start_frame": 100,
+        "end_frame": 110,
+        "utterance_start": 100,
+        "utterance_end": 200,
+        "utterance_video": "7.mp4",
+        "signer": "Cory",
+        "source_collection": "Cory_x",
+        "sign_type": "Signs",
+    }
+    base.update(kw)
+    return asllrp.SignToken(**base)  # type: ignore[arg-type]
 
 
-def test_tokens_aligned_to_emosign_clips_via_the_offset() -> None:
-    """The same mapping against the landmarks we already extracted locally."""
+def _local_clips() -> tuple[dict[str, int], dict[str, float]]:
     import glob
     import json
 
-    pytest.importorskip("pandas")
     from seam.paths import default_data_root
 
     lm = default_data_root() / "emosign" / "landmarks"
     counts: dict[str, int] = {}
+    rates: dict[str, float] = {}
     for p in glob.glob(str(lm / "*.json")):
         with open(p) as fh:
             meta = json.loads(fh.read())
-        counts[str(meta["utterance_id"])] = int(meta["frame_count"])
+        if meta.get("native_fps"):
+            counts[str(meta["utterance_id"])] = int(meta["frame_count"])
+            rates[str(meta["utterance_id"])] = float(meta["native_fps"])
+    return counts, rates
+
+
+def test_token_indices_are_on_a_30fps_timeline_whatever_the_clip_rate() -> None:
+    """The third conclusion this test has held, and the first checked the right way.
+
+    It first asserted the labels were unusable (absolute indices against clip length),
+    then that ``crop index = session frame - utterance_start + 1`` held for ~90% of
+    tokens. In range is not aligned. The utterance span over the extracted frame count
+    is 1.00 for the 30 fps clips and 1.25 for the 24 fps ones, so the indices are on a
+    30 fps timeline and the frame-for-frame mapping runs 25% fast on 138 of 200 clips.
+    The "10% overshoot" that used to be asserted here as a real and expected case was
+    the last fifth of those clips falling off the end.
+    """
+    pytest.importorskip("pandas")
+    counts, rates = _local_clips()
     if not counts:
         pytest.skip("no EmoSign landmarks on disk")
     tokens, _ = asllrp.load()
-    rep = asllrp.check_alignment(tokens, counts)
-    assert rep.aligned, f"offset mapping failed against local clips: {rep.as_dict()}"
-    assert rep.n_tokens_aligned > 0
+    rep = asllrp.check_alignment(tokens, counts, rates)
+
+    ratio = rep.span_ratio_median_by_fps
+    assert set(ratio) == {"24", "30"}, f"expected two clip frame rates, got {ratio}"
+    assert ratio["30"] == pytest.approx(1.00, abs=0.02)
+    assert ratio["24"] == pytest.approx(30 / 24, abs=0.02)
+
+    assert rep.aligned
+    assert rep.n_tokens_aligned / rep.n_tokens >= 0.99, rep.as_dict()
+    # The size of the correction: a tenth of all tokens were out of range before, and
+    # being in range was never evidence of landing on the right frames.
+    assert rep.n_tokens_aligned_one_to_one < 0.92 * rep.n_tokens_aligned
 
 
-def test_crop_frame_index_returns_none_outside_the_utterance() -> None:
-    """Positions past the utterance start are not clamped - clamping mislabels."""
-    tok = asllrp.SignToken(
-        video_id="1",
-        gloss="A",
-        start_frame=100,
-        end_frame=110,
-        utterance_start=100,
-        utterance_end=200,
-        utterance_video="7.mp4",
-        signer="Cory",
-        source_collection="Cory_x",
-        sign_type="Signs",
-    )
-    assert asllrp.crop_frame_index(tok, 100) == 1
-    assert asllrp.crop_frame_index(tok, 110) == 11
-    assert asllrp.crop_frame_index(tok, 99) is None
+def test_crop_frame_index_rescales_by_the_clip_frame_rate() -> None:
+    tok = _token()
+    # A 30 fps clip is frame-for-frame.
+    assert asllrp.crop_frame_index(tok, 100, clip_fps=30.0) == 1
+    assert asllrp.crop_frame_index(tok, 110, clip_fps=30.0) == 11
+    # A 24 fps clip of the same footage has four frames for every five.
+    assert asllrp.crop_frame_index(tok, 100, clip_fps=24.0) == 1
+    assert asllrp.crop_frame_index(tok, 110, clip_fps=24.0) == 9
+    assert asllrp.crop_frame_index(tok, 200, clip_fps=24.0) == 81
+    assert asllrp.crop_frame_range(tok, clip_fps=24.0) == (1, 9)
+    # Before the utterance: not clamped - clamping mislabels.
+    assert asllrp.crop_frame_index(tok, 98, clip_fps=30.0) is None
+
+
+def test_the_clip_frame_rate_has_no_default() -> None:
+    """A default of 30 fps is the bug: it is silently right for 62 clips of 200."""
+    tok = _token()
+    with pytest.raises(TypeError):
+        asllrp.crop_frame_index(tok, 100)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        asllrp.crop_frame_range(tok)  # type: ignore[call-arg]
+    with pytest.raises(ValueError, match="positive"):
+        asllrp.crop_frame_index(tok, 100, clip_fps=0.0)
 
 
 def test_alignment_passes_when_indices_do_index_the_clips() -> None:
     """The check must be able to say yes, or it is not a check."""
-    fake = [
-        asllrp.SignToken(
-            video_id="1",
-            gloss="A",
-            start_frame=0,
-            end_frame=5,
-            utterance_start=0,
-            utterance_end=20,
-            utterance_video="42.mp4",
-            signer="Cory",
-            source_collection="Cory_x",
-            sign_type="Signs",
-        )
-    ]
-    rep = asllrp.check_alignment(fake, {"42": 20})
+    fake = [_token(start_frame=0, end_frame=5, utterance_start=0, utterance_end=20)]
+    fake[0].utterance_video = "42.mp4"
+    uid = fake[0].utterance_id
+    rep = asllrp.check_alignment(fake, {uid: 21}, {uid: 30.0})
     assert rep.aligned
     assert rep.n_tokens_aligned == 1
     assert rep.n_tokens_overshoot == 0
+
+
+def test_alignment_can_say_no() -> None:
+    """...and to say no. A token past the end of a 24 fps clip is out of range."""
+    fake = [_token(start_frame=190, end_frame=200)]
+    uid = fake[0].utterance_id
+    # 101 session frames at 24 fps is 81 clip frames; give it a clip of 60.
+    rep = asllrp.check_alignment(fake, {uid: 60}, {uid: 24.0})
+    assert not rep.aligned
+    assert rep.n_tokens_overshoot == 1

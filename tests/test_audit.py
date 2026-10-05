@@ -475,3 +475,156 @@ def test_too_few_clips_reports_no_interval_and_no_mde() -> None:
     ]
     st = A.bootstrap_shift(list(zip(windows, windows, strict=True)), "brow_raise", n_boot=100)
     assert np.isnan(st.ci_low) and np.isnan(st.p_value) and np.isnan(st.mde)
+
+
+# ---------------------------------------------------------------------------
+# human frame-level markers through the same window builder
+# ---------------------------------------------------------------------------
+
+
+def _clip(n: int = 120, fps: float = 24.0, seed: int = 0) -> tuple[dict, object]:
+    """A synthetic clip the window builder accepts: a fixed pose with moving hands."""
+    from seam.perception.extract import ClipMeta
+    from seam.perception.tasks_api import FACE_BLENDSHAPES, TOTAL_POINTS
+
+    rng = np.random.default_rng(seed)
+    base = rng.uniform(0.3, 0.7, size=(TOTAL_POINTS, 3)).astype(np.float32)
+    wobble = 0.02 * rng.normal(size=(n, TOTAL_POINTS, 3)).astype(np.float32)
+    drift = 0.05 * np.sin(np.linspace(0, 6 * np.pi, n))[:, None, None].astype(np.float32)
+    arrays = {
+        "landmarks": base[None] + wobble + drift,
+        "blendshapes": rng.uniform(0, 0.2, size=(n, FACE_BLENDSHAPES)),
+        "presence": np.ones((n, 4), dtype=bool),
+        "head_rotation": np.tile(np.eye(4), (n, 1, 1)),
+    }
+    meta = ClipMeta(
+        source_path="x.mp4",
+        utterance_id="1",
+        native_fps=fps,
+        source_width=256,
+        source_height=256,
+        frame_count=n,
+        detection_rates={},
+    )
+    return arrays, meta
+
+
+def _probs(n: int, negative: np.ndarray) -> np.ndarray:
+    """Per-frame FER rows whose negative mass is exactly ``negative``."""
+    p = np.zeros((n, len(fer.EMOSIGN_LABELS)), dtype=np.float32)
+    for k in fer.NEG_IDX:
+        p[:, k] = negative / len(fer.NEG_IDX)
+    p[:, fer.NEUTRAL_IDX] = 1.0 - negative
+    return p
+
+
+def test_default_windows_still_carry_the_heuristic_markers() -> None:
+    arrays, meta = _clip()
+    ws = A.build_windows("c", arrays, meta, _probs(120, np.full(120, 0.3)))
+    assert ws and all(w.names == M.MARKERS and w.partial == () for w in ws)
+    assert all(w.n_frames <= A.WINDOW for w in ws)
+
+
+def test_human_markers_give_bearing_free_and_partial_windows() -> None:
+    """24 fps clip, analysis at 12 fps: native frames 48-71 are analysis frames 24-35."""
+    arrays, meta = _clip()
+    track = np.zeros(120, dtype=bool)
+    track[48:72] = True
+    ws = A.build_windows(
+        "c",
+        arrays,
+        meta,
+        _probs(120, np.full(120, 0.3)),
+        window=6,
+        stride=3,
+        frame_markers={"brow_raise": track, "negation": np.zeros(120, dtype=bool)},
+    )
+    assert ws[0].names == ("brow_raise", "negation")
+    by_start = {w.start: w for w in ws}
+    assert by_start[24].marker("brow_raise") and by_start[27].marker("brow_raise")
+    assert by_start[0].free_of("brow_raise") and by_start[42].free_of("brow_raise")
+    # Starts at 21: frames 21-26, half covered -> bearing. Starts at 33: frames 33-38,
+    # half covered -> bearing. Starts at 36: untouched -> free.
+    assert by_start[21].marker("brow_raise")
+    assert by_start[36].free_of("brow_raise")
+    # A window the event only clips is on neither side.
+    track2 = np.zeros(120, dtype=bool)
+    track2[48:52] = True  # analysis frames 24-25 only
+    ws2 = A.build_windows(
+        "c",
+        arrays,
+        meta,
+        _probs(120, np.full(120, 0.3)),
+        window=6,
+        stride=3,
+        frame_markers={"brow_raise": track2},
+    )
+    w = {x.start: x for x in ws2}[24]
+    assert not w.marker("brow_raise") and not w.free_of("brow_raise")
+    assert w.partial == ("brow_raise",)
+    assert all(x.free_of("negation") for x in ws)
+
+
+def test_a_marker_track_of_the_wrong_length_is_refused() -> None:
+    """A track built at the wrong frame rate has the wrong length; that must not pass."""
+    arrays, meta = _clip()
+    with pytest.raises(ValueError, match="frames"):
+        A.build_windows(
+            "c",
+            arrays,
+            meta,
+            _probs(120, np.full(120, 0.3)),
+            frame_markers={"brow_raise": np.zeros(150, dtype=bool)},
+        )
+
+
+def test_partial_windows_are_not_used_as_the_marker_free_side() -> None:
+    marked = make_window("c", 0, brow_raise=True, neg=0.5)
+    partial = make_window("c", 1, neg=0.9)
+    partial.partial = ("brow_raise",)
+    clean = make_window("c", 2, neg=0.1)
+    pairs = A.match_windows([marked, partial, clean], "brow_raise")
+    assert [(a.index, b.index) for a, b in pairs] == [(0, 2)]
+
+
+def _human_design(effect: float, n_clips: int = 24) -> list[A.Window]:
+    """Clips with a human-marked span whose frames carry ``effect`` extra negative mass."""
+    out: list[A.Window] = []
+    for c in range(n_clips):
+        arrays, meta = _clip(seed=c)
+        rng = np.random.default_rng(100 + c)
+        track = np.zeros(120, dtype=bool)
+        start = int(rng.integers(10, 70))
+        track[start : start + 24] = True
+        negative = 0.3 + 0.02 * rng.normal(size=120) + effect * track
+        out += A.build_windows(
+            f"clip{c}",
+            arrays,
+            meta,
+            _probs(120, np.clip(negative, 0, 1)),
+            window=6,
+            stride=3,
+            frame_markers={"brow_raise": track},
+        )
+    return out
+
+
+def test_a_planted_bias_on_human_marked_frames_is_recovered_end_to_end() -> None:
+    """The continuous-signing audit's positive control, through the real window builder.
+
+    Frame-level FER rows, a frame-level human track, resampling to the analysis rate,
+    windowing, within-clip matching and the cluster bootstrap: a +0.05 shift planted on
+    the marked frames must come out with an interval that excludes zero and covers it.
+    """
+    pairs = A.match_windows(_human_design(0.05), "brow_raise", tolerance=5.0)
+    stats = A.bootstrap_shift(pairs, "brow_raise")
+    assert stats.n_clips >= 20
+    assert stats.ci_low > 0
+    assert stats.ci_low < 0.05 < stats.ci_high or stats.mean_shift == pytest.approx(0.05, abs=0.01)
+
+
+def test_no_planted_bias_on_human_marked_frames_reads_as_null() -> None:
+    pairs = A.match_windows(_human_design(0.0), "brow_raise", tolerance=5.0)
+    stats = A.bootstrap_shift(pairs, "brow_raise")
+    assert stats.ci_low < 0 < stats.ci_high
+    assert stats.mde == stats.mde, "a null must carry its minimum detectable effect"

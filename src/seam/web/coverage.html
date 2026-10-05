@@ -22,8 +22,9 @@
     </div>
     <div class="callout warn">
       <b>Affect and gloss are withheld from the live demo on purpose.</b> Affect is withheld
-      because M4 measured 0.497 balanced accuracy against a 0.5 reference. Gloss recognition is
-      withheld because M5a's WER (0.916) equals its most-frequent baseline. A number that
+      because M4 measured 0.481 to 0.507 balanced accuracy over three seeds against a 0.5
+      reference. Gloss recognition is
+      withheld because M5a's WER (0.920) does not beat its most-frequent baseline (0.920). A number that
       carries no information is worse than no number, so both are withheld rather than shown
       empty.
     </div>
@@ -61,23 +62,44 @@
     <h2>Other measured results</h2>
     <div class="card">
       <div class="body prose">
-        <p><b style="color:var(--fg)">M1 confound audit — refuted.</b> No marker-induced
-        negative FER bias is detectable across 2,565 clips and 3 non-signer models:
-        −0.008…+0.002 against an MDE of 0.003–0.008. A powered null, not an absence of
-        measurement.</p>
+        <p><b style="color:var(--fg)">M1 confound audit — refuted on isolated signs.</b> No
+        brow- or mouth-marker-induced negative FER bias is detectable across 2,565 WLASL clips
+        and 3 non-signer models: −0.008…+0.002 against an MDE of 0.003–0.008. A powered null,
+        not an absence of measurement. It says nothing about head shake, for which there is no
+        working instrument (one matched pair after the yaw fix).</p>
+        <p><b style="color:var(--fg)">The same question on continuous signing — not
+        supported.</b> 200 utterances, human frame-level markers, 0.5 s windows inside the
+        signing span, a decision rule fixed before the first run. No marker meets it. Brow
+        furrow leans the other way in all three models; brow raise and rhetorical questions
+        lean positive in two and do not survive correction. Yes/no and wh-questions have too
+        few clips to estimate, and these are small FER models, so this is not evidence that
+        the confound does not exist.</p>
         <p><b style="color:var(--fg)">M4 factorisation — refuted.</b> Worst-fold
-        cross-prediction AUC 0.7276 (heuristic <code>y_L</code>) and 0.7031 (human
-        <code>y_L</code>) against a ≤0.60 target, with the signer positive control at 0.973 so
-        the instrument demonstrably works. The core contribution as originally framed was
-        withdrawn.</p>
+        cross-prediction AUC 0.694 (heuristic <code>y_L</code>) and 0.726 (human
+        <code>y_L</code>) against a ≤0.60 target, with the signer positive control at 0.98 so
+        the instrument demonstrably works. The gate fails in every one of three seeds and
+        five ablation variants. The core contribution as originally framed was withdrawn.</p>
         <p><b style="color:var(--fg)">M3 label quality.</b> Human SignStream non-manual
         annotations for all 200 utterances; Cohen's kappa 0.639 (negation) and 0.734 (rhetorical
-        question) usable, 0.028 and 0.038 at chance for the other two categories.</p>
+        question) usable, 0.028 and 0.038 at chance for the other two categories. The
+        <i>visual</i> markers were checked against human frame labels, leave one signer
+        out: brow raise is validated (within-clip AUC 0.82–0.88), brow furrow is not (0.60),
+        and head shake and head nod are unreadable even by a fitted detector. An earlier
+        negation ↔ head-shake association (r = 0.554) was produced by a rotation bug and is
+        withdrawn.</p>
         <p><b style="color:var(--fg)">M2 efficiency.</b> 73.2 ms p95 perception, 186 MB peak for
         six models resident at once against a 2,500 MB ceiling, 20.4 FPS sustained (repeats
         19.7–20.4, so K6 is met at the median and missed at the low end).</p>
-        <p><b style="color:var(--fg)">M5a gloss recognition — negative.</b> WER 0.916 against a
-        most-frequent baseline of 0.916 and a shuffled-label control of 0.911.</p>
+        <p><b style="color:var(--fg)">M5a gloss recognition — gate not met.</b> WER 0.920
+        against a most-frequent baseline of 0.920, signer-disjoint, on 1,736 tokens over 546
+        glosses. The first run of this experiment (0.916 against 0.916) was not a measurement:
+        its model predicted a single gloss, and its token frames were misaligned on the 138
+        clips recorded at 24 fps. Both are corrected; the verdict is the same and is now
+        from an instrument that passes a positive control.</p>
+        <p><b style="color:var(--fg)">Frame alignment.</b> ASLLRP frame indices are on a
+        30 fps timeline while 138 of the 200 clips are 24 fps. Checked against an independent
+        signal — annotated blinks against the eye-blink blendshape — the corrected mapping
+        scores AUC 0.710 on those clips where frame-for-frame scores 0.554.</p>
       </div>
     </div>
     <p class="prose note" style="margin-top:var(--s-3)">

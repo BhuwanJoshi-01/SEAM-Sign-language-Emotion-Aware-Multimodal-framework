@@ -44,6 +44,8 @@ from seam.features import markers as VM
 from seam.features import syntactic as SY
 from seam.logging import get, setup
 from seam.paths import artifacts_root, default_data_root
+from seam.provenance import KEY as PROVENANCE_KEY
+from seam.provenance import stamp
 
 log = get("label_markers")
 
@@ -165,6 +167,10 @@ def marker_usability(clips: list[ClipLabels]) -> dict[str, dict[str, object]]:
         out[name] = {"clip_prevalence": round(prev, 4), "state": state, "why": why}
     return out
 
+
+#: A magnitude that is zero on more than this fraction of clips is blind. The same
+#: figure `scripts/cue_grounding.py` uses, so the two reports cannot disagree about it.
+BLIND_ZERO_FRACTION = 0.60
 
 #: Which visual marker is expected to co-occur with which syntactic label, and on
 #: what linguistic grounds. Kept explicit so a pairing cannot be invented after
@@ -303,6 +309,26 @@ def magnitude_association(
         }
 
     obs = _partial_pb(y, x, z)
+
+    # The same blindness rule `scripts/cue_grounding.py` applies, because the two reports
+    # disagreed: this one printed r and p for negation <-> head_shake while the grounding
+    # report called the same channel blind. A magnitude that is zero on most clips cannot
+    # separate them, so its correlation is not a null - it is no measurement. The value
+    # is kept in the artifact, unread, so a later reader can see what was withheld.
+    zero_frac = float(np.mean(np.isclose(x, 0.0)))
+    if zero_frac > BLIND_ZERO_FRACTION:
+        return {
+            "syntactic": syn_name,
+            "visual": vis_name,
+            "n": n,
+            "n_positive": int(y.sum()),
+            "interpretable": False,
+            "blind": True,
+            "zero_fraction": round(zero_frac, 4),
+            "note": f"cannot discriminate: magnitude is zero on {zero_frac:.0%} of clips",
+            "statistic_not_interpreted": round(obs, 4),
+        }
+
     rng = np.random.default_rng(seed)
     null = np.empty(n_perm)
     for i in range(n_perm):
@@ -332,6 +358,7 @@ def magnitude_association(
         "control": "residualised on log clip duration",
         "r_before_duration_control": round(r_before, 4),
         "label_duration_r": round(label_r_dur, 4),
+        "zero_fraction": round(zero_frac, 4),
         "interpretable": True,
     }
 
@@ -474,6 +501,7 @@ def render(rep: dict[str, object]) -> str:
             lines.append(
                 f"  {a['syntactic'] + ' <-> ' + a['visual']:<38} "
                 f"{'-':>7} {'-':>8} {'-':>7}  not interpretable"
+                + (f" - {a['note']}" if a.get("note") else "")
             )
             continue
         lines.append(
@@ -498,6 +526,7 @@ def main() -> int:
     clips = label_all(Path(args.landmark_dir), limit=args.limit)
     log.info("labelled %d clips", len(clips))
     rep = report(clips)
+    rep[PROVENANCE_KEY] = stamp(__file__)
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)

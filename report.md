@@ -49,11 +49,11 @@ Update this table whenever you change a status. It is the only part most people 
 
 | # | Task | Owner | Status | Verified by | Date |
 |---|---|---|---|---|---|
-| 0 | Rotate exposed password | | `NOT STARTED` — **15 min, yours** | | |
+| 0 | Rotate exposed password | | **UNCONFIRMED** — the section below is marked `DONE — NEEDS VERIFICATION` but no box is ticked and no confirmation output is pasted; owner to confirm | | |
 | 1 | SMPL-X model weights | | `DONE` — model verified, **but LBS mesh gen still fails** | | |
 | 2 | M4 gate decision | | `DONE — NEEDS VERIFICATION` — (c) refuted, so (a) | | |
 | 3 | BU non-manual XML request | | `DONE` — 51 collections, 43,038 events, 200/200 joined | | |
-| 4 | DWPose corpus download | | `NOT STARTED` | | |
+| 4 | DWPose corpus download | | `DONE — NEEDS VERIFICATION` — tar holds video, **no pose**; see `guide.md` step 4 | | |
 | 5 | M7 preference study | | `IN PROGRESS` — arms defined and both render; **blocked only on human raters** | | |
 
 **Project state at the time this form was written** — so a later reader can tell
@@ -61,10 +61,15 @@ whether a number has moved:
 
 - Test suite: **306 passing**, lint and typecheck clean, `make serve-check` green.
 - Gates closed: M0, M1, M2. M4 **not met** (worst-fold cross-AUC 0.7276 against a
-  target of 0.60, with the signer control passing at 0.9729).
-- M5a: **negative result** — WER 0.916, against a most-frequent baseline of 0.916 and a
-  shuffled-label control of 0.911. The model is indistinguishable from always predicting
-  the most common gloss.
+  target of 0.60, with the signer control passing at 0.9729). *These were the figures when
+  the form was written; they were superseded on 2026-10-05 - see Step 2.*
+- M5a: **gate not met, and the first run could not have met it.** As first reported: WER
+  0.916 against a most-frequent baseline of 0.916. That model predicted one gloss in every
+  fold (so it *was* the baseline), on token frames that were misaligned for the 138 clips
+  recorded at 24 fps. Re-run 2026-10-05 with the frame mapping corrected and a model that
+  passes a positive control: 1,736 tokens over 546 glosses, WER 0.92 against a
+  most-frequent baseline of 0.92 and a shuffled-label control of 0.91. Still no better than
+  the baseline, now from an instrument that could have shown otherwise.
 - Known open defect: `export_glb()` writes a JSON parameter file, not a GLB mesh,
   despite its docstring. Not a valid mesh export, and `trimesh` is not installed.
 - **Task 5 is blocked by an untracked build step.** The avatar is a tested library that
@@ -180,15 +185,23 @@ no correct answer for me to supply.
 | Date | |
 | Status | `DONE — NEEDS VERIFICATION` |
 
-**Measured evidence** (from `artifacts/m4/factorizer_multilabel.json`, `runs.full.gate`):
+**Measured evidence** (from `artifacts/m4/factorizer_multilabel.json`, `runs.full.gate`),
+**re-run 2026-10-05** on yaw-fixed code with the baseline and checkpoint-selection defects
+corrected. The values this table held when the decision was taken are in the next table and
+in `artifacts/superseded/pre_yawfix/m4/`.
 
 | Quantity | Value | Target | Pass? |
 |---|---|---|---|
-| `worst_cross_auc` | 0.7276 | ≤ 0.60 | **No** |
-| `signer_control_max` | 0.9729 | ≥ 0.80 | Yes |
+| `worst_cross_auc` | 0.6944 | ≤ 0.60 | **No** |
+| `signer_control_max` | 0.9812 | ≥ 0.80 | Yes |
 | `gate_passed` | false | — | — |
 | `folds_excluded` | 1 (Ben, insufficient label support) | — | — |
-| Cross A→L | 0.5048 | — | chance (0.5) |
+| Cross A→L | 0.5891 | — | **not** chance; the earlier 0.5048 was a mean over folds on both sides of 0.5 |
+
+With human `y_L` the same run gives `worst_cross_auc` 0.7264, so human labels still do not
+rescue the gate and the decision below stands. Over three seeds the `full` model's
+worst-fold value is 0.710 ± 0.014. Full account: the 2026-10-05 entry of
+`paper/EXPERIMENT_LOG.md`.
 
 **Confirm you read the artifact, not this table:** the numbers above should match the
 `gate` block in the JSON. If they do not, stop and report — the artifact is the
@@ -201,7 +214,8 @@ worth recording that the decisive test turned out not to be more data: it was **
 labels**, available the moment the SignStream XML landed.
 
 Re-running the whole M4 experiment with **human** linguistic labels in the same four
-slots, same folds, same features, same seeds:
+slots, same folds, same features, same seeds (figures as measured on 2026-10-01, before
+the yaw fix; kept as the record of what the decision was based on):
 
 | quantity | heuristic `y_L` | human `y_L` |
 |---|---|---|
@@ -340,8 +354,9 @@ hand-copied — but the *download* itself has not been independently checked.
 
 ## Step 4 — Download the DWPose pose corpus
 
-**Why:** M5a's negative result is a *data-scale* verdict — 1,563 tokens over 499
-glosses, 3.1 each, 284 of them seen exactly once. This corpus has ~49,000 frame-aligned
+**Why:** M5a's negative result is a *data-scale* verdict — 1,736 tokens over 546
+glosses, 3.18 each, 306 of them seen exactly once (1,563 / 499 / 284 before the frame
+mapping was corrected on 2026-10-05). This corpus has ~49,000 frame-aligned
 pose files and is the fair test of whether signing-space pose carries lexical signal.
 It is only **1.17 GB**.
 
@@ -672,9 +687,12 @@ Complete when every step is `VERIFIED` or explicitly `FAILED` with a recorded re
 
 **Outstanding known issues at sign-off** *(carry these forward; do not close them here)*
 
-- [ ] `export_glb()` writes a JSON parameter file, not a GLB mesh, despite its docstring.
-      A real exporter is still needed once the SMPL-X model is present.
-- [ ] M3's headline result (negation ↔ head shake, r = 0.554) has **no backing artifact** —
-      it was run interactively and never persisted. Caught by the provenance guard.
-- [ ] The BU non-manual request is outstanding; until it resolves, every non-manual
-      feature is a heuristic pseudo-label.
+- [x] ~~`export_glb()` writes a JSON parameter file, not a GLB mesh.~~ Closed 2026-10-04:
+      `seam.avatar.gltf_export` writes a skinned, animated glTF verified by three.js.
+- [x] ~~M3's headline result (negation ↔ head shake, r = 0.554) has no backing artifact.~~
+      Closed 2026-10-05 the other way: the result was a yaw bug and is **withdrawn**. The
+      duration-controlled analysis is now persisted in
+      `artifacts/audit/marker_labels_yawfix.json`, where that pairing reads *not interpretable*.
+- [x] ~~The BU non-manual request is outstanding.~~ Closed 2026-10-01: 51 collections,
+      43,038 human non-manual events. The *visual* markers are still heuristic and have not
+      been validated against those human labels.

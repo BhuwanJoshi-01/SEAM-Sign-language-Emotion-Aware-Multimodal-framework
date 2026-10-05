@@ -1,0 +1,58 @@
+{
+  "_comment": "Which result artifacts are current. Read by tests/test_artifact_staleness.py. The canonical path under artifacts/{audit,m3,m4,m5a} always holds the current run. A superseded artifact is moved under artifacts/superseded/<why>/ and kept, because the append-only EXPERIMENT_LOG.md cites its numbers; nothing new may cite it. An unstamped artifact carries no record of the code that wrote it and is listed with the reason that is tolerable, as a ratchet: stamp the script, re-run, remove the entry.",
+  "superseded": {
+    "artifacts/superseded/pre_yawfix/audit/marker_labels.json": {
+      "by": "artifacts/audit/marker_labels.json",
+      "reason": "Written 2026-09-28, before the 2026-10-04 yaw fix in seam.features.markers. Its head_shake prevalence (0.785) and the negation/head_shake association derived from it are artifacts of the broken decomposition."
+    },
+    "artifacts/superseded/pre_yawfix/audit/confound_audit.json": {
+      "by": "artifacts/audit/confound_audit.json",
+      "reason": "Written 2026-09-27, before both head-path changes (the 2026-09-28 oscillation-threshold fix and the 2026-10-04 yaw fix). Its head_shake rows (251 pairs / 210 clips) and head_nod rows (13 / 9) do not survive: re-run, each has 1 pair. The four blendshape rows are identical in the successor."
+    },
+    "artifacts/superseded/pre_yawfix/m4/factorizer.json": {
+      "by": "artifacts/m4/factorizer_multilabel.json",
+      "reason": "The single-expression framing (314 of 1,765 windows), superseded on 2026-09-28 by the multi-label run, and also pre-yaw-fix."
+    },
+    "artifacts/superseded/pre_yawfix/m4/factorizer_multilabel.json": {
+      "by": "artifacts/m4/factorizer_multilabel.json",
+      "reason": "Written 2026-10-01, before the yaw fix. Each window's frame was chosen by brow_raise + head_shake evidence, so the inputs changed when head_shake did."
+    },
+    "artifacts/superseded/pre_yawfix/m4/factorizer_human_labels.json": {
+      "by": "artifacts/m4/factorizer_human_labels.json",
+      "reason": "Written 2026-10-01, before the yaw fix; same frame-selection dependence as the heuristic-label run."
+    },
+    "artifacts/superseded/yawfix_softmax_selection/m4/factorizer_multilabel.json": {
+      "by": "artifacts/m4/factorizer_multilabel.json",
+      "reason": "Yaw-fixed inputs, but checkpoints were still selected on a softmax cross-entropy over the multi-label affect logits and the entangled baseline was trained without the factorized model's class and positive-label weights. Kept because it isolates the effect of the yaw fix alone."
+    },
+    "artifacts/superseded/yawfix_softmax_selection/m4/factorizer_human_labels.json": {
+      "by": "artifacts/m4/factorizer_human_labels.json",
+      "reason": "As above, human linguistic labels."
+    },
+    "artifacts/superseded/yawfix_softmax_selection/m4/factorizer_multilabel_ablation.json": {
+      "by": "artifacts/m4/factorizer_multilabel_ablation.json",
+      "reason": "As above, the three-seed ablation grid."
+    },
+    "artifacts/superseded/yawfix_softmax_selection/m4/factorizer_multilabel_ablation_seed0.json": {
+      "by": "artifacts/m4/factorizer_multilabel_ablation.json",
+      "reason": "As above, the single-seed ablation grid; seed 0 is contained in the three-seed successor."
+    },
+    "artifacts/superseded/one_to_one_frame_mapping/m5a/recogniser.json": {
+      "by": "artifacts/m5a/recogniser.json",
+      "reason": "Two defects. Token frames were mapped frame-for-frame although the indices are on a 30 fps timeline and 138 of 200 clips are 24 fps, so most tokens were read from the wrong frames; and the classifier (ridge 1.0 on unstandardised features) predicted one gloss in every fold, on real and shuffled labels alike, so its WER equalled the most-frequent baseline by construction."
+    },
+    "artifacts/superseded/one_to_one_frame_mapping/data/asllrp_alignment.json": {
+      "by": "artifacts/m3/frame_alignment.json",
+      "reason": "Reported 89.5% / 89.9% of tokens 'aligned' under the frame-for-frame mapping. In range is not aligned: the successor tests the mapping against an independent signal. The frame-rate-aware in-range counts are in artifacts/data/asllrp_alignment.json."
+    },
+    "artifacts/superseded/before_stamping/audit/fer_sensitivity.json": {
+      "by": "artifacts/audit/fer_sensitivity.json",
+      "reason": "Same script and inputs, written before artifacts carried a provenance stamp. Kept only so the M1 log lines that cite it trace to a file if a re-run differs in the last digit."
+    },
+    "artifacts/superseded/before_stamping/m3/signstream_report.json": {
+      "by": "artifacts/m3/signstream_report.json",
+      "reason": "Same script and inputs, written before artifacts carried a provenance stamp."
+    }
+  },
+  "unstamped": {}
+}

@@ -57,10 +57,14 @@ from __future__ import annotations
 
 import collections
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from xml.etree import ElementTree as ET
+
+import numpy as np
+
+from seam.data.asllrp import crop_frame_position
 
 #: Element names that contain "UTTERANCE" but are not utterances. `UTTERANCE-NUMBER` is a
 #: child element of UTTERANCE, so a naive substring match emits it as its own utterance and
@@ -374,6 +378,45 @@ def parse_directory(path: Path, pattern: str = "*.xml") -> tuple[list[Utterance]
     for f in sorted(Path(path).rglob(pattern)):
         utterances.extend(parse_file(f, rep))
     return utterances, rep
+
+
+def frame_mask(
+    utterance: Utterance,
+    n_frames: int,
+    clip_fps: float,
+    select: Callable[[NonManual], bool],
+) -> np.ndarray:
+    """Per-frame boolean track, on the clip's own frames, of the events ``select`` accepts.
+
+    Event bounds are on the 30 fps session timeline and the clip may not be: 138 of the
+    200 EmoSign clips are 24 fps. The conversion is `asllrp.crop_frame_position`, the same
+    function the gloss tokens use, so annotations and tokens cannot be mapped two
+    different ways. An event is widened outward to whole frames (floor of its start, ceil
+    of its end) because a one-frame blink that rounds to nothing is a lost label, and
+    clipped to the clip - an event running past the last frame marks the frames that
+    exist, and one lying wholly outside marks none.
+
+    ``clip_fps`` has no default for the reason given on `asllrp.crop_frame_index`.
+    """
+    mask = np.zeros(int(n_frames), dtype=bool)
+    if utterance.start_frame is None:
+        return mask
+    for nm in utterance.non_manuals:
+        if nm.start_frame is None or nm.end_frame is None or not select(nm):
+            continue
+        lo = int(np.floor(crop_frame_position(nm.start_frame, utterance.start_frame, clip_fps)))
+        hi = int(np.ceil(crop_frame_position(nm.end_frame, utterance.start_frame, clip_fps)))
+        lo, hi = max(lo, 0), min(hi, int(n_frames) - 1)
+        if hi >= lo:
+            mask[lo : hi + 1] = True
+    return mask
+
+
+def marker_frame_mask(
+    utterance: Utterance, marker: str, n_frames: int, clip_fps: float
+) -> np.ndarray:
+    """`frame_mask` for one project marker name, e.g. ``brow_raise`` or ``head_shake``."""
+    return frame_mask(utterance, n_frames, clip_fps, lambda nm: marker in nm.markers)
 
 
 def gloss_vocabulary(utterances: list[Utterance]) -> collections.Counter[str]:

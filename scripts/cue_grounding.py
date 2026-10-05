@@ -48,6 +48,8 @@ from seam.features import markers as VM
 from seam.features import prosody as PR
 from seam.logging import get, setup
 from seam.paths import artifacts_root, default_data_root
+from seam.provenance import KEY as PROVENANCE_KEY
+from seam.provenance import stamp
 
 log = get("cue_grounding")
 
@@ -362,6 +364,7 @@ def main() -> int:
     setup("INFO")
 
     rep = build(Path(args.landmark_dir))
+    rep[PROVENANCE_KEY] = stamp(__file__)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(rep, indent=2), encoding="utf-8")

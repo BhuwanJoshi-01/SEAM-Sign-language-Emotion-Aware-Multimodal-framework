@@ -239,6 +239,55 @@ def class_weights(y: torch.Tensor, n_classes: int) -> torch.Tensor:
     return w / w.mean()
 
 
+def direct_task_losses(
+    out: dict[str, torch.Tensor],
+    y_l: torch.Tensor,
+    y_a: torch.Tensor,
+    cfg: FactorizerConfig,
+    *,
+    weight_l: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """The two supervised terms, ``(loss_l, loss_a)``, defined once.
+
+    Three things must agree on these or the comparison between them means nothing:
+    the factorized model's training objective, its checkpoint selection, and the
+    entangled baseline. They did not. The baseline was trained with unweighted
+    cross-entropy and unweighted BCE while the factorized model had class weights and
+    ``pos_weight``, so the baseline predicted almost no positive affect label (micro-F1
+    0.06 against 0.33) for a reason unrelated to separation; and checkpoints of the
+    factorized model were selected on a *softmax* cross-entropy over the eight affect
+    logits, a leftover of the single-expression framing that the training loss had
+    already abandoned. Everything now calls this.
+    """
+    loss_l = nn.functional.cross_entropy(out["logits_l"], y_l, weight=weight_l)
+    # Affect is multi-label, so this is BCE over independent binary targets, not
+    # softmax cross-entropy over 8 competing classes. The distinction is the whole
+    # point of the rerun: softmax forces exactly one label to win, which is what made
+    # 82% of the windows untrainable.
+    loss_a = nn.functional.binary_cross_entropy_with_logits(
+        out["logits_a"], y_a, pos_weight=_affect_pos_weight(y_a, cfg)
+    )
+    return loss_l, loss_a
+
+
+def selection_loss(
+    out: dict[str, torch.Tensor],
+    y_l: torch.Tensor,
+    y_a: torch.Tensor,
+    cfg: FactorizerConfig,
+    *,
+    weight_l: torch.Tensor | None = None,
+) -> float:
+    """Validation criterion for choosing a checkpoint: the weighted direct terms only.
+
+    The separation terms are deliberately excluded. Selecting on them would pick the
+    checkpoint that looks most separated on the validation signer, which is the
+    quantity under test.
+    """
+    loss_l, loss_a = direct_task_losses(out, y_l, y_a, cfg, weight_l=weight_l)
+    return float((cfg.w_linguistic * loss_l + cfg.w_affect * loss_a).detach())
+
+
 def factorizer_loss(
     out: dict[str, torch.Tensor],
     y_l: torch.Tensor,
@@ -257,12 +306,7 @@ def factorizer_loss(
     """
     ce = nn.functional.cross_entropy
     bce = nn.functional.binary_cross_entropy_with_logits
-    loss_l = ce(out["logits_l"], y_l, weight=weight_l)
-    # Affect is multi-label, so this is BCE over independent binary targets, not
-    # softmax cross-entropy over 8 competing classes. The distinction is the whole
-    # point of the rerun: softmax forces exactly one label to win, which is what made
-    # 82% of the windows untrainable.
-    loss_a = bce(out["logits_a"], y_a, pos_weight=_affect_pos_weight(y_a, cfg))
+    loss_l, loss_a = direct_task_losses(out, y_l, y_a, cfg, weight_l=weight_l)
     # **Both adversarial terms belong in the total.** The first version of this
     # function added only the two direct losses and commented that the GRL heads'
     # "own loss is not minimised - its gradient is reversed", excluding them. That is

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import collections
 
+import numpy as np
 import pytest
 
 from seam.eval.recogniser import fit_logreg, oov_floor, per_class_recall, predict, wer
@@ -156,3 +157,104 @@ def test_oov_count_and_fraction_are_distinct_quantities() -> None:
     assert count == 30
     assert count / len(ref) == pytest.approx(frac)
     assert frac != pytest.approx(count), "fraction and count must not be interchangeable"
+
+
+# --- a positive control, which this instrument did not have ---------------------------
+
+
+def _planted(
+    scale: float, n_classes: int = 6, per_class: int = 24, seed: int = 0
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Separable classes, three signers each, with features at a chosen scale."""
+    rng = np.random.default_rng(seed)
+    centres = rng.normal(size=(n_classes, 8))
+    X, y, g = [], [], []
+    for c in range(n_classes):
+        for i in range(per_class):
+            X.append((centres[c] + 0.3 * rng.normal(size=8)) * scale)
+            y.append(f"G{c}")
+            g.append(f"S{i % 3}")
+    # An extra majority class so "most frequent" is a real competitor.
+    for i in range(per_class * 2):
+        X.append((rng.normal(size=8) * 0.3 + 4.0) * scale)
+        y.append("IX")
+        g.append(f"S{i % 3}")
+    return np.asarray(X), np.asarray(y), np.asarray(g)
+
+
+def test_the_model_recovers_a_planted_signal_across_signers() -> None:
+    """The check M5a never had: when signal exists, the instrument must find it.
+
+    Features are at the scale of real pose statistics (standard deviation well under 1),
+    because that scale is what broke the first run.
+    """
+    from seam.eval.recogniser import fit_predict
+
+    X, y, g = _planted(scale=0.05)
+    tr, te = g != "S0", g == "S0"
+    hyp, info = fit_predict(X[tr], y[tr], g[tr], X[te])
+    acc = float(np.mean(np.asarray(hyp) == y[te]))
+    majority = float(np.mean(y[te] == "IX"))
+    assert not info["constant"]
+    assert info["n_distinct_predictions"] >= 5
+    assert acc > 0.9 > majority
+
+
+def test_the_first_m5a_configuration_fails_that_control() -> None:
+    """Why "WER equals the most-frequent baseline" was not a finding about pose.
+
+    A ridge of 1.0 on unstandardised features at this scale drives the weights to zero,
+    and the model predicts the most frequent gloss for every token - on a problem a
+    working classifier solves at better than 90%. In the real run it predicted exactly
+    one gloss in all four folds, with real labels and with shuffled ones.
+    """
+    X, y, g = _planted(scale=0.05)
+    tr, te = g != "S0", g == "S0"
+    classes = sorted(set(y[tr].tolist()))
+    hyp = predict(fit_logreg(X[tr], y[tr], classes, lam=1.0), classes, X[te])
+    assert set(hyp) == {"IX"}, "expected the majority-class collapse this test documents"
+
+
+def test_a_constant_predictor_is_flagged() -> None:
+    """Features that carry nothing leave only the bias, and the record must say so."""
+    from seam.eval.recogniser import fit_predict
+
+    X, y, g = _planted(scale=0.05)
+    tr, te = g != "S0", g == "S0"
+    hyp, info = fit_predict(np.zeros_like(X[tr]), y[tr], g[tr], np.zeros_like(X[te]))
+    assert set(hyp) == {"IX"}
+    assert info["constant"] is True
+    assert info["n_distinct_predictions"] == 1
+
+
+def test_an_unstable_ridge_is_refused_rather_than_diverging() -> None:
+    """A ridge past 1/step-size diverges to NaN and predicts class 0 for everything.
+
+    That is indistinguishable, in the output, from a very strong regulariser.
+    """
+    X, y, _ = _planted(scale=0.05)
+    with pytest.raises(ValueError, match="unstable"):
+        fit_logreg(X, y, sorted(set(y.tolist())), lam=1e4)
+
+
+def test_the_regulariser_is_chosen_without_the_test_signer() -> None:
+    """Changing the test labels must not change the selected lambda."""
+    from seam.eval.recogniser import select_lambda
+
+    X, y, g = _planted(scale=0.05)
+    tr = g != "S0"
+    assert select_lambda(X[tr], y[tr], g[tr]) == select_lambda(X[tr], y[tr], g[tr])
+    # Selection sees only what it is given; the held-out signer is simply absent.
+    assert "S0" not in set(g[tr].tolist())
+
+
+def test_standardise_uses_training_statistics_only() -> None:
+    from seam.eval.recogniser import standardise
+
+    train = np.array([[0.0, 1.0], [2.0, 1.0]])
+    test = np.array([[4.0, 5.0]])
+    a, b = standardise(train, test)
+    np.testing.assert_allclose(a[:, 0], [-1.0, 1.0])
+    np.testing.assert_allclose(b[0, 0], 3.0)
+    # A constant training column is left unscaled, not divided by zero.
+    np.testing.assert_allclose(b[0, 1], 4.0)

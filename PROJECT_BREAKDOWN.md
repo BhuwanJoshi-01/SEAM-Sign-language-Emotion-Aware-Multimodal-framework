@@ -43,19 +43,21 @@ path's legs are noise (see §4), and the regressor says nothing about meaning.
 
 | Stage | What it does | State | Evidence |
 |---|---|---|---|
-| **M0** | Reproducibility gate | **regressed to OPEN** | `make readiness`: 6/10. Three blockers were false negatives; see §2.1 |
-| **M1** | Causal claim on affect | **refuted** | `paper/EXPERIMENT_LOG.md` |
+| **M0** | Data readiness gate | **OPEN on two reviewer decisions** | `make readiness`: 7/10. Three earlier blockers were false negatives; see §2.1 |
+| **M1** | Marker-induced FER bias | **not supported, measured twice**: isolated signs (heuristic markers) and continuous signing (human frame-level markers, pre-registered rule) | `artifacts/audit/confound_audit.json`, `confound_audit_continuous.json` |
 | **M2** | Latency budget on RTX 3050 | **met**, marginal | 19.7–20.4 FPS, K6 |
 | **M3** | Non-manual instrumentation | **met** | 2,407 utterances, 100% mapped |
 | **M3b** | Label quality | **mixed** | kappa 0.639 / 0.734 usable, 0.028 / 0.038 at chance |
-| **M4** | Affect vs human labels | **refuted** | worst cross-AUC 0.7276 → 0.7031, still FAIL |
-| **M5a** | Gloss recognition | **refuted** | WER 0.916 = most-frequent baseline |
-| **M6** | Avatar retargeting | **superseded** | landmark arms replaced by SMPLer-X |
+| **M4** | Factorized encoder (linguistic vs affect) | **refuted** | worst cross-AUC 0.694 (heuristic `y_L`) / 0.726 (human `y_L`) on corrected code, vs ≤0.60 |
+| **M5a** | Gloss recognition | **gate not met** | WER 0.920 vs most-frequent baseline 0.920; first run superseded (constant predictor, misaligned frames) |
+| **M5b** | Translation (How2Sign) | **not started** | data on disk: 35,176 sentences, 991 shards |
+| **M6** | Emotion-conditioned generation | **not started** | — |
+| **M7 (retargeting)** | Landmark → SMPL-X solve | **superseded** | landmark arms replaced by SMPLer-X |
 | **M7a** | Avatar rendering | **working** | 4 clips, real geometry, animated glTF |
 | **M7** | Preference study | **blocked on humans** | stimuli + harness ready; **0 raters** |
 
-Two of nine stages are refuted hypotheses and one is at chance. That is the honest state and
-it is recorded rather than buried.
+Stage names follow `plan.md` §3. Two stages are refuted hypotheses and one is at its
+baseline. That is the honest state and it is recorded rather than buried.
 
 ### 2.1 M0 regressed because the gate was wrong, not because data was lost
 
@@ -66,7 +68,7 @@ errors had one shape: **the gate stated a fact it had not measured.**
 |---|---|---|
 | `wlasl_local` | `reuse path absent: /home/bhuwan/Videos/wlasl/videos` | **3,863 clips, 7.43 GB, at exactly that path** |
 | `rafdb_mediapipe` | `not fetched yet` | **2.72 GB, 6/6 shards readable** — 14,329 train + 3,071 val + 3,071 test rows |
-| `how2sign_mediapipe_pose` | `not fetched yet` | genuinely absent — now fetching, 31 shards / 14.12 GB, ungated |
+| `how2sign_mediapipe_pose` | `not fetched yet` | was absent; now on disk as 991 shards / 4.8 GB from `martinctl/how2sign-asl-landmarks`. The 31-shard, 14.12 GB repo first named holds JPEGs and a constant caption and is unusable |
 | `asl_citizen_poses` | `not fetched yet` | genuinely absent — 81 GB, reviewer-owned, not started |
 
 Three fixes, each measured:
@@ -106,8 +108,10 @@ The 4 genuinely lost: `beard/1`, `children/1`, `corn/0`, `decide/0`. `wlasl_repa
 **empty** — the earlier attempt produced nothing and left a directory that looked like
 progress. Run `make wlasl-index` to see the current count.
 
-**M0 is still OPEN, and now correctly so:** ASL Citizen (81 GB) and NSL provenance are
-outstanding, and 4 of 3,863 WLASL clips are gone.
+**M0 is still OPEN, and now correctly so:** 7/10 resources usable. ASL Citizen (81 GB) and
+NSL provenance are outstanding, and 4 of 3,775 indexed WLASL clips are gone. The gate now
+counts those from `wlasl.index_on_disk` over every file instead of asking for a repair pass
+on the strength of a 300-file sample.
 
 ---
 
@@ -219,13 +223,25 @@ landmark-derived head/neck tilt and was previously unknown.
 EmoSign clips. Two 2D points per bone do not determine monocular depth for a leg. This is not
 a bug to tune; it is the ceiling of the method, and it is why the front end was replaced.
 
-**Gloss recognition does not beat its baseline.** WER **0.916** against a most-frequent
-baseline of **0.916** (shuffled control 0.911; closed-vocab 0.875). 1,563 tokens, 499
+**Frame indices were being read at the wrong rate.** ASLLRP frame indices are on a 30 fps
+timeline and 138 of the 200 clips are 24 fps, so the frame-for-frame mapping ran a quarter
+fast on most of the corpus. Found by testing alignment against an independent signal
+(annotated blinks vs the eye-blink blendshape: AUC 0.554 frame-for-frame, 0.710 corrected,
+on the 24 fps clips). Fixed in `asllrp.crop_frame_position`, which takes the clip's frame
+rate and has no default.
+
+**Gloss recognition does not beat its baseline.** Re-run 2026-10-05 on correctly aligned
+frames: WER **0.920** against a most-frequent baseline of **0.920** (shuffled control 0.910;
+closed-vocab 0.881), 1,736 tokens over 546 glosses. The numbers first recorded here were not
+a measurement - the model predicted one gloss in every fold - and are kept for the record:
+WER 0.916 against 0.916 (shuffled control 0.911; closed-vocab 0.875). 1,563 tokens, 499
 glosses, 3.1 per gloss, 284 hapax.
 
-**Affect does not separate on human labels.** Worst cross-AUC 0.7276 → 0.7031 with human
-`y_L`, still failing the gate. Signer control is 0.973 in both arms, so the split is finding
-*who* is signing, not *what*.
+**Linguistic and affect information do not separate.** Worst cross-AUC 0.694 with heuristic
+`y_L` and 0.726 with human `y_L` (re-run 2026-10-05 on corrected code), against ≤0.60. Signer
+control is 0.98 in both arms, so the instrument can see. Over three seeds no separation loss
+moves the direction the gate fails on, and neither model learns affect (balanced accuracy
+0.481–0.507 against 0.5).
 
 **No avatar preference result exists.** Both study scripts refuse to invent a baseline,
 correctly. The comparison arm is now defined (§5) and both arms render, but **no human has
@@ -338,6 +354,13 @@ so every structural check passed throughout. The exporter now writes a matte mat
 * **ASLLRP data is not redistributed**; `*.xml` is gitignored as a licence safeguard.
 * **A provenance guard** (`tests/test_provenance.py`) fails on any number in
   `EXPERIMENT_LOG.md` / `CLAIMS_LEDGER.md` that has no artefact behind it.
+* **A staleness guard** (`tests/test_artifact_staleness.py`) fails when a result artefact
+  was written by code that has since changed. Each artefact carries a fingerprint of every
+  `seam` module loaded when it was written; an overtaken result is moved to
+  `artifacts/superseded/` and registered in `paper/artifact_status.json`, never overwritten.
+* **ASLLRP frame indices are on a 30 fps timeline** and most clips are 24 fps. Anything that
+  reads a frame-level annotation goes through `asllrp.crop_frame_position`, which takes the
+  clip's frame rate and has no default.
 * Every table above is **pipeline measurement, not quality measurement.** A confidently
   wrong pipeline produces a similar table.
 
@@ -346,7 +369,9 @@ so every structural check passed throughout. The exporter now writes a matte mat
 ## 8. Reproducing the numbers
 
 ```bash
-make lint typecheck test                       # 476 tests
+make lint typecheck test                       # the whole suite; the count is whatever pytest prints
+make provenance                                # untraced numbers + stale artefacts
+make repro                                     # every cited artefact, 15 stages, in dependency order
 make serve-check                               # HTTP contract of both pages
 make demo-avatar                               # 4 clips, ~15 min (SMPLer-X on GPU)
 make serve                                     # / and /avatar

@@ -227,6 +227,77 @@ def test_factorized_and_baseline_both_train() -> None:
         )
 
 
+def test_the_supervised_terms_have_one_definition() -> None:
+    """The factorized objective and the baseline's must be the same two numbers.
+
+    Until 2026-10-05 the entangled baseline was trained with unweighted losses while the
+    factorized model was class- and pos-weighted, so "the only difference is the absence
+    of separation pressure" was false and the baseline's affect micro-F1 of 0.06 said
+    nothing about separation.
+    """
+    from seam.affect.encoder import class_weights, direct_task_losses
+
+    cfg = _cfg()
+    torch.manual_seed(0)
+    nm, p = torch.randn(32, cfg.dim_nm), torch.randn(32, cfg.dim_p)
+    yl = (torch.rand(32) < 0.15).long()
+    ya = (torch.rand(32, cfg.n_affect) < 0.2).float()
+    w_l = class_weights(yl, cfg.n_linguistic)
+    out = FactorizedEncoder(cfg)(nm, p)
+
+    loss_l, loss_a = direct_task_losses(out, yl, ya, cfg, weight_l=w_l)
+    _, parts = factorizer_loss(out, yl, ya, cfg, weight_l=w_l)
+    assert parts["loss_l"] == pytest.approx(float(loss_l.detach()))
+    assert parts["loss_a"] == pytest.approx(float(loss_a.detach()))
+
+    # ...and that definition is the weighted one. On an imbalanced batch the weighted
+    # and unweighted losses differ, so a baseline that drops the weights is detectable.
+    plain_a = torch.nn.functional.binary_cross_entropy_with_logits(out["logits_a"], ya)
+    plain_l = torch.nn.functional.cross_entropy(out["logits_l"], yl)
+    assert float(loss_a.detach()) != pytest.approx(float(plain_a.detach()))
+    assert float(loss_l.detach()) != pytest.approx(float(plain_l.detach()))
+
+
+def test_checkpoints_are_selected_on_the_training_criterion_not_a_softmax() -> None:
+    """Selection once used softmax cross-entropy over the eight affect logits.
+
+    That was the single-expression framing surviving in one line after the training loss
+    had moved to independent binary targets. A softmax is the wrong instrument for
+    choosing a multi-label checkpoint for two reasons, both pinned here:
+
+    * it is invariant to shifting every logit, so a model that calls **all eight**
+      emotions present scores exactly as well as one that calls the right two;
+    * a clip with no emotion above threshold contributes zero whatever is predicted -
+      and 130 of the 1,765 windows are such clips - so false alarms on them are free.
+    """
+    from seam.affect.encoder import selection_loss
+
+    cfg = _cfg()
+    yl = torch.zeros(4, dtype=torch.long)
+    logits_l = torch.zeros(4, cfg.n_linguistic)
+
+    def crit(logits_a: torch.Tensor, ya: torch.Tensor) -> float:
+        return selection_loss({"logits_l": logits_l, "logits_a": logits_a}, yl, ya, cfg)
+
+    def softmax_ce(logits_a: torch.Tensor, ya: torch.Tensor) -> float:
+        return float(torch.nn.functional.cross_entropy(logits_a, ya))
+
+    two = torch.zeros(4, cfg.n_affect)
+    two[:, :2] = 1.0  # two emotions present on every clip
+    right = torch.full((4, cfg.n_affect), -6.0)
+    right[:, :2] = 6.0
+    everything = right + 20.0  # same ranking, every label called present
+
+    assert softmax_ce(right, two) == pytest.approx(softmax_ce(everything, two), abs=1e-4)
+    assert crit(right, two) < crit(everything, two)
+
+    none = torch.zeros(4, cfg.n_affect)  # no emotion on these clips
+    quiet = torch.full((4, cfg.n_affect), -6.0)
+    alarm = torch.full((4, cfg.n_affect), 6.0)
+    assert softmax_ce(quiet, none) == softmax_ce(alarm, none) == 0.0
+    assert crit(quiet, none) < crit(alarm, none)
+
+
 def test_affect_loss_rejects_a_class_index_target() -> None:
     """Affect is multi-label; a softmax-style class index must not silently train."""
     cfg = _cfg()

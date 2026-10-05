@@ -33,19 +33,42 @@ CACHE = Path("/tmp/opencode/asllrp_listing.json")
 MIRROR = "https://huggingface.co/api/datasets/FangSen9000/ASLLRP_utterances_results"
 
 
-def local_frame_counts() -> dict[str, int]:
-    """Frame counts from the EmoSign landmark sidecars already extracted."""
+def local_frame_counts() -> tuple[dict[str, int], dict[str, float]]:
+    """Frame counts and frame rates from the EmoSign landmark sidecars already extracted.
+
+    The rate comes from the video container, so it is independent of the token table.
+    """
     lm = default_data_root() / "emosign" / "landmarks"
     counts: dict[str, int] = {}
+    rates: dict[str, float] = {}
     for p in sorted(lm.glob("*.json")):
         try:
             meta = json.loads(p.read_text())
         except (json.JSONDecodeError, UnicodeDecodeError):
             continue
-        uid, fc = meta.get("utterance_id"), meta.get("frame_count")
-        if uid is not None and fc is not None:
+        uid, fc, fps = meta.get("utterance_id"), meta.get("frame_count"), meta.get("native_fps")
+        if uid is not None and fc is not None and fps:
             counts[str(uid)] = int(fc)
-    return counts
+            rates[str(uid)] = float(fps)
+    return counts, rates
+
+
+def inferred_rates(tokens: list[asllrp.SignToken], counts: dict[str, int]) -> dict[str, float]:
+    """Nearest of 24 or 30 fps to what an utterance's span and frame count imply.
+
+    The mirror listing carries frame counts and no frame rate. Inferring the rate from
+    the count makes "in range" true partly by construction for this reference set, so
+    what it contributes is the split - how many utterances sit at each ratio - and not
+    the aligned fraction.
+    """
+    out: dict[str, float] = {}
+    for t in tokens:
+        fc = counts.get(t.utterance_id)
+        if not fc or t.utterance_id in out or t.utterance_end <= t.utterance_start:
+            continue
+        implied = asllrp.SESSION_FPS * fc / (t.utterance_end - t.utterance_start + 1)
+        out[t.utterance_id] = min((24.0, 30.0), key=lambda f: abs(f - implied))
+    return out
 
 
 def published_frame_counts(timeout: int) -> dict[str, int]:
@@ -75,24 +98,32 @@ def main() -> int:
 
     tokens, parse_report = asllrp.load()
     out: dict[str, object] = {
-        "mapping": "crop frame index = session frame - utterance_start + 1",
+        "mapping": asllrp.MAPPING,
         "n_tokens_total": len(tokens),
         "parser": parse_report,
         "reference_sets": {},
     }
 
-    refs = {"local_emosign_landmarks": local_frame_counts()}
+    refs: dict[str, tuple[dict[str, int], dict[str, float], str]] = {}
+    local_counts, local_rates = local_frame_counts()
+    refs["local_emosign_landmarks"] = (local_counts, local_rates, "video container")
     if not args.skip_published:
         try:
-            refs["mirror_dwpose_listing"] = dict(published_frame_counts(args.timeout))
+            pub = dict(published_frame_counts(args.timeout))
+            refs["mirror_dwpose_listing"] = (
+                pub,
+                inferred_rates(tokens, pub),
+                "inferred from span / frame count; in-range is partly by construction",
+            )
         except Exception as exc:  # network, 404, malformed listing
             print(f"  published reference unavailable ({type(exc).__name__}: {exc})")
 
-    for name, counts in refs.items():
+    for name, (counts, rates, rate_source) in refs.items():
         if not counts:
             continue
-        rep = asllrp.check_alignment(tokens, counts)
+        rep = asllrp.check_alignment(tokens, counts, rates)
         d = rep.as_dict()
+        d["frame_rate_source"] = rate_source
         # A worked example, so the mapping is checkable by hand and not just asserted.
         rows = [t for t in tokens if t.utterance_id in counts]
         if rows:
@@ -103,14 +134,18 @@ def main() -> int:
                 "token_start_frame": t.start_frame,
                 "token_end_frame": t.end_frame,
                 "crop_frames": counts[t.utterance_id],
-                "mapped_start": asllrp.crop_frame_index(t, t.start_frame),
-                "mapped_end": asllrp.crop_frame_index(t, t.end_frame),
+                "clip_fps": rates.get(t.utterance_id),
+                "mapped_range": asllrp.crop_frame_range(t, clip_fps=rates[t.utterance_id])
+                if t.utterance_id in rates
+                else None,
             }
         out["reference_sets"][name] = d  # type: ignore[index]
         frac = d.get("aligned_fraction", 0.0)
         print(
-            f"  {name}: {d['n_tokens_aligned']}/{d['n_tokens']} aligned "
-            f"({frac:.1%}), {d['n_tokens_overshoot']} overshoot -> aligned={d['aligned']}"
+            f"  {name}: {d['n_tokens_aligned']}/{d['n_tokens']} in range "
+            f"({frac:.1%}), {d['n_tokens_overshoot']} out; frame-for-frame would give "
+            f"{d['n_tokens_in_range_one_to_one']}; clips by fps {d['n_utterances_by_fps']}, "
+            f"span/frames {d['span_over_frames_ratio_median_by_fps']}"
         )
 
     OUT.parent.mkdir(parents=True, exist_ok=True)

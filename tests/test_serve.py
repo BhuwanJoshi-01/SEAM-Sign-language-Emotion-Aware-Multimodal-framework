@@ -11,7 +11,7 @@ Three properties, each of which has a specific way of failing quietly:
   default, it is a *plausible* head pose, and it makes "no tracking" indistinguishable
   from "perfectly still" - which silently changes head_shake and head_nod to zero.
 * **Features the build cannot support are withheld, not shown empty.** M4's encoder was
-  measured at 0.497 balanced accuracy against a 0.5 reference, so returning its affect
+  measured at 0.481 to 0.507 balanced accuracy against a 0.5 reference, so returning its affect
   output would put a number on screen that carries no information. An empty panel is
   honest; a confident wrong one is not.
 """
@@ -22,6 +22,8 @@ import numpy as np
 import pytest
 
 from seam.serve.app import (
+    M4_AFFECT_BALANCED_ACCURACY,
+    M5A_WER_AND_BASELINE,
     MIN_FRAMES,
     NM_DIM,
     BadWindow,
@@ -136,14 +138,66 @@ def test_absent_pose_produces_zero_head_markers_not_a_crash() -> None:
 def test_affect_prediction_is_withheld_with_a_reason() -> None:
     out = analyse(_window())
     assert out["affect"]["supported"] is False
-    assert "0.497" in out["affect"]["reason"], "the reason must cite the measurement"
-    assert "m4-factorizer-002" in out["affect"]["reason"]
+    lo, hi = M4_AFFECT_BALANCED_ACCURACY
+    reason = out["affect"]["reason"]
+    assert f"{lo:.3f}" in reason and f"{hi:.3f}" in reason, "the reason must cite the measurement"
+    assert "EXPERIMENT_LOG" in reason, "and say where the measurement is recorded"
+
+
+def test_the_withheld_affect_figure_is_the_one_in_the_artifact() -> None:
+    """A refusal that quotes a stale number is a claim with nothing behind it.
+
+    The page said 0.497 for a day after the run behind it had been superseded.
+    """
+    import json
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "artifacts/m4/factorizer_multilabel_ablation.json"
+    if not path.is_file():
+        pytest.skip("M4 ablation artifact not built")
+    rows = json.loads(path.read_text())["runs"]["full"]["per_fold"]
+    folds = sorted({r["held_out"] for r in rows})
+    per_seed = []
+    for i in range(0, len(rows), len(folds)):
+        chunk = rows[i : i + len(folds)]
+        assert sorted(r["held_out"] for r in chunk) == folds, "rows are not grouped by seed"
+        per_seed.append(
+            float(
+                np.average(
+                    [r["balanced_affect"] for r in chunk], weights=[r["n_test"] for r in chunk]
+                )
+            )
+        )
+    assert (round(min(per_seed), 3), round(max(per_seed), 3)) == M4_AFFECT_BALANCED_ACCURACY
 
 
 def test_recognition_is_withheld_with_a_reason() -> None:
     out = analyse(_window())
     assert out["recognition"]["supported"] is False
-    assert "Sign video filename" in out["recognition"]["reason"]
+    wer, base = M5A_WER_AND_BASELINE
+    reason = out["recognition"]["reason"]
+    assert f"{wer:.3f}" in reason and f"{base:.3f}" in reason
+    assert "misaligned" not in reason, (
+        "the reason given until 2026-10-05 - 99.3% of tokens misaligned, no recogniser "
+        "trained - had been false since 2026-09-29"
+    )
+
+
+def test_the_withheld_recognition_figure_is_the_one_in_the_artifact() -> None:
+    import json
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "artifacts" / "m5a" / "recogniser.json"
+    if not path.is_file():
+        pytest.skip("M5a artifact not built")
+    folds = json.loads(path.read_text())["real"]["folds"]
+    live = (
+        round(float(np.mean([f["wer"] for f in folds])), 3),
+        round(float(np.mean([f["wer_most_frequent_baseline"] for f in folds])), 3),
+    )
+    assert live == M5A_WER_AND_BASELINE
+    # The refusal is only honest while the model fails to beat its baseline.
+    assert live[0] >= live[1], "M5a now beats its baseline: revisit the withholding"
 
 
 def test_linguistic_context_needs_an_utterance_id() -> None:
