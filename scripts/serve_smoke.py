@@ -126,6 +126,40 @@ def main() -> int:
             if f"'{target}'" not in nav.decode():
                 failures.append(f"nav.js does not link {target}; that page is unreachable")
 
+        # ── the standalone live page ─────────────────────────────────────────
+        # Served from docs/, the same file GitHub Pages hosts. It must run with no server
+        # behind it, so it may not call this API, and every figure it shows must resolve.
+        try:
+            live = urllib.request.urlopen(f"http://127.0.0.1:{PORT}/live", timeout=15).read()
+        except urllib.error.HTTPError as e:
+            live = b""
+            failures.append(f"/live returned HTTP {e.code}")
+        if live:
+            print(f"GET /live             {len(live)} bytes")
+            for needle in (
+                b"tasks-vision",
+                b"face_landmarker",
+                b"hand_landmarker",
+                b"pose_landmarker",
+            ):
+                if needle not in live:
+                    failures.append(f"/live does not load {needle.decode()}")
+            if b"api/analyse" in live:
+                failures.append("/live calls the server API; the hosted page has no server")
+            if "'/live'" not in nav.decode():
+                failures.append("nav.js does not link /live; that page is unreachable")
+            import re as _re
+
+            for fig in sorted(set(_re.findall(rb'src="figures/([\w.-]+)"', live))):
+                try:
+                    body = urllib.request.urlopen(
+                        f"http://127.0.0.1:{PORT}/figures/{fig.decode()}", timeout=15
+                    ).read()
+                    if not body.startswith(b"\x89PNG"):
+                        failures.append(f"/figures/{fig.decode()} is not a PNG")
+                except urllib.error.HTTPError as e:
+                    failures.append(f"/figures/{fig.decode()} returned HTTP {e.code}")
+
         # ── /avatar specifics ────────────────────────────────────────────────
         av = urllib.request.urlopen(f"http://127.0.0.1:{PORT}/avatar", timeout=15).read()
         if b"cdn.jsdelivr" in av or b"unpkg.com" in av:

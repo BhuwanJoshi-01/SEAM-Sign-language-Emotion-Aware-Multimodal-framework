@@ -93,6 +93,12 @@ train: ## Train from configs/
 repro: ## Regenerate every artifact the paper cites, in dependency order  [M9]
 	bash scripts/repro_all.sh
 
+figures: ## Redraw the report figures in docs/figures from the result artifacts
+	$(PY) scripts/make_report_figures.py
+
+site-check: ## Run the standalone live page in headless Chrome with a fake camera (VIDEO=path)
+	$(PY) scripts/site_smoke.py --video $(VIDEO)
+
 provenance: ## Fail on an untraced number, or a result written by code that has since changed
 	$(PY) -m pytest tests/test_provenance.py tests/test_artifact_staleness.py -v
 

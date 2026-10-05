@@ -393,7 +393,7 @@ that download. The non-manuals were never in it. They are a different download.
 
 Contact: **Carol Neidle, carol@bu.edu** — Director of ASLLRP, Professor Emerita, BU.
 Confirmed current across several November 2025 sources. CC
-**augustine.opoku@gmail.com** for DAI site issues. Do **not** email the Rutgers
+**the DAI support address listed on the portal** for DAI site issues. Do **not** email the Rutgers
 developers — they built the software, they do not handle data requests.
 
 A complete, ready-to-edit draft is in

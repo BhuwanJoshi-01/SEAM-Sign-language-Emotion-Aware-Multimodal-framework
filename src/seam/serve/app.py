@@ -359,6 +359,28 @@ def build_app() -> Any:
     def index() -> Any:
         return _serve_page(web, "index.html")
 
+    # The standalone demo: every model and every number is computed in the browser, so it
+    # needs no server at all. It lives in docs/ because that is what GitHub Pages serves,
+    # and this route hands out that same file - the hosted page and the local one cannot
+    # drift apart, because there is only one.
+    site = Path(__file__).resolve().parents[3] / "docs"
+
+    @app.get("/live", response_class=HTMLResponse)
+    def live_page() -> Any:
+        """Real-time face, hand and body tracking with the marker read-out, client-side."""
+        return _serve_page(site, "index.html")
+
+    @app.get("/figures/{name}")
+    def figure(name: str) -> Any:
+        """The report figures the standalone page shows, generated from the artifacts."""
+        root = (site / "figures").resolve()
+        target = (root / name).resolve()
+        if not str(target).startswith(str(root) + "/"):
+            return JSONResponse({"error": "path escapes figures/"}, status_code=400)
+        if not target.is_file() or target.suffix != ".png":
+            return JSONResponse({"error": f"{name} not found"}, status_code=404)
+        return FileResponse(target, media_type="image/png")
+
     @app.get("/avatar", response_class=HTMLResponse)
     def avatar_page() -> Any:
         """The avatar product page: a real skinned GLB playing a real animation clip."""

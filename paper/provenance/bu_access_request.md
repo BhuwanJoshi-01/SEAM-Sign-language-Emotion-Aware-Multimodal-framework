@@ -160,7 +160,7 @@ Time-aligned to frames, which means it can be joined to the landmarks already on
 | `dai/s/dai` XML export includes non-manuals | Report 18 §8.3, verbatim XML above |
 | `continuoussigndownload` (17,522) is manual-only | Report 24 §1.1 column list |
 | **Carol Neidle, carol@bu.edu** — Director ASLLRP, Professor Emerita of Linguistics, BU | `bu.edu/asllrp/people.html`, `about-datasets.pdf` (Nov 2025), `about-dai2.html`, `signbank-terms.pdf` |
-| Augustine Opoku, augustine.opoku@gmail.com — DAI technical support | Report 18 §9; `people.html` |
+| Augustine Opoku, the DAI support address listed on the portal — DAI technical support | Report 18 §9; `people.html` |
 | Rutgers hosts the server; the project is directed from BU | Report 18 §9: "The site is hosted by LCSR at Rutgers University" |
 | No formal data-request form exists | Searched; only the SignStream *software* download form |
 
@@ -217,7 +217,7 @@ mapping is a task to do, not an assumption to make.
 ## 4. Draft email — for a person to review, edit and send
 
 **To:** `carol@bu.edu`
-**CC:** `augustine.opoku@gmail.com` (DAI technical support)
+**CC:** `the DAI support address listed on the portal` (DAI technical support)
 **Subject:** ASLLRP SignStream 3 XML — non-manual annotations, access and field IDs
 
 > Edit before sending. Put your own name, affiliation and contact details in. Do not

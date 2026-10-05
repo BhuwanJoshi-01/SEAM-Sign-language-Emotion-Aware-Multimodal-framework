@@ -1,0 +1,635 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SEAM — live non-manual signal reader for sign language</title>
+<meta name="description" content="Real-time MediaPipe pipeline that reads the grammatical and affective non-manual signals of sign language in the browser. Video never leaves the device.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#05070d; --bg-2:#0a0f1c; --panel:rgba(16,24,42,.72); --panel-solid:#0e1626;
+  --line:rgba(120,170,255,.16); --line-strong:rgba(120,200,255,.38);
+  --ink:#eaf2ff; --ink-2:#a9b8d4; --ink-3:#6f7f9e;
+  --cyan:#3ee6ff; --violet:#a78bfa; --lime:#9dff6b; --amber:#ffc857; --rose:#ff6b9a;
+  --ok:#5df2a0; --warn:#ffc857; --bad:#ff7a7a;
+  --r:16px; --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:"Space Grotesk",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.5;
+  background-image:
+    radial-gradient(900px 500px at 12% -10%,rgba(62,230,255,.13),transparent 60%),
+    radial-gradient(800px 520px at 100% 0%,rgba(167,139,250,.14),transparent 60%),
+    linear-gradient(rgba(120,170,255,.045) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(120,170,255,.045) 1px,transparent 1px);
+  background-size:auto,auto,44px 44px,44px 44px;background-attachment:fixed}
+a{color:var(--cyan);text-decoration:none} a:hover{text-decoration:underline}
+:focus-visible{outline:2px solid var(--cyan);outline-offset:3px;border-radius:6px}
+.wrap{max-width:1320px;margin:0 auto;padding:0 20px}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* top bar */
+.top{position:sticky;top:0;z-index:20;backdrop-filter:blur(14px);background:rgba(5,7,13,.72);border-bottom:1px solid var(--line)}
+.top .wrap{display:flex;align-items:center;gap:20px;height:60px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:.14em;color:var(--ink)}
+.brand i{width:26px;height:26px;border-radius:8px;display:block;background:conic-gradient(from 210deg,var(--cyan),var(--violet),var(--lime),var(--cyan));box-shadow:0 0 22px rgba(62,230,255,.5)}
+.top nav{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
+.top nav a{color:var(--ink-2);padding:8px 12px;border-radius:10px;font-size:14px}
+.top nav a:hover{color:var(--ink);background:rgba(120,170,255,.1);text-decoration:none}
+
+/* hero */
+.hero{padding:34px 0 18px}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:var(--cyan)}
+h1{font-size:clamp(30px,4.6vw,54px);line-height:1.04;margin:10px 0 12px;letter-spacing:-.02em}
+h1 em{font-style:normal;background:linear-gradient(90deg,var(--cyan),var(--violet));-webkit-background-clip:text;background-clip:text;color:transparent}
+.lede{color:var(--ink-2);max-width:70ch;font-size:17px;margin:0}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+.chip{font-family:var(--mono);font-size:12px;padding:6px 10px;border-radius:999px;border:1px solid var(--line);color:var(--ink-2);background:rgba(16,24,42,.6)}
+.chip b{color:var(--ink);font-weight:600}
+
+/* live grid */
+.live{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(320px,1fr);gap:18px;padding:14px 0 30px;align-items:start}
+@media (max-width:1020px){.live{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);backdrop-filter:blur(10px);position:relative}
+.panel h2{margin:0;font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-2);font-weight:600;display:flex;align-items:center;gap:8px}
+.panel .hd{padding:14px 16px 0;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.panel .bd{padding:12px 16px 16px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ink-3);display:inline-block}
+.dot.on{background:var(--ok);box-shadow:0 0 12px var(--ok)}
+
+/* stage */
+.stage{overflow:hidden}
+.viewport{position:relative;aspect-ratio:4/3;background:#02040a;border-radius:calc(var(--r) - 1px) calc(var(--r) - 1px) 0 0;overflow:hidden}
+.viewport video,.viewport canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.viewport.mirror video,.viewport.mirror canvas{transform:scaleX(-1)}
+.viewport.privacy video{opacity:0}
+.corner{position:absolute;width:26px;height:26px;border:2px solid var(--cyan);opacity:.85;pointer-events:none}
+.corner.tl{top:12px;left:12px;border-right:0;border-bottom:0}.corner.tr{top:12px;right:12px;border-left:0;border-bottom:0}
+.corner.bl{bottom:12px;left:12px;border-right:0;border-top:0}.corner.br{bottom:12px;right:12px;border-left:0;border-top:0}
+.hud{position:absolute;left:16px;top:14px;display:flex;gap:8px;flex-wrap:wrap;pointer-events:none;padding-left:26px}
+.hud span{font-family:var(--mono);font-size:11.5px;background:rgba(2,6,14,.72);border:1px solid var(--line);padding:4px 8px;border-radius:8px;color:var(--ink-2)}
+.hud span b{color:var(--cyan);font-weight:600}
+.verdict{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);font-family:var(--mono);font-size:13px;letter-spacing:.06em;
+  padding:9px 14px;border-radius:12px;background:rgba(2,6,14,.78);border:1px solid var(--line-strong);color:var(--ink);white-space:nowrap;max-width:92%;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
+.verdict[data-kind="grammar"]{border-color:var(--cyan);box-shadow:0 0 24px rgba(62,230,255,.35)}
+.verdict[data-kind="affect"]{border-color:var(--rose);box-shadow:0 0 24px rgba(255,107,154,.35)}
+.verdict[data-kind="both"]{border-color:var(--violet);box-shadow:0 0 24px rgba(167,139,250,.4)}
+.idle{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:24px;color:var(--ink-2)}
+.idle p{max-width:44ch;margin:8px auto 16px}
+.scan{position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--cyan),transparent);opacity:.55;animation:scan 3.6s linear infinite;pointer-events:none}
+@keyframes scan{from{top:0}to{top:100%}}
+@media (prefers-reduced-motion:reduce){.scan{display:none}html{scroll-behavior:auto}}
+.controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:12px 14px;border-top:1px solid var(--line)}
+button,.btn{font:inherit;font-size:14px;font-weight:600;color:var(--ink);background:rgba(120,170,255,.1);border:1px solid var(--line-strong);padding:9px 14px;border-radius:11px;cursor:pointer}
+button:hover,.btn:hover{background:rgba(120,170,255,.2)}
+button.primary{background:linear-gradient(90deg,rgba(62,230,255,.9),rgba(167,139,250,.9));color:#04121c;border-color:transparent}
+button:disabled{opacity:.5;cursor:not-allowed}
+.toggle{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-2);padding:6px 10px;border:1px solid var(--line);border-radius:10px;cursor:pointer;user-select:none}
+.toggle input{accent-color:var(--cyan)}
+.spacer{flex:1}
+#timeline{display:block;width:100%;height:120px;border-top:1px solid var(--line)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;padding:8px 16px 14px;font-size:12px;color:var(--ink-2)}
+.legend i{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:6px;vertical-align:middle}
+
+/* channel cards */
+.stack{display:grid;gap:14px}
+.meter{display:grid;grid-template-columns:118px 1fr 52px;align-items:center;gap:10px;margin:9px 0}
+.meter label{font-size:14px;color:var(--ink)}
+.bar{height:10px;border-radius:6px;background:rgba(120,170,255,.12);overflow:hidden;position:relative}
+.bar i{display:block;height:100%;width:0;border-radius:6px;background:var(--cyan);transition:width .08s linear}
+.bar.violet i{background:var(--violet)} .bar.rose i{background:var(--rose)} .bar.lime i{background:var(--lime)} .bar.amber i{background:var(--amber)}
+.meter .num{font-size:13px;color:var(--ink-2);text-align:right}
+.meter.active label{color:var(--cyan)} .meter.active .bar{box-shadow:0 0 14px rgba(62,230,255,.45)}
+.badge{font-family:var(--mono);font-size:10.5px;letter-spacing:.04em;padding:3px 7px;border-radius:999px;border:1px solid var(--line);color:var(--ink-2);white-space:nowrap}
+.badge.ok{color:var(--ok);border-color:rgba(93,242,160,.5)} .badge.warn{color:var(--warn);border-color:rgba(255,200,87,.45)} .badge.bad{color:var(--bad);border-color:rgba(255,122,122,.45)}
+.note{font-size:12.5px;color:var(--ink-3);margin:8px 0 0}
+.kv{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.kv div{background:rgba(120,170,255,.06);border:1px solid var(--line);border-radius:12px;padding:9px 10px}
+.kv small{display:block;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+.kv b{font-family:var(--mono);font-size:19px;font-weight:600}
+.events{list-style:none;margin:0;padding:0;display:grid;gap:6px;min-height:92px}
+.events li{display:grid;grid-template-columns:54px 1fr;gap:10px;font-size:13px;padding:7px 9px;border-radius:10px;background:rgba(120,170,255,.06);border:1px solid var(--line)}
+.events time{font-family:var(--mono);color:var(--ink-3);font-size:12px}
+.events b{color:var(--ink)} .events span{color:var(--ink-2)}
+.events .empty{grid-template-columns:1fr;color:var(--ink-3)}
+
+/* content sections */
+section.block{padding:38px 0;border-top:1px solid var(--line)}
+section.block h2.big{font-size:clamp(24px,3vw,34px);margin:6px 0 8px;letter-spacing:-.01em}
+.sub{color:var(--ink-2);max-width:74ch;margin:0 0 22px}
+.tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:22px}
+@media (max-width:900px){.tiles,.steps{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
+@media (max-width:560px){.tiles,.steps{grid-template-columns:1fr!important}}
+.tile{padding:16px;border-radius:var(--r);background:var(--panel);border:1px solid var(--line)}
+.tile b{display:block;font-family:var(--mono);font-size:28px;line-height:1.1;color:var(--ink)}
+.tile span{display:block;color:var(--ink-2);font-size:14px;margin-top:6px}
+.tile small{display:block;color:var(--ink-3);font-size:12px;margin-top:6px}
+.figs{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,460px),1fr));gap:14px}
+figure{margin:0;background:var(--panel-solid);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+figure img{display:block;width:100%;height:auto;background:#fcfcfb}
+figcaption{padding:12px 14px;font-size:14px;color:var(--ink-2)}
+figcaption b{color:var(--ink)}
+.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;counter-reset:s}
+.step{padding:16px;border-radius:var(--r);background:var(--panel);border:1px solid var(--line);counter-increment:s}
+.step::before{content:"0" counter(s);font-family:var(--mono);color:var(--cyan);font-size:12px;letter-spacing:.2em}
+.step h3{margin:6px 0 6px;font-size:17px} .step p{margin:0;color:var(--ink-2);font-size:14px}
+table.res{width:100%;border-collapse:collapse;font-size:14.5px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+table.res th,table.res td{padding:11px 14px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+table.res th{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);font-weight:600}
+table.res tr:last-child td{border-bottom:0}
+.scroll{overflow-x:auto}
+footer{padding:28px 0 46px;color:var(--ink-3);font-size:13.5px;border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <a class="brand" href="#top" aria-label="SEAM home"><i aria-hidden="true"></i>SEAM</a>
+  <nav aria-label="Sections">
+    <a href="#live">Live</a><a href="#results">Results</a><a href="#how">How it works</a><a href="#limits">Limits</a>
+    <a href="https://github.com/BhuwanJoshi-01/SEAM-Sign-language-Emotion-Aware-Multimodal-framework">GitHub</a>
+  </nav>
+</div></header>
+
+<main id="top">
+<div class="wrap">
+  <section class="hero">
+    <div class="eyebrow">Sign-language Emotion-Aware Multimodal framework</div>
+    <h1>Is that face <em>grammar</em> or <em>emotion</em>?</h1>
+    <p class="lede">In American Sign Language the face is part of the grammar: raised brows mark a yes/no question, a furrow marks a wh-question, a head shake marks negation. The same face also shows feeling. SEAM reads both channels in real time from 478 face landmarks, 52 blendshapes, two hands and the body, entirely in your browser.</p>
+    <div class="chips">
+      <span class="chip"><b>MediaPipe Tasks</b> · WASM + GPU</span>
+      <span class="chip">video <b>never leaves</b> this device</span>
+      <span class="chip"><b>553</b> landmarks / frame</span>
+      <span class="chip">validated against <b>43,038</b> human annotations</span>
+    </div>
+  </section>
+
+  <section class="live" id="live" aria-label="Live demo">
+    <div class="panel stage">
+      <div class="viewport" id="viewport">
+        <video id="video" playsinline muted></video>
+        <canvas id="overlay"></canvas>
+        <div class="scan" id="scan" hidden></div>
+        <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+        <div class="hud" aria-live="off">
+          <span>FPS <b class="num" id="hFps">—</b></span>
+          <span>face <b class="num" id="hFace">—</b> ms</span>
+          <span>hands <b class="num" id="hHands">—</b> ms</span>
+          <span>pose <b class="num" id="hPose">—</b> ms</span>
+          <span id="hDelegate">idle</span>
+        </div>
+        <div class="verdict" id="verdict" hidden></div>
+        <div class="idle" id="idle">
+          <div>
+            <div class="eyebrow">Real-time demo</div>
+            <p id="idleMsg">Start the camera and raise your eyebrows, furrow them, smile, shake your head, and move your hands. Everything is computed on this device.</p>
+            <button class="primary" id="start">Start camera</button>
+            <label class="btn" for="file" style="margin-left:8px">Use a video file</label>
+            <input type="file" id="file" accept="video/*" hidden>
+          </div>
+        </div>
+      </div>
+      <div class="controls">
+        <button id="stop" disabled>Stop</button>
+        <label class="toggle"><input type="checkbox" id="tFace" checked> Face mesh</label>
+        <label class="toggle"><input type="checkbox" id="tHands" checked> Hands</label>
+        <label class="toggle"><input type="checkbox" id="tPose" checked> Body</label>
+        <span class="spacer"></span>
+        <label class="toggle" title="Hide the camera image and show only the landmarks"><input type="checkbox" id="tPrivacy"> Skeleton only</label>
+      </div>
+      <canvas id="timeline" aria-label="Last 12 seconds of four signals"></canvas>
+      <div class="legend">
+        <span><i style="background:var(--cyan)"></i>brow raise</span>
+        <span><i style="background:var(--violet)"></i>brow furrow</span>
+        <span><i style="background:var(--rose)"></i>smile</span>
+        <span><i style="background:var(--lime)"></i>hand speed</span>
+      </div>
+    </div>
+
+    <aside class="stack">
+      <div class="panel">
+        <div class="hd"><h2><span class="dot" id="dLing"></span>Linguistic channel · grammar</h2></div>
+        <div class="bd">
+          <div class="meter" id="mRaise"><label>Brow raise</label><div class="bar"><i></i></div><span class="num">0.00</span></div>
+          <div style="margin:-4px 0 6px 128px"><span class="badge ok">validated · AUC 0.82–0.88 vs human annotation</span></div>
+          <div class="meter" id="mFurrow"><label>Brow furrow</label><div class="bar violet"><i></i></div><span class="num">0.00</span></div>
+          <div style="margin:-4px 0 6px 128px"><span class="badge warn">not validated · AUC 0.60–0.78</span></div>
+          <div class="meter" id="mShake"><label>Head shake</label><div class="bar amber"><i></i></div><span class="num">0.00</span></div>
+          <div class="meter" id="mNod"><label>Head nod</label><div class="bar amber"><i></i></div><span class="num">0.00</span></div>
+          <div style="margin:-4px 0 0 128px"><span class="badge bad">experimental · unreadable in our tests</span></div>
+          <p class="note">Yes/no questions and topics raise the brows; wh-questions furrow them; negation shakes the head. Each badge is what we measured against human frame-level labels.</p>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="hd"><h2><span class="dot" id="dAff"></span>Affective cues · raw signals</h2></div>
+        <div class="bd">
+          <div class="meter" id="mSmile"><label>Smile</label><div class="bar rose"><i></i></div><span class="num">0.00</span></div>
+          <div class="meter" id="mFrown"><label>Frown</label><div class="bar rose"><i></i></div><span class="num">0.00</span></div>
+          <div class="meter" id="mWide"><label>Eyes wide</label><div class="bar rose"><i></i></div><span class="num">0.00</span></div>
+          <div class="meter" id="mJaw"><label>Jaw open</label><div class="bar rose"><i></i></div><span class="num">0.00</span></div>
+          <p class="note">These are measured expression signals, not an emotion verdict. Our trained affect model did not beat chance (balanced accuracy 0.48–0.51), so SEAM withholds an emotion label rather than show one it cannot support.</p>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="hd"><h2>Head pose · manual prosody</h2></div>
+        <div class="bd">
+          <div class="kv">
+            <div><small>Yaw</small><b id="kYaw">—</b></div>
+            <div><small>Pitch</small><b id="kPitch">—</b></div>
+            <div><small>Roll</small><b id="kRoll">—</b></div>
+          </div>
+          <div class="meter" id="mSpeed" style="margin-top:12px"><label>Hand speed</label><div class="bar lime"><i></i></div><span class="num">0.00</span></div>
+          <div class="meter" id="mAmp"><label>Signing space</label><div class="bar lime"><i></i></div><span class="num">0.00</span></div>
+          <p class="note">Deaf annotators name sign speed and size as emotion cues. Units are shoulder-widths, so they do not depend on distance from the camera.</p>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="hd"><h2>Marker events</h2><span class="badge">rule-based</span></div>
+        <div class="bd"><ul class="events" id="events"><li class="empty">Events appear here when a marker stays active for about a quarter of a second.</li></ul></div>
+      </div>
+    </aside>
+  </section>
+</div>
+
+<section class="block" id="results"><div class="wrap">
+  <div class="eyebrow">Results</div>
+  <h2 class="big">What we measured</h2>
+  <p class="sub">Every number below comes from a logged experiment in the repository. Several of our starting hypotheses were refuted, and we report those as plainly as the one that held.</p>
+  <div class="tiles">
+    <div class="tile"><b>0.82–0.88</b><span>Brow-raise AUC against human frame-level annotation, on signers never seen</span><small>leave one signer out · 200 utterances</small></div>
+    <div class="tile"><b>73 ms</b><span>p95 perception latency on a 4 GB RTX 3050, about 20 FPS</span><small>3 MediaPipe graphs, 900 timed calls</small></div>
+    <div class="tile"><b>186 MB</b><span>peak VRAM with six models live, against a 2,500 MB budget</span><small>7% of budget</small></div>
+    <div class="tile"><b>0 of 8</b><span>grammatical markers read as more negative by emotion models, under a pre-registered rule</span><small>3 FER models · human markers</small></div>
+    <div class="tile"><b>0.71</b><span>worst-fold cross-prediction AUC of the factorized encoder; target was ≤ 0.60</span><small>hypothesis refuted, 3 seeds</small></div>
+    <div class="tile"><b>526</b><span>automated tests, including checks that fail when a result outlives its code</span><small>23 more need a licensed body model</small></div>
+  </div>
+  <div class="figs">
+    <figure><img src="figures/marker_validation.png" alt="Dot plot: brow raise scores 0.82 to 0.88 AUC on three held-out signers; brow furrow 0.60 to 0.78; head shake and head nod sit at chance, 0.50." loading="lazy"><figcaption><b>One marker holds.</b> Brow raise clears the 0.80 gate on every held-out signer. Head shake and nod cannot be read from this input.</figcaption></figure>
+    <figure><img src="figures/c1_continuous.png" alt="Forest plot of eight markers by three FER models; most intervals cross zero and none is positive in two models after correction." loading="lazy"><figcaption><b>Emotion models did not read grammar as anger.</b> On 200 utterances with human markers, no marker met the rule. Brow furrow leaned the opposite way.</figcaption></figure>
+    <figure><img src="figures/m4_gate.png" alt="Dot plot of worst-fold cross-prediction AUC for five model variants; all dots lie between 0.69 and 0.81, above the 0.60 target." loading="lazy"><figcaption><b>Separation failed.</b> No loss term moved the encoder under the target, in any of three seeds.</figcaption></figure>
+    <figure><img src="figures/frame_alignment.png" alt="Line chart: for 24 fps clips alignment AUC peaks at 0.73 near scale 0.82; for 30 fps clips it peaks at 0.81 at scale 1.00." loading="lazy"><figcaption><b>A bug we caught with a measurement.</b> Annotations are on a 30 fps timeline; most clips are 24 fps. Blink labels only line up after rescaling.</figcaption></figure>
+  </div>
+</div></section>
+
+<section class="block" id="how"><div class="wrap">
+  <div class="eyebrow">Method</div>
+  <h2 class="big">How the vision pipeline works</h2>
+  <p class="sub">The same steps run here in the browser and in the Python pipeline used for the experiments.</p>
+  <div class="steps">
+    <div class="step"><h3>Perception</h3><p>Three MediaPipe Tasks graphs run on each frame: Face Landmarker (478 points, 52 blendshapes, head transform), two Hand Landmarkers (21 points each) and Pose Landmarker (33 points).</p></div>
+    <div class="step"><h3>Normalisation</h3><p>Landmarks are centred on the shoulders and scaled by shoulder width, gaps are interpolated, and a One-Euro filter removes jitter without adding lag.</p></div>
+    <div class="step"><h3>Three channels</h3><p>Manual (hands and arms), non-manual (blendshapes, head pose) and prosody (speed, size, pauses of the signing).</p></div>
+    <div class="step"><h3>Marker read-out</h3><p>Brow raise is the mean of three brow blendshapes above the signer's own baseline. Head movements are read from oscillation of the head angles.</p></div>
+    <div class="step"><h3>Validation</h3><p>Each marker is scored against human SignStream annotations, frame by frame, on signers held out of any fitting.</p></div>
+    <div class="step"><h3>Honest output</h3><p>A signal that passed validation is shown as validated. One that did not is labelled. A model that did not learn is withheld.</p></div>
+  </div>
+</div></section>
+
+<section class="block" id="limits"><div class="wrap">
+  <div class="eyebrow">Scope</div>
+  <h2 class="big">What works, what does not, what is next</h2>
+  <div class="scroll"><table class="res">
+    <thead><tr><th>Component</th><th>State</th><th>Evidence</th></tr></thead>
+    <tbody>
+      <tr><td>Real-time perception</td><td><span class="badge ok">works</span></td><td>41.8 ms median, 73.2 ms p95, 19.7–20.4 FPS on an RTX 3050 (4 GB)</td></tr>
+      <tr><td>Brow-raise marker</td><td><span class="badge ok">validated</span></td><td>Within-clip AUC 0.838 / 0.822 / 0.878 on three held-out signers</td></tr>
+      <tr><td>Brow furrow, head shake, head nod</td><td><span class="badge warn">not validated</span></td><td>0.60 on the largest fold; head markers at chance even with a fitted detector</td></tr>
+      <tr><td>"Emotion models misread grammar"</td><td><span class="badge bad">not supported</span></td><td>Tested on isolated signs and on continuous signing; no marker met the rule</td></tr>
+      <tr><td>Grammar / affect factorized encoder</td><td><span class="badge bad">refuted</span></td><td>Worst-fold cross-AUC 0.694–0.726 against a target of 0.60</td></tr>
+      <tr><td>Gloss recognition</td><td><span class="badge bad">at baseline</span></td><td>WER 0.920 equals always predicting the most frequent gloss, on 200 utterances</td></tr>
+      <tr><td>Expressive 3D avatar</td><td><span class="badge ok">works offline</span></td><td>SMPL-X body from video, exported as animated glTF; no human rating study yet</td></tr>
+      <tr><td>Sign-to-English translation, emotion-styled text</td><td><span class="badge">future work</span></td><td>Data is prepared (35,176 How2Sign sentences); not trained</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note" style="margin-top:14px">Dataset video is never redistributed. ASLLRP and EmoSign material is used for research under their terms; this page ships no signer video and sends none anywhere.</p>
+</div></section>
+</main>
+
+<footer><div class="wrap">SEAM · computer-vision course project · code, tests and the full experiment log are in the <a href="https://github.com/BhuwanJoshi-01/SEAM-Sign-language-Emotion-Aware-Multimodal-framework">repository</a>. Built on MediaPipe Tasks.</div></footer>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const CDN = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+const MODELS = {
+  face: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+  hand: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+  pose: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+};
+const COLORS = { cyan: "#3ee6ff", violet: "#a78bfa", lime: "#9dff6b", rose: "#ff6b9a", amber: "#ffc857" };
+const GPU_TIMEOUT_MS = 9000;
+
+const video = $("video"), overlay = $("overlay"), ctx = overlay.getContext("2d");
+const tl = $("timeline"), tctx = tl.getContext("2d");
+let vision = null, face = null, hands = null, pose = null, draw = null, delegate = "GPU";
+let running = false, stream = null, lastVideoTime = -1, lastTick = 0, fps = 0;
+const ms = { face: 0, hands: 0, pose: 0 };
+const startedAt = performance.now();
+
+// ── small numeric helpers ────────────────────────────────────────────────────
+const mean = (xs) => xs.reduce((a, b) => a + b, 0) / (xs.length || 1);
+const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
+const ema = (prev, x, k = 0.2) => (prev ? prev + (x - prev) * k : x);
+
+// A signal relative to this person's own baseline. A fixed threshold would call someone
+// with naturally high brows "raised" on every frame, so each channel is measured as an
+// excursion above the running median, scaled by its own recent range (p95 - median) -
+// the same clip-relative idea the Python pipeline uses.
+class Adaptive {
+  // The baseline is a low percentile over about 20 seconds, not the median: someone who
+  // holds their brows up for a whole question should not have that absorbed as "normal".
+  constructor(size = 600, floor = 0.1) { this.buf = []; this.size = size; this.floor = floor; this.base = 0; this.range = floor; this.n = 0; }
+  push(x) {
+    this.buf.push(x); if (this.buf.length > this.size) this.buf.shift();
+    if (this.n++ % 8 === 0) {
+      const s = [...this.buf].sort((a, b) => a - b);
+      this.base = s[Math.floor(s.length * 0.2)];
+      this.range = Math.max(s[Math.floor(s.length * 0.95)] - this.base, this.floor);
+    }
+    return clamp((x - this.base) / this.range, 0, 1.5);
+  }
+}
+// "Active" needs the level to hold for a few frames, so one noisy frame is not an event.
+class Latch {
+  constructor(on = 0.55, hold = 5) { this.on = on; this.hold = hold; this.count = 0; this.active = false; }
+  update(level) {
+    this.count = level >= this.on ? this.count + 1 : 0;
+    const was = this.active; this.active = this.count >= this.hold;
+    return this.active && !was;
+  }
+}
+// Oscillation of an angle: at least two direction reversals of real amplitude inside a
+// short window. A single turn of the head is not a shake.
+class Oscillation {
+  constructor(minDeg = 5, windowMs = 1300) { this.minDeg = minDeg; this.windowMs = windowMs; this.pts = []; this.rev = []; this.dir = 0; this.ext = null; }
+  push(deg, t) {
+    if (this.ext === null) { this.ext = deg; return 0; }
+    const d = deg - this.ext;
+    if (this.dir === 0) { if (Math.abs(d) >= this.minDeg) { this.dir = Math.sign(d); this.ext = deg; } }
+    else if (Math.sign(d) === this.dir) { this.ext = deg; }
+    else if (Math.abs(d) >= this.minDeg) { this.rev.push(t); this.dir = -this.dir; this.ext = deg; }
+    this.rev = this.rev.filter((r) => t - r <= this.windowMs);
+    return clamp(this.rev.length / 3, 0, 1.2);
+  }
+}
+
+// The two grammatical brow markers are read relative to the person's baseline. The affective
+// cues are shown as the raw blendshape scores: they are reported as signals, not judged.
+const sig = { raise: new Adaptive(), furrow: new Adaptive() };
+const latch = { raise: new Latch(), furrow: new Latch(), shake: new Latch(0.6, 2), nod: new Latch(0.6, 2), smile: new Latch(0.45, 6) };
+const osc = { yaw: new Oscillation(), pitch: new Oscillation() };
+const series = { raise: [], furrow: [], smile: [], speed: [] };
+const TL_LEN = 360;
+const wrists = [];   // {t, x, y} per hand, recent
+const live = { raise: 0, furrow: 0, shake: 0, nod: 0, smile: 0, frown: 0, wide: 0, jaw: 0, speed: 0, amp: 0, yaw: 0, pitch: 0, roll: 0, face: false, hands: 0, pose: false, frames: 0 };
+window.__seam = live;   // read by the automated smoke test
+
+// ── UI painters ──────────────────────────────────────────────────────────────
+function meter(id, level, raw, active) {
+  const el = $(id); if (!el) return;
+  el.querySelector("i").style.width = (clamp(level, 0, 1) * 100).toFixed(1) + "%";
+  el.querySelector(".num").textContent = raw.toFixed(2);
+  el.classList.toggle("active", !!active);
+}
+function pushEvent(title, meaning) {
+  const ul = $("events"); const empty = ul.querySelector(".empty"); if (empty) empty.remove();
+  const li = document.createElement("li");
+  const t = ((performance.now() - startedAt) / 1000).toFixed(1) + "s";
+  li.innerHTML = `<time>${t}</time><div><b>${title}</b> <span>— ${meaning}</span></div>`;
+  ul.prepend(li); while (ul.children.length > 5) ul.lastChild.remove();
+}
+function setVerdict() {
+  const ling = latch.raise.active || latch.furrow.active || latch.shake.active;
+  const aff = latch.smile.active || live.frown > 0.4;
+  const v = $("verdict");
+  $("dLing").classList.toggle("on", ling); $("dAff").classList.toggle("on", aff);
+  if (!live.face) { v.hidden = false; v.dataset.kind = ""; v.textContent = "no face in view"; return; }
+  v.hidden = false;
+  if (ling && aff) { v.dataset.kind = "both"; v.textContent = "LINGUISTIC + AFFECTIVE cues together"; }
+  else if (ling) {
+    v.dataset.kind = "grammar";
+    v.textContent = latch.raise.active ? "LINGUISTIC · brow raise → question / topic marker"
+      : latch.furrow.active ? "LINGUISTIC · brow furrow → wh-question marker" : "LINGUISTIC · head shake → negation";
+  } else if (aff) { v.dataset.kind = "affect"; v.textContent = "AFFECTIVE cue · " + (latch.smile.active ? "smile" : "frown"); }
+  else { v.dataset.kind = ""; v.textContent = "neutral · no marker active"; }
+}
+function paintTimeline() {
+  const dpr = window.devicePixelRatio || 1, w = tl.clientWidth, h = tl.clientHeight;
+  if (tl.width !== Math.round(w * dpr)) { tl.width = Math.round(w * dpr); tl.height = Math.round(h * dpr); }
+  tctx.setTransform(dpr, 0, 0, dpr, 0, 0); tctx.clearRect(0, 0, w, h);
+  tctx.strokeStyle = "rgba(120,170,255,.12)"; tctx.lineWidth = 1;
+  for (let i = 1; i < 4; i++) { const y = (h * i) / 4; tctx.beginPath(); tctx.moveTo(0, y); tctx.lineTo(w, y); tctx.stroke(); }
+  const plot = (arr, color) => {
+    if (arr.length < 2) return;
+    tctx.strokeStyle = color; tctx.lineWidth = 2; tctx.lineJoin = "round"; tctx.beginPath();
+    arr.forEach((v, i) => { const x = w - (arr.length - 1 - i) * (w / TL_LEN), y = h - 8 - clamp(v, 0, 1.2) / 1.2 * (h - 16); i ? tctx.lineTo(x, y) : tctx.moveTo(x, y); });
+    tctx.stroke();
+  };
+  plot(series.speed, COLORS.lime); plot(series.smile, COLORS.rose); plot(series.furrow, COLORS.violet); plot(series.raise, COLORS.cyan);
+}
+
+// ── geometry ─────────────────────────────────────────────────────────────────
+// MediaPipe's facial transformation matrix arrives as 16 numbers, column-major. The head's
+// forward and right axes are its third and first columns; yaw and pitch are read off the
+// forward axis and roll off the right axis, which avoids an Euler-order ambiguity.
+function headAngles(m) {
+  const fx = m[8], fy = m[9], fz = m[10], rx = m[0], ry = m[1];
+  const deg = 180 / Math.PI;
+  return { yaw: Math.atan2(fx, fz) * deg, pitch: -Math.asin(clamp(fy, -1, 1)) * deg, roll: Math.atan2(ry, rx) * deg };
+}
+function handProsody(handLms, poseLm, t) {
+  let scale = 0.25;
+  if (poseLm && poseLm[11] && poseLm[12]) scale = Math.max(Math.hypot(poseLm[11].x - poseLm[12].x, poseLm[11].y - poseLm[12].y), 0.05);
+  for (const h of handLms) wrists.push({ t, x: h[0].x, y: h[0].y, n: handLms.length });
+  while (wrists.length && t - wrists[0].t > 1000) wrists.shift();
+  if (wrists.length < 3) return { speed: 0, amp: 0 };
+  let path = 0;
+  const per = handLms.length || 1;
+  for (let i = per; i < wrists.length; i++) { const a = wrists[i - per], b = wrists[i]; if (b.t - a.t < 250) path += Math.hypot(b.x - a.x, b.y - a.y); }
+  const dt = (wrists[wrists.length - 1].t - wrists[0].t) / 1000 || 1;
+  const xs = wrists.map((p) => p.x), ys = wrists.map((p) => p.y);
+  const amp = Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+  return { speed: path / per / dt / scale, amp: amp / scale };
+}
+
+// ── drawing ──────────────────────────────────────────────────────────────────
+function fitCanvas() {
+  const dpr = window.devicePixelRatio || 1, r = overlay.getBoundingClientRect();
+  const w = Math.round(r.width * dpr), h = Math.round(r.height * dpr);
+  if (overlay.width !== w || overlay.height !== h) { overlay.width = w; overlay.height = h; }
+}
+// The video is shown with object-fit: cover, so landmarks (normalised to the full frame)
+// have to be mapped through the same crop or the mesh slides off the face.
+function coverMap() {
+  const cw = overlay.width, ch = overlay.height, vw = video.videoWidth || 4, vh = video.videoHeight || 3;
+  const s = Math.max(cw / vw, ch / vh), dw = vw * s, dh = vh * s;
+  return { ox: (cw - dw) / 2, oy: (ch - dh) / 2, dw, dh };
+}
+function mapped(lms, m) { return lms.map((p) => ({ x: (m.ox + p.x * m.dw) / overlay.width, y: (m.oy + p.y * m.dh) / overlay.height, z: p.z })); }
+function paint(fr, hr, pr) {
+  fitCanvas(); ctx.clearRect(0, 0, overlay.width, overlay.height);
+  const m = coverMap(), F = vision.FaceLandmarker, lw = Math.max(1, overlay.width / 640);
+  if ($("tPose").checked && pr?.landmarks?.[0]) {
+    const lm = mapped(pr.landmarks[0], m);
+    const body = vision.PoseLandmarker.POSE_CONNECTIONS.filter((c) => c.start > 10 && c.end > 10 && c.start < 25 && c.end < 25);
+    draw.drawConnectors(lm, body, { color: "rgba(157,255,107,.75)", lineWidth: 3 * lw });
+  }
+  if ($("tFace").checked && fr?.faceLandmarks?.[0]) {
+    const lm = mapped(fr.faceLandmarks[0], m);
+    draw.drawConnectors(lm, F.FACE_LANDMARKS_TESSELATION, { color: "rgba(62,230,255,.16)", lineWidth: 0.6 * lw });
+    draw.drawConnectors(lm, F.FACE_LANDMARKS_FACE_OVAL, { color: "rgba(62,230,255,.7)", lineWidth: 1.4 * lw });
+    const brow = latch.raise.active ? "#ffffff" : latch.furrow.active ? COLORS.violet : COLORS.cyan;
+    const bw = (latch.raise.active || latch.furrow.active ? 4 : 2.2) * lw;
+    draw.drawConnectors(lm, F.FACE_LANDMARKS_LEFT_EYEBROW, { color: brow, lineWidth: bw });
+    draw.drawConnectors(lm, F.FACE_LANDMARKS_RIGHT_EYEBROW, { color: brow, lineWidth: bw });
+    draw.drawConnectors(lm, F.FACE_LANDMARKS_LEFT_EYE, { color: COLORS.cyan, lineWidth: 1.4 * lw });
+    draw.drawConnectors(lm, F.FACE_LANDMARKS_RIGHT_EYE, { color: COLORS.cyan, lineWidth: 1.4 * lw });
+    draw.drawConnectors(lm, F.FACE_LANDMARKS_LIPS, { color: latch.smile.active ? COLORS.rose : "rgba(255,107,154,.75)", lineWidth: 1.8 * lw });
+  }
+  if ($("tHands").checked && hr?.landmarks?.length) {
+    for (const h of hr.landmarks) {
+      const lm = mapped(h, m);
+      draw.drawConnectors(lm, vision.HandLandmarker.HAND_CONNECTIONS, { color: COLORS.amber, lineWidth: 2.4 * lw });
+      draw.drawLandmarks(lm, { color: "#ffffff", fillColor: COLORS.amber, radius: 2.4 * lw, lineWidth: 1 });
+    }
+  }
+}
+
+// ── the frame loop ───────────────────────────────────────────────────────────
+function tick() {
+  if (!running) return;
+  requestAnimationFrame(tick);
+  if (video.readyState < 2 || video.currentTime === lastVideoTime) return;
+  lastVideoTime = video.currentTime;
+  const now = performance.now();
+  if (lastTick) fps = ema(fps, 1000 / (now - lastTick), 0.1);
+  lastTick = now;
+
+  let fr = null, hr = null, pr = null, t0;
+  try {
+    t0 = performance.now(); fr = face.detectForVideo(video, now); ms.face = ema(ms.face, performance.now() - t0);
+    if ($("tHands").checked) { t0 = performance.now(); hr = hands.detectForVideo(video, now); ms.hands = ema(ms.hands, performance.now() - t0); }
+    if ($("tPose").checked) { t0 = performance.now(); pr = pose.detectForVideo(video, now); ms.pose = ema(ms.pose, performance.now() - t0); }
+  } catch (e) { console.warn("detect failed", e); return; }
+
+  const cats = fr?.faceBlendshapes?.[0]?.categories;
+  live.face = !!cats; live.hands = hr?.landmarks?.length || 0; live.pose = !!pr?.landmarks?.[0]; live.frames++;
+  if (cats) {
+    const b = {}; for (const c of cats) b[c.categoryName] = c.score;
+    const raw = {
+      raise: mean([b.browInnerUp, b.browOuterUpLeft, b.browOuterUpRight]),
+      furrow: mean([b.browDownLeft, b.browDownRight]),
+      smile: mean([b.mouthSmileLeft, b.mouthSmileRight]),
+      frown: mean([b.mouthFrownLeft, b.mouthFrownRight]),
+      wide: mean([b.eyeWideLeft, b.eyeWideRight]),
+      jaw: b.jawOpen,
+    };
+    for (const k of Object.keys(raw)) live[k] = sig[k] ? sig[k].push(raw[k] || 0) : (raw[k] || 0);
+    const mtx = fr.facialTransformationMatrixes?.[0]?.data;
+    if (mtx) {
+      const a = headAngles(mtx); live.yaw = a.yaw; live.pitch = a.pitch; live.roll = a.roll;
+      live.shake = osc.yaw.push(a.yaw, now); live.nod = osc.pitch.push(a.pitch, now);
+      $("kYaw").textContent = a.yaw.toFixed(0) + "°"; $("kPitch").textContent = a.pitch.toFixed(0) + "°"; $("kRoll").textContent = a.roll.toFixed(0) + "°";
+    }
+    if (latch.raise.update(live.raise)) pushEvent("Brow raise", "in ASL, a yes/no question or a topic. Grammar, not surprise.");
+    if (latch.furrow.update(live.furrow)) pushEvent("Brow furrow", "in ASL, a wh-question. Grammar, not anger.");
+    if (latch.shake.update(live.shake)) pushEvent("Head shake", "in ASL, negation. Experimental detector.");
+    if (latch.nod.update(live.nod)) pushEvent("Head nod", "affirmation or emphasis. Experimental detector.");
+    if (latch.smile.update(live.smile)) pushEvent("Smile", "an affective cue, shown as a raw signal only.");
+    meter("mRaise", live.raise, raw.raise, latch.raise.active); meter("mFurrow", live.furrow, raw.furrow, latch.furrow.active);
+    meter("mShake", live.shake, live.shake, latch.shake.active); meter("mNod", live.nod, live.nod, latch.nod.active);
+    meter("mSmile", live.smile, raw.smile, latch.smile.active); meter("mFrown", live.frown, raw.frown, false);
+    meter("mWide", live.wide, raw.wide, false); meter("mJaw", live.jaw, raw.jaw || 0, false);
+  }
+  if (!cats) {
+    // No face in this frame: a meter frozen at its last value would read as a measurement.
+    for (const k of ["raise", "furrow", "shake", "nod", "smile", "frown", "wide", "jaw"]) live[k] = 0;
+    for (const k of Object.keys(latch)) latch[k].update(0);
+    for (const id of ["mRaise", "mFurrow", "mShake", "mNod", "mSmile", "mFrown", "mWide", "mJaw"]) meter(id, 0, 0, false);
+  }
+  const pro = handProsody(hr?.landmarks || [], pr?.landmarks?.[0], now);
+  live.speed = ema(live.speed, pro.speed, 0.3); live.amp = ema(live.amp, pro.amp, 0.3);
+  meter("mSpeed", live.speed / 3, live.speed, false); meter("mAmp", live.amp / 2.5, live.amp, false);
+
+  series.raise.push(cats ? live.raise : 0); series.furrow.push(cats ? live.furrow : 0);
+  series.smile.push(cats ? live.smile : 0); series.speed.push(clamp(live.speed / 3, 0, 1.2));
+  for (const k of Object.keys(series)) if (series[k].length > TL_LEN) series[k].shift();
+
+  paint(fr, hr, pr); paintTimeline(); setVerdict();
+  $("hFps").textContent = fps ? fps.toFixed(0) : "—";
+  $("hFace").textContent = ms.face.toFixed(0); $("hHands").textContent = $("tHands").checked ? ms.hands.toFixed(0) : "off";
+  $("hPose").textContent = $("tPose").checked ? ms.pose.toFixed(0) : "off";
+}
+
+// ── model loading ────────────────────────────────────────────────────────────
+function withTimeout(p, t, label) {
+  return new Promise((res, rej) => { const id = setTimeout(() => rej(new Error(label + " timed out")), t); p.then((v) => { clearTimeout(id); res(v); }, (e) => { clearTimeout(id); rej(e); }); });
+}
+async function build(d) {
+  const fileset = await vision.FilesetResolver.forVisionTasks(CDN + "/wasm");
+  const base = (path) => ({ baseOptions: { modelAssetPath: path, delegate: d }, runningMode: "VIDEO" });
+  const f = await vision.FaceLandmarker.createFromOptions(fileset, { ...base(MODELS.face), numFaces: 1, outputFaceBlendshapes: true, outputFacialTransformationMatrixes: true });
+  const h = await vision.HandLandmarker.createFromOptions(fileset, { ...base(MODELS.hand), numHands: 2 });
+  const p = await vision.PoseLandmarker.createFromOptions(fileset, { ...base(MODELS.pose), numPoses: 1 });
+  return [f, h, p];
+}
+// Asking for the GPU delegate on a machine without one does not always raise - in some
+// browsers the promise simply never settles. A timeout turns that into a CPU fallback,
+// which is slower and computes the same numbers.
+async function loadModels() {
+  if (face) return;
+  $("idleMsg").textContent = "Loading MediaPipe and three models (about 15 MB, cached after the first visit)…";
+  vision = await import(CDN);
+  try { [face, hands, pose] = await withTimeout(build("GPU"), GPU_TIMEOUT_MS, "GPU delegate"); delegate = "GPU"; }
+  catch (e) { console.warn("GPU delegate unavailable, using CPU:", e?.message); [face, hands, pose] = await build("CPU"); delegate = "CPU"; }
+  draw = new vision.DrawingUtils(ctx);
+  $("hDelegate").textContent = "MediaPipe · " + delegate;
+}
+async function begin(kind, file) {
+  $("start").disabled = true;
+  try {
+    await loadModels();
+    if (kind === "camera") {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 960 }, height: { ideal: 720 }, facingMode: "user" }, audio: false });
+      video.srcObject = stream; $("viewport").classList.add("mirror");
+    } else {
+      video.srcObject = null; video.src = URL.createObjectURL(file); video.loop = true; $("viewport").classList.remove("mirror");
+    }
+    await video.play();
+    running = true; lastVideoTime = -1; lastTick = 0;
+    $("idle").hidden = true; $("scan").hidden = false; $("stop").disabled = false;
+    requestAnimationFrame(tick);
+  } catch (e) {
+    console.error(e);
+    $("idleMsg").textContent = e?.name === "NotAllowedError" ? "Camera permission was denied. Allow the camera for this page, or use a video file instead."
+      : e?.name === "NotFoundError" ? "No camera was found. You can use a video file instead."
+      : "Could not start: " + (e?.message || e) + ". Check your connection (the models load from a CDN) and try again.";
+    $("start").disabled = false;
+  }
+}
+function stop() {
+  running = false;
+  if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
+  video.pause(); video.srcObject = null; video.removeAttribute("src");
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+  $("idle").hidden = false; $("scan").hidden = true; $("verdict").hidden = true; $("stop").disabled = true; $("start").disabled = false;
+  $("idleMsg").textContent = "Stopped. Start the camera again or choose a video file.";
+}
+$("start").onclick = () => begin("camera");
+$("file").onchange = (e) => { const f = e.target.files?.[0]; if (f) begin("file", f); };
+$("stop").onclick = stop;
+$("tPrivacy").onchange = (e) => $("viewport").classList.toggle("privacy", e.target.checked);
+if (!navigator.mediaDevices?.getUserMedia) { $("start").disabled = true; $("idleMsg").textContent = "This browser cannot open a camera here (it needs HTTPS or localhost). You can still use a video file."; }
+const auto = new URLSearchParams(location.search);
+if (auto.get("skeleton") === "1") { $("tPrivacy").checked = true; $("viewport").classList.add("privacy"); }
+if (auto.get("autostart") === "camera") begin("camera");
+</script>
+</body>
+</html>

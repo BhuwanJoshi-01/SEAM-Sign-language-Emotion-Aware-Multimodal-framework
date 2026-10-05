@@ -686,6 +686,28 @@ These are long-lead and never block code. Each needs a named owner and a weekly 
 
 ---
 
+## §6b Scope frozen for the course submission — 2026-10-05
+
+The project was submitted as a computer-vision course project on this date. What is in the
+submission, and what is explicitly **future work**:
+
+| Milestone | In the submission | Future work |
+| --- | --- | --- |
+| M0–M3 | Data spine, real-time perception, human-annotated markers, marker validation | ASL Citizen, a working head-movement instrument |
+| M1 / K1 | Confound audit on isolated and on continuous signing: not supported | Question marking, which needs the 1,354 further utterance videos |
+| M4 / K2, K3 | Factorized encoder: refuted, with a passing positive control | — |
+| K4 | — | **Never run** on a protocol comparable to the published baselines |
+| M5a | Gloss recognition: at baseline, as a measurement | The larger corpus |
+| M5b / K7 | Data prepared only | **Translation: not started** |
+| M6 / K8 | — | **Emotion-conditioned generation: not started**; needs an affect signal that does not exist |
+| M7 / K9 | SMPL-X avatar and the standalone live demo (`docs/index.html`) | Emotion modulation; the preference study (zero raters) |
+| M8 / K10 | — | **Cut**: terms of the local data not established |
+| M9 / K11 | Report (`README.md`), team guide, repro script, provenance and staleness guards | The paper itself |
+
+Nothing in the right-hand column may be described as done.
+
+---
+
 ## §7 Definition of done
 
 - [ ] M0–M9 evidence gates closed

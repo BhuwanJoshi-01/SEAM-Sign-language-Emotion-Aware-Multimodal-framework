@@ -201,7 +201,7 @@ without the download ever happening.**
 **To:** `carol@bu.edu` — Carol Neidle, Director of ASLLRP, Professor Emerita of Linguistics,
 Boston University. Confirmed as the current contact across several November 2025 sources.
 
-**CC:** `augustine.opoku@gmail.com` — DAI technical support.
+**CC:** `the DAI support address listed on the portal` — DAI technical support.
 
 **Do not email the Rutgers developers.** Gregory Dimitriadis and Douglas Motto built the
 SignStream software; they do not handle data requests.

@@ -21,6 +21,8 @@ artifacts/
 *.jpeg
 *.png
 !paper/figures/*.png
+# Report figures and demo screenshots: generated from artifacts, shown in README and the site.
+!docs/figures/*.png
 
 # Python bytecode
 __pycache__/

@@ -12,8 +12,14 @@
 
 export const ROUTES = [
   {
+    path: '/live',
+    title: 'Live HUD',
+    what: 'The standalone real-time demo: face mesh, hands and body tracked in the browser, with the grammar and affect channels read out live. Needs no server; this is the page hosted on GitHub Pages.',
+    kind: 'page',
+  },
+  {
     path: '/',
-    title: 'Live demo',
+    title: 'Server demo',
     what: 'Webcam. MediaPipe Tasks runs in the browser; the page posts landmark numbers only, so no video reaches the server.',
     kind: 'page',
   },
