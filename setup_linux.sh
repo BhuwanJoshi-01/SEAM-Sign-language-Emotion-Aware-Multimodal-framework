@@ -4,25 +4,34 @@
 #   ./setup_linux.sh          everything: website, analyse your own videos, tests
 #   ./setup_linux.sh --lite   only what the website needs (about 60 MB instead of 1.5 GB)
 #
-# Needs Python 3.11, 3.12 or 3.13 (3.12 is what it was built on). Nothing is installed outside the .venv folder it creates.
+# Needs Python 3.11 or 3.12 (3.12 is what it was built on); --lite also runs on 3.13. Nothing is installed outside the .venv folder it creates.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 MODE=full
 [ "${1:-}" = "--lite" ] && MODE=lite
 
+# The full install needs Python 3.11 or 3.12: the pinned MediaPipe has no build for 3.13.
+# The website alone (--lite) also runs on 3.13.
+if [ "$MODE" = "lite" ]; then NEWEST=13; else NEWEST=12; fi
 PY=""
-for candidate in python3.12 python3.11 python3 python; do
+for candidate in python3.12 python3.11 python3.13 python3 python; do
   if command -v "$candidate" >/dev/null 2>&1 &&
-     "$candidate" -c 'import sys; raise SystemExit(0 if (3, 11) <= sys.version_info[:2] <= (3, 13) else 1)' 2>/dev/null; then
+     "$candidate" -c "import sys; raise SystemExit(0 if (3, 11) <= sys.version_info[:2] <= (3, $NEWEST) else 1)" 2>/dev/null; then
     PY="$candidate"
     break
   fi
 done
 if [ -z "$PY" ]; then
-  echo "Python 3.11 to 3.13 was not found."
-  echo "  Ubuntu/Debian:  sudo apt install python3.12 python3.12-venv"
-  echo "  macOS:          brew install python@3.12"
+  if [ "$MODE" = "full" ]; then
+    echo "The full install needs Python 3.11 or 3.12, and neither was found."
+    echo "  Ubuntu/Debian:  sudo apt install python3.12 python3.12-venv"
+    echo "  macOS:          brew install python@3.12"
+    echo "  Any system:     https://www.python.org/downloads/release/python-3120/"
+    echo "Or run  ./setup_linux.sh --lite  for the website only, which also works on 3.13."
+  else
+    echo "Python 3.11, 3.12 or 3.13 was not found. Install one from https://www.python.org/downloads/"
+  fi
   exit 1
 fi
 echo "Using $($PY --version) at $(command -v "$PY")"

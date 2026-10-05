@@ -43,9 +43,15 @@ def have(module: str) -> bool:
 def main() -> int:
     ok = True
     v = sys.version_info
-    good_python = (3, 11) <= (v.major, v.minor) <= (3, 13)
+    minor = (v.major, v.minor)
+    good_python = (3, 11) <= minor <= (3, 13)
     print(f"[{'ok' if good_python else '!!'}] Python {v.major}.{v.minor}.{v.micro}", end="")
-    print("" if good_python else "   (3.11 to 3.13 is what the pinned packages support)")
+    if not good_python:
+        print("   (3.11 or 3.12 is what the pinned packages support)")
+    elif minor == (3, 13):
+        print("   (fine for the website; the full install needs 3.11 or 3.12)")
+    else:
+        print()
 
     site = [m for m in SITE if not have(m)]
     print(

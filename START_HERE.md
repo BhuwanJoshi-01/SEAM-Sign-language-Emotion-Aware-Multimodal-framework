@@ -5,8 +5,11 @@ Multimodal framework). You do not need to train anything. Two steps: set up once
 
 ## 1. Set up (once)
 
-You need **Python 3.12** (3.11 and 3.13 also work). Get it from <https://www.python.org/downloads/>.
-On Windows, tick **"Add python.exe to PATH"** in the installer.
+You need **Python 3.12** (3.11 also works). Get it from
+<https://www.python.org/downloads/release/python-3120/>. On Windows, tick
+**"Add python.exe to PATH"** in the installer. Python 3.13 is too new for the full install,
+because the version of MediaPipe this project is pinned to has no build for it; it can stay
+installed beside 3.12, and the website-only install (`--lite`) works on it.
 
 | Your computer | Do this in the folder you extracted |
 |---|---|
@@ -74,7 +77,7 @@ To use `python` commands yourself, activate the environment first:
 
 | What you see | What to do |
 |---|---|
-| "Python 3.11 to 3.13 was not found" | Install Python 3.12 from python.org. On Windows tick "Add python.exe to PATH", then run setup again. |
+| "The full install needs Python 3.11 or 3.12" | Install Python 3.12 from python.org (it can sit beside a newer Python). On Windows tick "Add python.exe to PATH", then run setup again. Or use `--lite`. |
 | Windows says the script is from an unknown publisher | Click **More info**, then **Run anyway**. It only creates the `.venv` folder here. |
 | The install stops partway | Check the internet connection and run the setup file again; it continues where it stopped. |
 | The page says the camera is blocked | Allow the camera for `127.0.0.1` in the browser's address bar, then reload. |
