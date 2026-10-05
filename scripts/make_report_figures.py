@@ -116,13 +116,20 @@ def marker_validation() -> None:
     markers = ["brow_raise", "brow_furrow", "head_shake", "head_nod"]
     labels = ["Brow raise", "Brow furrow", "Head shake", "Head nod"]
     folds = ["Cory", "Jonathan", "Rachel"]
-    fig, ax = plt.subplots(figsize=(8.2, 3.9))
-    fig.subplots_adjust(top=0.76, left=0.16, right=0.97, bottom=0.16)
+    # The detector the live page runs. For the brows that is the blendshape mean; for the
+    # head it is the revised detector on the corrected axes, where one exists.
+    current = {
+        m: d[m].get(
+            "revised_page_within_clip_auc_by_fold", d[m]["heuristic_within_clip_auc_by_fold"]
+        )
+        for m in markers
+    }
+    fig, ax = plt.subplots(figsize=(8.2, 4.3))
+    fig.subplots_adjust(top=0.78, left=0.16, right=0.97, bottom=0.15)
     for j, (fold, colour) in enumerate(zip(folds, SERIES, strict=True)):
         ys = np.arange(len(markers))[::-1] + (j - 1) * 0.18
-        xs = [d[m]["heuristic_within_clip_auc_by_fold"][fold] for m in markers]
         ax.scatter(
-            xs,
+            [current[m][fold] for m in markers],
             ys,
             s=70,
             color=colour,
@@ -131,6 +138,27 @@ def marker_validation() -> None:
             zorder=3,
             label=f"held-out signer: {fold}",
         )
+        # Where the head markers stood before the axis correction: hollow, same colour.
+        for m, y in zip(markers, ys, strict=True):
+            if "revised_page_within_clip_auc_by_fold" in d[m]:
+                ax.scatter(
+                    d[m]["heuristic_within_clip_auc_by_fold"][fold],
+                    y,
+                    s=58,
+                    facecolor=SURFACE,
+                    edgecolor=colour,
+                    linewidth=1.6,
+                    zorder=2,
+                )
+    ax.scatter(
+        [],
+        [],
+        s=58,
+        facecolor=SURFACE,
+        edgecolor=INK_2,
+        linewidth=1.6,
+        label="before: wrong head axis",
+    )
     ax.axvline(0.5, color=NEUTRAL, linewidth=1)
     ax.axvline(0.8, color=INK, linewidth=1)
     ax.text(0.5, 3.62, "chance", ha="center", fontsize=9, color=INK_2)
@@ -140,12 +168,11 @@ def marker_validation() -> None:
     ax.set_xlim(0.42, 0.95)
     ax.grid(axis="y", visible=False)
     ax.set_xlabel("within-clip AUC against human frame-level annotation")
-    ax.legend(loc="lower right", fontsize=9.5)
+    ax.legend(loc="lower right", fontsize=9)
     _title(
         fig,
-        "Only brow raise can be read off the face reliably",
-        "Heuristic marker signal vs human SignStream annotation, leave one signer out, "
-        "200 utterances",
+        "Brow raise is validated; head shake is visible once the right axis is read",
+        "Live-page detector vs human SignStream annotation, leave one signer out, 200 utterances",
     )
     _save(fig, "marker_validation.png")
 

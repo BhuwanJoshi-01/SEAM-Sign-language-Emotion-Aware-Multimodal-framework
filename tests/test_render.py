@@ -210,3 +210,24 @@ def test_default_camera_looks_at_the_body_front_not_its_back() -> None:
     # front and drawn, rather than hidden behind the flat plate.
     img = render_frame(verts, faces, width=160, height=160, camera=cam)
     assert _bg_pixels(img) < 160 * 160
+
+
+def test_the_render_is_not_a_mirror_image() -> None:
+    """A person facing the camera has their right hand on the viewer's left.
+
+    The body faces +z and its right side is at -x. Seen from the front (yaw 180), -x has
+    to land left of centre. For the whole life of this renderer it landed right of centre:
+    every stimulus video showed the signer mirrored, raising the wrong hand, and nothing
+    noticed because a mirrored body still stands upright and faces the camera.
+    """
+    import dataclasses
+
+    from seam.avatar.render import Camera, _project
+
+    pts = np.array([[0.0, 0.0, 0.0], [-0.3, 0.0, 0.0], [0.3, 0.0, 0.0], [0.0, 0.3, 0.0]])
+    for yaw in (180.0, 210.0):
+        cam = dataclasses.replace(Camera(), yaw_deg=yaw, pitch_deg=0.0)
+        screen, _ = _project(pts, cam, 400, 400)
+        centre, right_side, left_side, above = screen
+        assert right_side[0] < centre[0] < left_side[0], f"mirrored at yaw {yaw}"
+        assert above[1] < centre[1], "up must still be up"

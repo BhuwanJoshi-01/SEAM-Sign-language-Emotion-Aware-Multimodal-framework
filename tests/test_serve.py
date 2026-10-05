@@ -236,6 +236,38 @@ def test_health_states_the_request_contract() -> None:
     assert {"/", "/api/health", "/api/analyse", "/api/coverage"} <= routes
 
 
+def test_the_front_page_is_the_standalone_live_demo() -> None:
+    """`/` is the page GitHub Pages hosts; the earlier demo moved to `/server`.
+
+    One file serves both the local front page and the hosted one, so they cannot differ.
+    `/live` was that page's address for a day and must still arrive at it.
+    """
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+
+    import seam.serve.app as mod
+
+    client = TestClient(mod.build_app())
+    site = mod.Path(mod.__file__).resolve().parents[3] / "docs" / "index.html"
+    front = client.get("/")
+    assert front.status_code == 200
+    assert front.text == site.read_text(encoding="utf-8")
+    assert "api/analyse" not in front.text
+
+    old = client.get("/live", follow_redirects=False)
+    assert old.status_code == 308 and old.headers["location"] == "/"
+
+    server = client.get("/server")
+    assert server.status_code == 200
+    assert "api/analyse" in server.text and "tasks-vision" in server.text
+
+    for route in ("/", "/server", "/avatar"):
+        assert (
+            f"'{route}'"
+            in (mod.Path(mod.__file__).resolve().parents[1] / "web" / "nav.js").read_text()
+        )
+
+
 def test_page_assets_resolve_from_the_package_not_the_cwd(tmp_path, monkeypatch) -> None:
     """The first implementation pointed at src/ and served a 44-byte 404 page.
 

@@ -195,6 +195,11 @@ def smplerx_arm(
     res = sx.run(video, fps=fps, batch=batch, work_dir=cache)
     res = sx.upright(res)
     res, repaired = sx.repair_outliers(res)
+    # Per-frame regression shakes and its depth estimate is noise. See `sx.stabilise` for
+    # the measurements, including why the model's resting hand is deliberately not added.
+    before = sx.jitter(res)
+    res = sx.stabilise(res)
+    after = sx.jitter(res)
     res = sx.recentre_to_origin(res)
     upright_stats = sx.check_upright(res)
     metrics = {
@@ -203,6 +208,11 @@ def smplerx_arm(
         "collapsed_frames_interpolated": repaired,
         "motion": {k: round(v, 4) for k, v in sx.motion_energy(res).items()},
         "upright": {k: round(v, 4) for k, v in upright_stats.items()},
+        "stabilised": {
+            "frame_to_frame_before": {k: round(v, 4) for k, v in before.items()},
+            "frame_to_frame_after": {k: round(v, 4) for k, v in after.items()},
+            "hand_mean_added": False,
+        },
         "betas": [round(float(b), 4) for b in res.betas],
         "source": "SMPLer-X smpler_x_b32 (third-party, third_party weights not vendored)",
     }

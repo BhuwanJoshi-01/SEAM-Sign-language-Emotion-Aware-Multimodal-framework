@@ -52,15 +52,13 @@ def main() -> int:
             failures.append("index did not serve an HTML document")
         if b"tasks-vision" not in page:
             failures.append("page does not load client-side MediaPipe")
-        if b"api/analyse" not in page:
-            failures.append("page does not post to /api/analyse")
 
         # ── every page, and every page reachable from every page ─────────────
         # `/avatar` shipped unlinked from `/`, absent from the banner, and absent from
         # this smoke test, and stayed broken for its whole life. A route nothing points at
         # is a route nobody checks, so both properties are asserted here.
         PAGES = {
-            "/": (b"tasks-vision", b"api/analyse"),
+            "/server": (b"tasks-vision", b"api/analyse"),
             "/avatar": (b"/api/demo/manifest", b"importmap"),
             "/api/coverage": (b"api/cue_expectations", b"is not claimed"),
             "/routes": (b"/static/nav.js", b"/api/demo/manifest"),
@@ -122,20 +120,30 @@ def main() -> int:
         # The nav module is the single source of truth for cross-page links, so if it is
         # missing a page then that page is genuinely unreachable from the UI.
         nav = urllib.request.urlopen(f"http://127.0.0.1:{PORT}/static/nav.js", timeout=15).read()
-        for target in PAGES:
+        for target in ("/", *PAGES):
             if f"'{target}'" not in nav.decode():
                 failures.append(f"nav.js does not link {target}; that page is unreachable")
 
-        # ── the standalone live page ─────────────────────────────────────────
+        # ── the front page: the standalone live demo ─────────────────────────
         # Served from docs/, the same file GitHub Pages hosts. It must run with no server
-        # behind it, so it may not call this API, and every figure it shows must resolve.
+        # behind it, so it may not depend on this API, and every figure it shows must
+        # resolve. `/live` was its address before it became the front page and must still
+        # arrive there.
+        live = page
         try:
-            live = urllib.request.urlopen(f"http://127.0.0.1:{PORT}/live", timeout=15).read()
+            old = urllib.request.urlopen(f"http://127.0.0.1:{PORT}/live", timeout=15).read()
+            if old != page:
+                failures.append("/live does not lead to the front page")
         except urllib.error.HTTPError as e:
-            live = b""
             failures.append(f"/live returned HTTP {e.code}")
         if live:
-            print(f"GET /live             {len(live)} bytes")
+            print(f"GET /                 {len(live)} bytes (docs/index.html)")
+            # The 3D avatar sat unlinked once already. The front page must name it in its
+            # nav and must look for the local viewer, which is how the link becomes live.
+            if b'id="navAvatar"' not in live or b"3D avatar" not in live:
+                failures.append("/ does not link the 3D avatar from its nav")
+            if b"api/demo/manifest" not in live:
+                failures.append("/ never looks for the local avatar viewer")
             for needle in (
                 b"tasks-vision",
                 b"face_landmarker",
@@ -143,11 +151,9 @@ def main() -> int:
                 b"pose_landmarker",
             ):
                 if needle not in live:
-                    failures.append(f"/live does not load {needle.decode()}")
+                    failures.append(f"/ does not load {needle.decode()}")
             if b"api/analyse" in live:
-                failures.append("/live calls the server API; the hosted page has no server")
-            if "'/live'" not in nav.decode():
-                failures.append("nav.js does not link /live; that page is unreachable")
+                failures.append("/ calls the server API; the hosted page has no server")
             import re as _re
 
             for fig in sorted(set(_re.findall(rb'src="figures/([\w.-]+)"', live))):

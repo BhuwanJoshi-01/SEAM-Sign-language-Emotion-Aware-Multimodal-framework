@@ -39,13 +39,14 @@ Most of our original hypotheses were refuted, and we can show exactly why with n
 4. **Three channels.** Manual (hands), non-manual (face and head), prosody (how fast and how
    large the signing is).
 5. **Marker read-out.** Brow raise is the mean of three brow blendshapes above the signer's
-   own baseline. Brow furrow uses two. Head shake and nod are oscillations of head angles.
+   own baseline. Brow furrow uses two. Head shake and nod are the back-and-forth energy of
+   the head's turn and nod angles, in degrees.
 6. **Validation.** Linguists annotated the same 200 clips frame by frame. We score every
    marker against them on signers the detector has never seen.
 7. **Two experiments on top.** An audit of whether emotion models misread grammar, and a
    two-branch encoder that tries to separate grammar from emotion.
 8. **Avatar.** A separate model (SMPLer-X) turns the video into a 3D body, exported as an
-   animated glTF file.
+   animated glTF file. The sequence is stabilised first, because a per-frame model shakes.
 
 **Blendshapes** are the key idea. MediaPipe does not only give face points; it gives 52 named
 scores between 0 and 1 such as `browInnerUp`, `mouthSmileLeft` and `eyeBlinkRight`. They are
@@ -60,13 +61,14 @@ the face in this project is built on them.
 |---|---|---|
 | Is it real-time on a 4 GB GPU? | 73.2 ms p95, 19.7–20.4 FPS, 186 MB VRAM | Yes. The limit is the CPU, not the GPU |
 | Can we read brow raise? | AUC 0.838 / 0.822 / 0.878 on three unseen signers | Yes. Our one validated instrument |
-| Can we read brow furrow? | AUC 0.60–0.78 | Not reliably |
-| Can we read head shake and nod? | AUC 0.50 | No, even with a trained detector |
+| Can we read brow furrow? | AUC 0.60–0.78 | Not reliably; six other signals did not help |
+| Can we read head shake? | AUC 0.70–0.76 on the correct axis (0.50 before, a bug) | Visible, not validated |
+| Can we read head nod? | AUC 0.55–0.77 | Weak |
 | Do emotion models read grammar as negative emotion? | 0 of 8 markers met the rule | Not supported, on isolated or continuous signing |
 | Does the encoder separate grammar from emotion? | 0.694–0.726; target ≤ 0.60 | No. Refuted in every seed |
 | Does the encoder recognise emotion? | Balanced accuracy 0.48–0.51 | No better than chance |
 | Does pose recognise glosses? | WER 0.920 = baseline 0.920 | Not with 3 examples per gloss |
-| Does the avatar export work? | 55 joints, 6.4 mm error | Yes, verified in a real 3D viewer |
+| Does the avatar export work? | 55 joints, 6.4 mm error; frame-to-frame jump cut from 0.32–0.62 m to 0.006–0.030 m | Yes, verified in a real 3D viewer |
 | How much human ground truth? | 43,038 annotated events, 200 of 200 clips joined | Enough to validate against |
 | How well tested? | Over 500 automated tests | Including tests that catch stale results |
 
@@ -82,7 +84,10 @@ Newest first.
 | Date | What happened | In one line |
 |---|---|---|
 | 5 Oct | Final review | Re-ran every result on corrected code; verdicts held, several finer claims withdrawn |
-| 5 Oct | Marker validation | Brow raise validated against human labels; head shake and nod unreadable |
+| 5 Oct | Head-axis bug | Offline "head shake" was measuring head tilt. On the right axis it reads 0.70–0.76, not 0.50 |
+| 5 Oct | Avatar steadied | The jumping was the regressor's depth estimate; held still and smoothed, 20 times steadier |
+| 5 Oct | Live page is the front page | `/` is the live demo, with the 3D avatar in the nav bar |
+| 5 Oct | Marker validation | Brow raise validated against human labels; furrow not; head markers first read as unreadable |
 | 5 Oct | Confound audit on continuous signing | The test we said was needed: not supported |
 | 5 Oct | Frame-rate bug | Annotations are on a 30 fps timeline, 138 clips are 24 fps; found with a blink test |
 | 5 Oct | Gloss model bug | The model could only predict one gloss; its "result" was the baseline by construction |
@@ -118,7 +123,7 @@ recovers it. If an examiner asks what you learned, this is the answer.
 **Locally:**
 
 ```bash
-make serve        # then open http://127.0.0.1:8000/live
+make serve        # then open http://127.0.0.1:8000/
 ```
 
 Or simply open `docs/index.html` through any local web server. Click **Start camera**. The
@@ -161,7 +166,9 @@ normalisation, a One-Euro filter, and three channels: manual, non-manual, prosod
 **1:50 – 2:50 · Why we trust the measurements.** "We obtained 43,038 frame-level annotations
 by ASL linguists for the same 200 clips. We validated every marker against them,
 leave-one-signer-out. Brow raise scores 0.84, 0.82 and 0.88 on three unseen signers. Brow
-furrow does not pass. Head shake and nod sit at 0.50, even with a trained detector."
+furrow does not pass. Head shake first scored exactly 0.50, and we found that was our own
+bug: the offline code was measuring head tilt. On the correct axis it reads 0.70 to 0.76,
+which is visible but below our 0.80 gate, so we do not call it validated."
 *(Show the marker validation figure.)*
 
 **2:50 – 3:50 · The two hypotheses.** "First: do emotion models read grammar as negative
@@ -228,10 +235,36 @@ Three ways. A planted effect of 0.05 is recovered by the same code. Every null i
 with the smallest effect it could have detected. And a placebo, the same marker track shifted
 in time, behaves as it should.
 
-**Why does head shake not work?**
-MediaPipe's head transform on 256-pixel face crops does not carry half-second head movements
-well enough. Even a trained detector on head angles and their dynamics stays at chance. The
-events exist: annotators mark a head shake in 89 of 200 clips.
+**Does head shake work?**
+Partly. At first it scored exactly 0.50 and we wrote that it was unreadable. That was a bug:
+the offline code named its head angles by an aircraft convention, so "head shake" was
+measuring head tilt and "head nod" a head turn. We found it because the live page, written
+separately, did respond to a head shake. We settled which was right by correlating each
+angle with the face landmarks: the offline "yaw" follows the tilt of the eye line at 0.95.
+On the correct axis head shake reads 0.757, 0.702 and 0.696 on three unseen signers. That is
+well above chance and below our gate of 0.80, so we call it visible, not validated. Head
+nod is weak: 0.59, 0.77, 0.55.
+
+**Then why does it look fine in the live demo?**
+Because a deliberate head shake is 10 to 20 degrees and a fluent signer's is a few. The page
+measures back-and-forth motion in degrees and fires above 2.44. At that threshold it catches
+40%, 10% and 52% of the frames linguists marked on the three unseen signers, with false
+alarms on 12%, 0% and 16%. So: reliable for a deliberate movement, not for fluent signing.
+
+**Is that bug fixed everywhere?**
+No, and say so if asked. It is fixed in the live page and in the validation. The old
+function is still in the offline code, because nine results were computed with it and
+changing it means re-running all nine. Two of them used the head marker: the isolated-sign
+audit and the encoder's frame selection. Both are negative results we do not claim. A test
+fails the moment someone fixes the function without re-running them.
+
+**Why did the avatar jitter, and what fixed it?**
+The body model estimates distance from the camera separately for every frame, and that
+estimate is close to noise, so the avatar jumped 0.32 to 0.62 m between frames. We hold
+depth at its median and smooth every joint rotation on the rotation sphere, on quaternions,
+because axis-angle numbers wrap around at 180 degrees. Result: 0.006 to 0.030 m, and finger
+jitter halved. We also tried adding the body model's "resting hand" pose and removed it: it
+turned flat open hands into claws.
 
 **What was the frame-rate bug?**
 Annotation frame numbers are on a 30 fps timeline, and 138 of our 200 clips are 24 fps. Our
@@ -248,7 +281,8 @@ showing a label would be showing noise.
 
 **What would you do with more time?**
 Run perception over the 1,354 further annotated videos we have, to test question marking;
-train translation on How2Sign; get a head-pose estimator that works; and run the avatar
+train translation on How2Sign; re-run the two results that used the wrong head axis; make
+the head-shake threshold adapt to each signer; and run the avatar
 study with Deaf raters.
 
 **Is the data ethical to use?**

@@ -94,12 +94,136 @@ def test_brow_raise_is_the_one_marker_validated_against_human_frames() -> None:
         assert m[other]["verdict_heuristic"] == "not validated", other
 
 
-def test_the_head_markers_are_unreadable_even_with_supervision() -> None:
-    """Not a threshold problem: a fitted detector on head pose does not find them either."""
+def test_the_offline_head_markers_score_at_chance_because_they_read_the_wrong_axis() -> None:
+    """0.50 was read as "head movement cannot be seen". It was the wrong axis.
+
+    The legacy rows are kept in the artifact as the baseline, and they stay at chance:
+    `markers.signals` reads a tilt for head_shake and a turn for head_nod
+    (`tests/test_head_motion.py`).
+    """
     m = _artifact()["markers"]
     for marker in ("head_shake", "head_nod"):
-        assert m[marker]["verdict_supervised"] == "not validated"
         heur = m[marker]["heuristic_within_clip_auc_by_fold"]
-        assert all(abs(heur[f] - 0.5) < 0.02 for f in V.DECIDING_FOLDS), (
-            f"{marker}: the heuristic signal should be at chance, it is blind"
-        )
+        assert all(abs(heur[f] - 0.5) < 0.02 for f in V.DECIDING_FOLDS), marker
+
+
+def test_head_shake_is_readable_on_the_right_axis_but_does_not_pass_the_gate() -> None:
+    """Above chance on every large fold; under 0.80 on every one. Both halves are the result."""
+    shake = _artifact()["markers"]["head_shake"]
+    revised = shake["revised_page_within_clip_auc_by_fold"]
+    legacy = shake["heuristic_within_clip_auc_by_fold"]
+    for fold in V.DECIDING_FOLDS:
+        assert revised[fold] > legacy[fold] + 0.15, fold
+        assert 0.65 < revised[fold] < V.VALIDATED, fold
+    assert shake["verdict_revised_page"] == "not validated"
+    assert shake["verdict_compact"] == "not validated"
+
+
+def test_head_nod_stays_weak_on_the_right_axis() -> None:
+    nod = _artifact()["markers"]["head_nod"]
+    revised = nod["revised_page_within_clip_auc_by_fold"]
+    assert min(revised[f] for f in V.DECIDING_FOLDS) < 0.60
+    assert nod["verdict_revised_page"] == "not validated"
+    assert nod["verdict_tuned"] == "not validated"
+
+
+def test_brow_furrow_was_not_rescued_by_any_alternative_signal() -> None:
+    furrow = _artifact()["markers"]["brow_furrow"]
+    for key in ("verdict_browser", "verdict_tuned", "verdict_compact", "verdict_heuristic"):
+        assert furrow[key] == "not validated", key
+
+
+def test_the_revised_detector_was_chosen_without_the_held_out_signer() -> None:
+    """Every fold records what the other three signers chose, from the declared grid."""
+    m = _artifact()["markers"]
+    names = set(V.LIVE_PARAMS)
+    for marker in ("head_shake", "head_nod"):
+        choice = m[marker]["revised_page_choice_by_fold"]
+        assert set(choice) >= set(V.DECIDING_FOLDS)
+        assert set(choice.values()) <= names
+        assert m[marker]["shipped_in_page"]["name"] in names
+        assert "not a held-out result" in m[marker]["shipped_in_page"]["note"]
+
+
+# --- the second design: nothing in it may read a label --------------------------------------
+
+
+def _clip(n: int = 72, fps: float = 24.0, seed: int = 0) -> dict:
+    rng = np.random.default_rng(seed)
+    t = np.arange(n) / fps
+    turn = 0.2 * np.sin(2 * np.pi * 2.5 * t)
+    rot = np.tile(np.eye(4), (n, 1, 1))
+    rot[:, 0, 0], rot[:, 0, 2] = np.cos(turn), np.sin(turn)
+    rot[:, 2, 0], rot[:, 2, 2] = -np.sin(turn), np.cos(turn)
+    landmarks = rng.uniform(0.2, 0.8, size=(n, 553, 3))
+    return {
+        "fps": fps,
+        "bs": rng.uniform(0, 0.6, size=(n, 52)),
+        "angles": V.HM.head_angles(rot),
+        "geometry": V.face_geometry(landmarks, np.ones((n, 4), dtype=bool)),
+    }
+
+
+def test_no_detector_in_the_second_design_can_see_a_label() -> None:
+    """The clip handed over has no `y`. A signal that needed one would raise here."""
+    clip = _clip()
+    families = [*V.CANDIDATES.values(), V.BROWSER, *(V.live_family(m) for m in V.LIVE_AXES)]
+    for family in families:
+        for name, signal in family.items():
+            out = signal(clip)
+            assert out.shape == (72,), name
+            assert np.isfinite(out).all(), name
+    for marker in V.MARKERS:
+        assert np.isfinite(V.compact_features(clip, marker)).all()
+    assert V.compact_features(clip, "brow_furrow").shape == (72, 16)
+    assert V.compact_features(clip, "head_shake").shape == (72, 10)
+
+
+def test_the_tuned_choice_is_made_on_the_clips_it_is_given_and_no_others() -> None:
+    """Planted: on these clips only one family member follows the label, and it is chosen."""
+    clips = []
+    for seed in range(4):
+        c = _clip(seed=seed)
+        c["y"] = {"brow_furrow": c["bs"][:, V.VM._IDX["browInnerUp"]] < 0.3}
+        clips.append(c)
+    assert V.choose_candidate(clips, "brow_furrow") == "inner-brow-up blendshape, negated"
+
+
+def test_adaptive_level_is_the_pages_rescale() -> None:
+    """Baseline at the 20th percentile, full scale at the 95th, never under the floor."""
+    x = np.concatenate([np.full(40, 0.2), np.full(40, 0.8)])
+    level = V.adaptive_level(x)
+    assert level[:40].max() == 0.0
+    assert level[40] == pytest.approx(1.5), "a jump over a flat baseline saturates"
+    assert level.min() >= 0.0 and level.max() <= 1.5
+    flat = V.adaptive_level(np.full(30, 0.4))
+    assert flat.max() == 0.0
+
+
+def test_frames_without_a_face_do_not_invent_brow_geometry() -> None:
+    landmarks = np.random.default_rng(0).uniform(0.2, 0.8, size=(10, 553, 3))
+    presence = np.ones((10, 4), dtype=bool)
+    landmarks[3], presence[3, 0] = 0.0, False
+    geo = V.face_geometry(landmarks, presence)
+    seen = np.delete(np.arange(10), 3)
+    for key, value in geo.items():
+        assert value[3] == pytest.approx(float(np.median(value[seen]))), key
+
+
+def test_the_operating_point_is_set_on_unmarked_frames_only() -> None:
+    clip = _clip()
+    clip["y"] = {"head_shake": np.arange(72) >= 36}
+    signal = V.live_signal("head_shake", V.LIVE_GRID[0])
+    thr = V.threshold_at_false_alarm([clip], "head_shake", signal)
+    quiet = signal(clip)[:36]
+    assert (quiet >= thr).mean() == pytest.approx(V.LIVE_FALSE_ALARM, abs=0.03)
+    point = V.operating_point([clip], "head_shake", signal, thr)
+    assert set(point) == {
+        "threshold_deg_rms",
+        "level_only",
+        "event_with_swing_gate",
+        "old_page_event",
+    }
+    gated, level = point["event_with_swing_gate"], point["level_only"]
+    assert gated["hit_rate"] <= level["hit_rate"], "a gate can only remove detections"
+    assert gated["false_alarm_rate"] <= level["false_alarm_rate"]

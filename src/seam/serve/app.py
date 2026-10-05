@@ -355,20 +355,28 @@ def build_app() -> Any:
                 content={"error": str(exc), "hint": "see /api/health for the contract"},
             )
 
-    @app.get("/", response_class=HTMLResponse)
-    def index() -> Any:
-        return _serve_page(web, "index.html")
-
-    # The standalone demo: every model and every number is computed in the browser, so it
-    # needs no server at all. It lives in docs/ because that is what GitHub Pages serves,
-    # and this route hands out that same file - the hosted page and the local one cannot
-    # drift apart, because there is only one.
+    # The front page is the standalone demo: every model and every number is computed in
+    # the browser, so it needs no server at all. It lives in docs/ because that is what
+    # GitHub Pages serves, and this route hands out that same file - the hosted page and
+    # the local one cannot drift apart, because there is only one.
     site = Path(__file__).resolve().parents[3] / "docs"
 
-    @app.get("/live", response_class=HTMLResponse)
-    def live_page() -> Any:
+    @app.get("/", response_class=HTMLResponse)
+    def index() -> Any:
         """Real-time face, hand and body tracking with the marker read-out, client-side."""
         return _serve_page(site, "index.html")
+
+    @app.get("/live")
+    def live_page() -> Any:
+        """The front page's address before it became the front page; kept so links work."""
+        from fastapi.responses import RedirectResponse
+
+        return RedirectResponse("/", status_code=308)
+
+    @app.get("/server", response_class=HTMLResponse)
+    def server_demo() -> Any:
+        """The earlier demo, which posts landmark numbers to /api/analyse for the read-out."""
+        return _serve_page(web, "index.html")
 
     @app.get("/figures/{name}")
     def figure(name: str) -> Any:

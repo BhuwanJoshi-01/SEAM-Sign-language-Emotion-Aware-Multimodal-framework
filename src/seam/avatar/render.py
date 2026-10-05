@@ -92,7 +92,13 @@ def _project(verts: np.ndarray, cam: Camera, w: int, h: int) -> tuple[np.ndarray
     ndc_x = (cam_space[:, 0] * f / aspect) / z
     ndc_y = (cam_space[:, 1] * f) / z
 
-    sx = (ndc_x * 0.5 + 0.5) * (w - 1)
+    # The camera looks down +z here with +y up, so +x in camera space is the viewer's
+    # LEFT, not right - screen x has to be flipped. Without the flip every render was a
+    # mirror image: a signer raising their right hand was drawn raising their left. It
+    # went unnoticed because a mirrored body still faces the camera, stands upright and
+    # moves plausibly, and the only check made was "is it facing us". Sign language has
+    # handedness, so a mirrored stimulus is a different utterance.
+    sx = (1.0 - (ndc_x * 0.5 + 0.5)) * (w - 1)
     sy = (1.0 - (ndc_y * 0.5 + 0.5)) * (h - 1)
     return np.stack([sx, sy], axis=1), z
 

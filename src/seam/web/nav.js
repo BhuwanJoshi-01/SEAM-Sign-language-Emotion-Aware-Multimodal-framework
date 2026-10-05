@@ -12,20 +12,20 @@
 
 export const ROUTES = [
   {
-    path: '/live',
-    title: 'Live HUD',
+    path: '/',
+    title: 'Live demo',
     what: 'The standalone real-time demo: face mesh, hands and body tracked in the browser, with the grammar and affect channels read out live. Needs no server; this is the page hosted on GitHub Pages.',
     kind: 'page',
   },
   {
-    path: '/',
+    path: '/server',
     title: 'Server demo',
     what: 'Webcam. MediaPipe Tasks runs in the browser; the page posts landmark numbers only, so no video reaches the server.',
     kind: 'page',
   },
   {
     path: '/avatar',
-    title: 'SMPL-X avatar',
+    title: '3D avatar',
     what: 'Animated skinned glTF from SMPLer-X, beside the per-clip pipeline measurements. Needs `make demo-avatar` first.',
     kind: 'page',
   },
@@ -80,7 +80,7 @@ export const ROUTES = [
 ];
 
 /** The pages a person navigates between, in reading order. */
-const NAV = ['/', '/avatar', '/api/coverage', '/routes'];
+const NAV = ['/', '/avatar', '/server', '/api/coverage', '/routes'];
 
 const BRAND = 'SEAM';
 const TAGLINE = 'Sign-language non-manual analysis';

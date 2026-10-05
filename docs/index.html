@@ -122,7 +122,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
 section.block{padding:38px 0;border-top:1px solid var(--line)}
 section.block h2.big{font-size:clamp(24px,3vw,34px);margin:6px 0 8px;letter-spacing:-.01em}
 .sub{color:var(--ink-2);max-width:74ch;margin:0 0 22px}
-.tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:22px}
+.tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:22px}
 @media (max-width:900px){.tiles,.steps{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
 @media (max-width:560px){.tiles,.steps{grid-template-columns:1fr!important}}
 .tile{padding:16px;border-radius:var(--r);background:var(--panel);border:1px solid var(--line)}
@@ -150,7 +150,7 @@ footer{padding:28px 0 46px;color:var(--ink-3);font-size:13.5px;border-top:1px so
 <header class="top"><div class="wrap">
   <a class="brand" href="#top" aria-label="SEAM home"><i aria-hidden="true"></i>SEAM</a>
   <nav aria-label="Sections">
-    <a href="#live">Live</a><a href="#results">Results</a><a href="#how">How it works</a><a href="#limits">Limits</a>
+    <a href="#live">Live</a><a href="#results">Results</a><a href="#avatar" id="navAvatar">3D avatar</a><a href="#how">How it works</a><a href="#limits">Limits</a>
     <a href="https://github.com/BhuwanJoshi-01/SEAM-Sign-language-Emotion-Aware-Multimodal-framework">GitHub</a>
   </nav>
 </div></header>
@@ -220,9 +220,10 @@ footer{padding:28px 0 46px;color:var(--ink-3);font-size:13.5px;border-top:1px so
           <div class="meter" id="mFurrow"><label>Brow furrow</label><div class="bar violet"><i></i></div><span class="num">0.00</span></div>
           <div style="margin:-4px 0 6px 128px"><span class="badge warn">not validated · AUC 0.60–0.78</span></div>
           <div class="meter" id="mShake"><label>Head shake</label><div class="bar amber"><i></i></div><span class="num">0.00</span></div>
+          <div style="margin:-4px 0 6px 128px"><span class="badge warn" id="bShake">above chance · AUC 0.70–0.76 · gate 0.80</span></div>
           <div class="meter" id="mNod"><label>Head nod</label><div class="bar amber"><i></i></div><span class="num">0.00</span></div>
-          <div style="margin:-4px 0 0 128px"><span class="badge bad">experimental · unreadable in our tests</span></div>
-          <p class="note">Yes/no questions and topics raise the brows; wh-questions furrow them; negation shakes the head. Each badge is what we measured against human frame-level labels.</p>
+          <div style="margin:-4px 0 0 128px"><span class="badge warn" id="bNod">weak · AUC 0.55–0.77</span></div>
+          <p class="note">Yes/no questions and topics raise the brows; wh-questions furrow them; negation shakes the head. Each badge is what we measured against human frame-level labels on signers the detector never saw. Shake and nod show degrees of back-and-forth motion; they respond well to a deliberate movement and less reliably to the small ones of fluent signing.</p>
         </div>
       </div>
 
@@ -265,17 +266,35 @@ footer{padding:28px 0 46px;color:var(--ink-3);font-size:13.5px;border-top:1px so
   <p class="sub">Every number below comes from a logged experiment in the repository. Several of our starting hypotheses were refuted, and we report those as plainly as the one that held.</p>
   <div class="tiles">
     <div class="tile"><b>0.82–0.88</b><span>Brow-raise AUC against human frame-level annotation, on signers never seen</span><small>leave one signer out · 200 utterances</small></div>
+    <div class="tile"><b>0.70–0.76</b><span>Head-shake AUC on the correct head axis. It read 0.50 while our offline code was measuring head tilt</span><small>visible, still under the 0.80 gate</small></div>
     <div class="tile"><b>73 ms</b><span>p95 perception latency on a 4 GB RTX 3050, about 20 FPS</span><small>3 MediaPipe graphs, 900 timed calls</small></div>
     <div class="tile"><b>186 MB</b><span>peak VRAM with six models live, against a 2,500 MB budget</span><small>7% of budget</small></div>
     <div class="tile"><b>0 of 8</b><span>grammatical markers read as more negative by emotion models, under a pre-registered rule</span><small>3 FER models · human markers</small></div>
     <div class="tile"><b>0.71</b><span>worst-fold cross-prediction AUC of the factorized encoder; target was ≤ 0.60</span><small>hypothesis refuted, 3 seeds</small></div>
-    <div class="tile"><b>526</b><span>automated tests, including checks that fail when a result outlives its code</span><small>23 more need a licensed body model</small></div>
+    <div class="tile"><b>569</b><span>automated tests, including checks that fail when a result outlives its code</span><small>23 more need a licensed body model</small></div>
+    <div class="tile"><b>20×</b><span>steadier 3D avatar: the jump between frames fell from 0.32–0.62 m to 0.006–0.030 m</span><small>4 clips · depth held, rotations smoothed</small></div>
   </div>
   <div class="figs">
-    <figure><img src="figures/marker_validation.png" alt="Dot plot: brow raise scores 0.82 to 0.88 AUC on three held-out signers; brow furrow 0.60 to 0.78; head shake and head nod sit at chance, 0.50." loading="lazy"><figcaption><b>One marker holds.</b> Brow raise clears the 0.80 gate on every held-out signer. Head shake and nod cannot be read from this input.</figcaption></figure>
+    <figure><img src="figures/marker_validation.png" alt="Dot plot of within-clip AUC on three held-out signers. Brow raise 0.82 to 0.88, above the 0.80 gate. Brow furrow 0.60 to 0.78. Head shake 0.70 to 0.76 and head nod 0.55 to 0.77 on the corrected axes, with hollow markers at 0.50 showing the earlier wrong-axis reading." loading="lazy"><figcaption><b>One marker holds; two more are now visible.</b> Brow raise clears the 0.80 gate on every held-out signer. Head shake and nod read 0.50 until we found our offline code was measuring the wrong head axis; on the right one they are above chance but short of the gate.</figcaption></figure>
     <figure><img src="figures/c1_continuous.png" alt="Forest plot of eight markers by three FER models; most intervals cross zero and none is positive in two models after correction." loading="lazy"><figcaption><b>Emotion models did not read grammar as anger.</b> On 200 utterances with human markers, no marker met the rule. Brow furrow leaned the opposite way.</figcaption></figure>
     <figure><img src="figures/m4_gate.png" alt="Dot plot of worst-fold cross-prediction AUC for five model variants; all dots lie between 0.69 and 0.81, above the 0.60 target." loading="lazy"><figcaption><b>Separation failed.</b> No loss term moved the encoder under the target, in any of three seeds.</figcaption></figure>
     <figure><img src="figures/frame_alignment.png" alt="Line chart: for 24 fps clips alignment AUC peaks at 0.73 near scale 0.82; for 30 fps clips it peaks at 0.81 at scale 1.00." loading="lazy"><figcaption><b>A bug we caught with a measurement.</b> Annotations are on a 30 fps timeline; most clips are 24 fps. Blink labels only line up after rescaling.</figcaption></figure>
+  </div>
+</div></section>
+
+<section class="block" id="avatar"><div class="wrap">
+  <div class="eyebrow">Output side</div>
+  <h2 class="big">The 3D signing avatar</h2>
+  <p class="sub">The same video can be turned into a full 3D body. SMPLer-X regresses SMPL-X pose (body, 30 finger joints, jaw) for every frame, and we export it as an animated, skinned glTF that any 3D viewer can play.</p>
+  <div class="figs">
+    <figure><img src="figures/avatar_strip.png" alt="Five frames of a grey 3D human body model seated and signing: hands rest on the lap, then the right hand rises to the chin and the left hand opens beside it with the fingers spread." width="1474" height="400"><figcaption><b>Five frames of one utterance.</b> Rendered from the exported animation. No video of the signer is shown or shipped.</figcaption></figure>
+    <div class="tile" style="align-self:start">
+      <b>20× steadier</b>
+      <span>The first version jumped back and forth. The cause was the regressor's depth estimate, which is noise from one frame to the next: the body moved 0.32 to 0.62 m per frame. Holding depth still and smoothing every joint rotation on the sphere brings that to 0.006 to 0.030 m, and halves finger jitter.</span>
+      <small>4 clips · measured before and after in the demo manifest</small>
+      <p style="margin:14px 0 0"><a class="btn" id="avatarOpen" href="avatar" hidden>Open the interactive 3D viewer</a></p>
+      <p class="note" id="avatarNote" style="margin-top:12px">The interactive viewer runs on the local server (<code>make demo-avatar</code>, then <code>make serve</code>). It is not hosted here because the SMPL-X body model is licensed and may not be redistributed.</p>
+    </div>
   </div>
 </div></section>
 
@@ -301,11 +320,13 @@ footer{padding:28px 0 46px;color:var(--ink-3);font-size:13.5px;border-top:1px so
     <tbody>
       <tr><td>Real-time perception</td><td><span class="badge ok">works</span></td><td>41.8 ms median, 73.2 ms p95, 19.7–20.4 FPS on an RTX 3050 (4 GB)</td></tr>
       <tr><td>Brow-raise marker</td><td><span class="badge ok">validated</span></td><td>Within-clip AUC 0.838 / 0.822 / 0.878 on three held-out signers</td></tr>
-      <tr><td>Brow furrow, head shake, head nod</td><td><span class="badge warn">not validated</span></td><td>0.60 on the largest fold; head markers at chance even with a fitted detector</td></tr>
+      <tr><td>Brow furrow</td><td><span class="badge warn">not validated</span></td><td>0.599 / 0.717 / 0.780: two signers pass 0.70, one does not, and none of six other brow signals fixed it</td></tr>
+      <tr><td>Head shake</td><td><span class="badge warn">above chance</span></td><td id="eShake">0.757 / 0.702 / 0.696 on the corrected axis, against 0.50 before; short of the 0.80 gate</td></tr>
+      <tr><td>Head nod</td><td><span class="badge warn">weak</span></td><td id="eNod">0.592 / 0.767 / 0.549; readable for one signer only</td></tr>
       <tr><td>"Emotion models misread grammar"</td><td><span class="badge bad">not supported</span></td><td>Tested on isolated signs and on continuous signing; no marker met the rule</td></tr>
       <tr><td>Grammar / affect factorized encoder</td><td><span class="badge bad">refuted</span></td><td>Worst-fold cross-AUC 0.694–0.726 against a target of 0.60</td></tr>
       <tr><td>Gloss recognition</td><td><span class="badge bad">at baseline</span></td><td>WER 0.920 equals always predicting the most frequent gloss, on 200 utterances</td></tr>
-      <tr><td>Expressive 3D avatar</td><td><span class="badge ok">works offline</span></td><td>SMPL-X body from video, exported as animated glTF; no human rating study yet</td></tr>
+      <tr><td>Expressive 3D avatar</td><td><span class="badge ok">works offline</span></td><td>SMPL-X body and fingers from video, exported as animated glTF; frame-to-frame jump cut from 0.32–0.62 m to 0.006–0.030 m. No human rating study yet</td></tr>
       <tr><td>Sign-to-English translation, emotion-styled text</td><td><span class="badge">future work</span></td><td>Data is prepared (35,176 How2Sign sentences); not trained</td></tr>
     </tbody>
   </table></div>
@@ -365,8 +386,29 @@ class Latch {
     return this.active && !was;
   }
 }
-// Oscillation of an angle: at least two direction reversals of real amplitude inside a
-// short window. A single turn of the head is not a shake.
+// Head shake and nod are scored as the RMS, in degrees, of the back-and-forth part of the
+// head angle: a fast average drops tracking noise, a slow one follows posture, and the
+// energy of their difference is what oscillates. Each average is advanced by the real time
+// since the last frame, so the score does not depend on the frame rate. This is
+// seam.features.head_motion.live_band_rms line for line, and the constants and the two
+// thresholds are the ones scripts/validate_markers.py chose and scored on held-out signers.
+const HEAD = { fast: 0.08, slow: 0.4, hold: 0.4, shakeOnDeg: 2.44, nodOnDeg: 3.01 };
+class BandEnergy {
+  constructor() { this.f = null; this.s = 0; this.e = 0; this.t = 0; }
+  push(deg, tMs) {
+    if (this.f === null) { this.f = this.s = deg; this.e = 0; this.t = tMs; return 0; }
+    const dt = clamp((tMs - this.t) / 1000, 0.001, 0.25); this.t = tMs;
+    this.f += (1 - Math.exp(-dt / HEAD.fast)) * (deg - this.f);
+    this.s += (1 - Math.exp(-dt / HEAD.slow)) * (deg - this.s);
+    const band = this.f - this.s;
+    this.e += (1 - Math.exp(-dt / HEAD.hold)) * (band * band - this.e);
+    return Math.sqrt(this.e);
+  }
+  reset() { this.f = null; this.e = 0; }
+}
+// The event also needs the angle to have genuinely gone there and back: at least two
+// reversals of 2 degrees inside the window. One quick turn of the head has energy too, and
+// it is not a shake.
 class Oscillation {
   constructor(minDeg = 5, windowMs = 1300) { this.minDeg = minDeg; this.windowMs = windowMs; this.pts = []; this.rev = []; this.dir = 0; this.ext = null; }
   push(deg, t) {
@@ -384,11 +426,12 @@ class Oscillation {
 // cues are shown as the raw blendshape scores: they are reported as signals, not judged.
 const sig = { raise: new Adaptive(), furrow: new Adaptive() };
 const latch = { raise: new Latch(), furrow: new Latch(), shake: new Latch(0.6, 2), nod: new Latch(0.6, 2), smile: new Latch(0.45, 6) };
-const osc = { yaw: new Oscillation(), pitch: new Oscillation() };
+const osc = { yaw: new Oscillation(2, 1300), pitch: new Oscillation(2, 1300) };
+const energy = { yaw: new BandEnergy(), pitch: new BandEnergy() };
 const series = { raise: [], furrow: [], smile: [], speed: [] };
 const TL_LEN = 360;
 const wrists = [];   // {t, x, y} per hand, recent
-const live = { raise: 0, furrow: 0, shake: 0, nod: 0, smile: 0, frown: 0, wide: 0, jaw: 0, speed: 0, amp: 0, yaw: 0, pitch: 0, roll: 0, face: false, hands: 0, pose: false, frames: 0 };
+const live = { raise: 0, furrow: 0, shake: 0, nod: 0, shakeDeg: 0, nodDeg: 0, smile: 0, frown: 0, wide: 0, jaw: 0, speed: 0, amp: 0, yaw: 0, pitch: 0, roll: 0, face: false, hands: 0, pose: false, frames: 0 };
 window.__seam = live;   // read by the automated smoke test
 
 // ── UI painters ──────────────────────────────────────────────────────────────
@@ -535,22 +578,26 @@ function tick() {
     const mtx = fr.facialTransformationMatrixes?.[0]?.data;
     if (mtx) {
       const a = headAngles(mtx); live.yaw = a.yaw; live.pitch = a.pitch; live.roll = a.roll;
-      live.shake = osc.yaw.push(a.yaw, now); live.nod = osc.pitch.push(a.pitch, now);
+      live.shakeDeg = energy.yaw.push(a.yaw, now); live.nodDeg = energy.pitch.push(a.pitch, now);
+      // A level of 0.6, where the event latches, is the validated threshold in degrees.
+      live.shake = clamp(0.6 * live.shakeDeg / HEAD.shakeOnDeg, 0, 1.2); live.nod = clamp(0.6 * live.nodDeg / HEAD.nodOnDeg, 0, 1.2);
+      live.shakeSwing = osc.yaw.push(a.yaw, now) >= 0.66; live.nodSwing = osc.pitch.push(a.pitch, now) >= 0.66;
       $("kYaw").textContent = a.yaw.toFixed(0) + "°"; $("kPitch").textContent = a.pitch.toFixed(0) + "°"; $("kRoll").textContent = a.roll.toFixed(0) + "°";
     }
     if (latch.raise.update(live.raise)) pushEvent("Brow raise", "in ASL, a yes/no question or a topic. Grammar, not surprise.");
     if (latch.furrow.update(live.furrow)) pushEvent("Brow furrow", "in ASL, a wh-question. Grammar, not anger.");
-    if (latch.shake.update(live.shake)) pushEvent("Head shake", "in ASL, negation. Experimental detector.");
-    if (latch.nod.update(live.nod)) pushEvent("Head nod", "affirmation or emphasis. Experimental detector.");
+    if (latch.shake.update(live.shakeSwing ? live.shake : 0)) pushEvent("Head shake", "in ASL, negation. Above chance in our tests, not yet validated.");
+    if (latch.nod.update(live.nodSwing ? live.nod : 0)) pushEvent("Head nod", "affirmation or emphasis. Weak in our tests.");
     if (latch.smile.update(live.smile)) pushEvent("Smile", "an affective cue, shown as a raw signal only.");
     meter("mRaise", live.raise, raw.raise, latch.raise.active); meter("mFurrow", live.furrow, raw.furrow, latch.furrow.active);
-    meter("mShake", live.shake, live.shake, latch.shake.active); meter("mNod", live.nod, live.nod, latch.nod.active);
+    meter("mShake", live.shake, live.shakeDeg, latch.shake.active); meter("mNod", live.nod, live.nodDeg, latch.nod.active);
     meter("mSmile", live.smile, raw.smile, latch.smile.active); meter("mFrown", live.frown, raw.frown, false);
     meter("mWide", live.wide, raw.wide, false); meter("mJaw", live.jaw, raw.jaw || 0, false);
   }
   if (!cats) {
     // No face in this frame: a meter frozen at its last value would read as a measurement.
-    for (const k of ["raise", "furrow", "shake", "nod", "smile", "frown", "wide", "jaw"]) live[k] = 0;
+    for (const k of ["raise", "furrow", "shake", "nod", "shakeDeg", "nodDeg", "smile", "frown", "wide", "jaw"]) live[k] = 0;
+    energy.yaw.reset(); energy.pitch.reset();
     for (const k of Object.keys(latch)) latch[k].update(0);
     for (const id of ["mRaise", "mFurrow", "mShake", "mNod", "mSmile", "mFrown", "mWide", "mJaw"]) meter(id, 0, 0, false);
   }
@@ -630,6 +677,15 @@ if (!navigator.mediaDevices?.getUserMedia) { $("start").disabled = true; $("idle
 const auto = new URLSearchParams(location.search);
 if (auto.get("skeleton") === "1") { $("tPrivacy").checked = true; $("viewport").classList.add("privacy"); }
 if (auto.get("autostart") === "camera") begin("camera");
+
+// The interactive 3D viewer exists only where the local server is: the body model is
+// licensed and cannot be hosted. Where it is there, the nav link goes straight to it; where
+// it is not, this request fails quietly and the avatar section explains why.
+fetch("api/demo/manifest", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((m) => {
+  if (!m || !(m.clips || []).length) return;
+  $("avatarOpen").hidden = false; $("navAvatar").href = "avatar";
+  $("avatarNote").textContent = "Running on the local server: the viewer plays the skinned glTF with orbit controls, " + m.clips.length + " clips.";
+}).catch(() => {});
 </script>
 </body>
 </html>

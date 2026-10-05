@@ -13,7 +13,7 @@ not.
 | | |
 |---|---|
 | **Live demo** | [`docs/index.html`](docs/index.html) — runs fully in the browser. Hosted on GitHub Pages once enabled: `https://bhuwanjoshi-01.github.io/SEAM-Sign-language-Emotion-Aware-Multimodal-framework/` |
-| **Run locally** | `make setup && make serve`, then open <http://127.0.0.1:8000/live> |
+| **Run locally** | `make setup && make serve`, then open <http://127.0.0.1:8000/> |
 | **Team reading guide** | [`docs/TEAM_GUIDE.md`](docs/TEAM_GUIDE.md) — what the project is, what happened, viva preparation |
 | **Full experiment record** | [`paper/EXPERIMENT_LOG.md`](paper/EXPERIMENT_LOG.md), [`paper/CLAIMS_LEDGER.md`](paper/CLAIMS_LEDGER.md) |
 
@@ -45,11 +45,11 @@ MediaPipe's public sample photo; no dataset video is shown or shipped.*
 |---|---|---|
 | Can the full perception stack run in real time on a 4 GB laptop GPU? | 41.8 ms median, **73.2 ms p95**, 19.7–20.4 FPS; **186 MB** peak VRAM with six models live against a 2,500 MB budget | **Yes** |
 | Can a grammatical marker be read off the face on signers never seen? | Brow raise vs human frame-level annotation: within-clip AUC **0.838 / 0.822 / 0.878** on three held-out signers | **Yes, for brow raise** |
-| Can the other markers be read too? | Brow furrow 0.60–0.78; head shake and head nod at **0.50** (chance), even with a fitted detector | **No** |
+| Can the other markers be read too? | Brow furrow 0.60–0.78. Head shake **0.70–0.76** and head nod 0.55–0.77 once the correct head axis is read; both had scored 0.50 while our offline code measured the wrong axis | **Partly: above chance, below the 0.80 gate** |
 | Do emotion models read grammar as negative emotion? | Tested twice: 2,565 isolated signs, and 200 continuous utterances with human markers under a pre-registered rule. **No marker met the rule** | **Not supported** |
 | Can a factorized encoder separate grammar from affect? | Worst-fold cross-prediction AUC **0.694–0.726** against a target of ≤ 0.60, in all 3 seeds and 5 ablation variants | **Refuted** |
 | Can pose alone recognise glosses on this corpus? | WER 0.920, equal to always predicting the most frequent gloss | **Not at this data scale** |
-| Can a video become an animated 3D avatar? | SMPL-X body regressed per frame and exported as a skinned, animated glTF (55 joints, 6.4 mm error) | **Yes** |
+| Can a video become an animated 3D avatar? | SMPL-X body and fingers regressed per frame and exported as a skinned, animated glTF (55 joints, 6.4 mm error); frame-to-frame jump cut from 0.32–0.62 m to 0.006–0.030 m | **Yes** |
 
 Two of our original hypotheses were refuted. We report them as results, because each was
 measured with an instrument that passes a positive control. The record also contains the
@@ -188,13 +188,24 @@ Each marker is a small, inspectable function of the face signals:
 |---|---|---|
 | Brow raise | mean of `browInnerUp`, `browOuterUpLeft`, `browOuterUpRight` | Yes/no question, topic |
 | Brow furrow | mean of `browDownLeft`, `browDownRight` | Wh-question |
-| Head shake | oscillation of head yaw | Negation |
-| Head nod | oscillation of head pitch | Affirmation |
+| Head shake | back-and-forth energy of the head's left-right turn, in degrees RMS | Negation |
+| Head nod | back-and-forth energy of the head's up-down angle, in degrees RMS | Affirmation |
 
-Thresholds are **relative to the clip's own baseline**, not absolute, because a signer who
-habitually holds a slight furrow would otherwise be "furrowing" on every frame. Head angles
-come from a ZYX decomposition of the rotation block of MediaPipe's facial transformation
-matrix.
+Brow thresholds are **relative to the person's own baseline**, not absolute, because a signer
+who habitually holds a slight furrow would otherwise be "furrowing" on every frame.
+
+Head angles are read from MediaPipe's facial transformation matrix as the direction the face
+points (its third column) and its right-hand direction (its first). A shake or a nod is then
+scored by three running averages: a fast one removes tracking noise, a slow one follows
+posture, and the energy of their difference is the part of the angle that goes back and
+forth. The page reports it in degrees and additionally requires two real reversals before it
+calls an event, so that one quick turn of the head is not a "shake".
+
+> **A naming bug worth knowing about.** Our first offline implementation took the angles
+> from a ZYX Euler decomposition and named them roll, pitch and yaw. Those names assume the
+> forward axis is x, as on an aircraft; a face's forward axis is z. The mathematics was
+> right and the names were not: "head shake" was reading head *tilt*, and "head nod" a head
+> *turn*. Section 4.2 shows what that cost.
 
 ### 3.6 Aligning human annotation to video frames
 
@@ -288,6 +299,13 @@ standard orientation, repair frames where the regressor loses the person, and ex
 110 animation channels). The export is verified by loading it in a completely independent
 reader, three.js in headless Chrome, which found two bugs our own verifier had agreed with.
 
+A per-frame regressor shakes, so the sequence is **stabilised** before export. The
+regressor's estimate of the body's distance from the camera is close to noise from one frame
+to the next, which made the first avatar jump back and forth; we hold that axis at its
+median over the clip. Every joint rotation, including the 30 finger joints, is then smoothed
+with a Gaussian window computed on the rotation sphere (on quaternions, after aligning their
+signs), not on the raw axis-angle numbers, which wrap around at 180 degrees.
+
 ### 3.12 Efficiency
 
 Models are exported to ONNX and checked for numerical parity against PyTorch on real faces.
@@ -328,23 +346,48 @@ way. The limit is the CPU, not VRAM.
 
 ### 4.2 Which markers can actually be read
 
-![Dot plot of within-clip AUC for four markers on three held-out signers. Brow raise sits between 0.82 and 0.88, brow furrow between 0.60 and 0.78, head shake and head nod at 0.50.](docs/figures/marker_validation.png)
+![Dot plot of within-clip AUC for four markers on three held-out signers. Brow raise sits between 0.82 and 0.88, above the 0.80 gate. Brow furrow lies between 0.60 and 0.78. Head shake lies between 0.70 and 0.76 and head nod between 0.55 and 0.77, with hollow markers at 0.50 showing where both stood while the wrong head axis was read.](docs/figures/marker_validation.png)
 
-| Marker | Cory | Jonathan | Rachel | Verdict |
-|---|---|---|---|---|
-| **Brow raise** | 0.838 | 0.822 | 0.878 | **Validated** |
-| Brow furrow | 0.599 | 0.717 | 0.780 | Not validated |
-| Head shake | 0.500 | 0.502 | 0.500 | Unreadable |
-| Head nod | 0.498 | 0.500 | 0.499 | Unreadable |
+| Marker | Detector | Cory | Jonathan | Rachel | Verdict |
+|---|---|---|---|---|---|
+| **Brow raise** | mean of three blendshapes | 0.838 | 0.822 | 0.878 | **Validated** |
+| Brow furrow | mean of two blendshapes | 0.599 | 0.717 | 0.780 | Not validated |
+| Head shake | first version, wrong axis | 0.500 | 0.502 | 0.500 | (a bug, not a result) |
+| Head shake | **correct axis, as on the live page** | 0.757 | 0.702 | 0.696 | Above chance, not validated |
+| Head nod | first version, wrong axis | 0.498 | 0.500 | 0.499 | (a bug, not a result) |
+| Head nod | **correct axis, as on the live page** | 0.592 | 0.767 | 0.549 | Weak |
 
 **Brow raise works**, on signers the detector was never tuned on, using the plain mean of
 three blendshapes. A fitted 61-feature detector did *worse* (0.70–0.87): with four signers,
 more capacity bought less generalisation.
 
-**Head movements cannot be read from this input.** Even a supervised detector on head
-angles and their dynamics stays near chance. The annotators mark a head shake in 89 of the
-200 clips, so the events are there; the head transform on 256-pixel crops does not carry
-them.
+**Head movements looked unreadable, and that was our bug.** In the first run both head
+markers scored exactly 0.50, and so did a fitted detector, and we wrote that the input does
+not carry head movement. Then the live page, written separately, plainly responded to a head
+shake. Comparing the two showed the offline code was reading head tilt for "shake" and head
+turn for "nod" (section 3.5). We confirmed it without trusting either implementation, by
+correlating each angle with the face landmarks themselves: the angle the offline code called
+"yaw" follows the tilt of the eye line (|r| = 0.95) and the one it called "pitch" follows
+the nose moving sideways (|r| = 0.90).
+
+On the correct axis, **head shake reads 0.70 to 0.76** on the three held-out signers. That is
+well above chance and still short of our gate, so we report it as visible but not validated.
+**Head nod stays weak**: one signer at 0.77, two under 0.60. The detector's three constants
+were chosen on the training signers only in every fold.
+
+A ranking score is not the whole story for a live demo, which has to say yes or no. At the
+threshold the page uses, the head-shake event fires on 40%, 10% and 52% of the frames the
+annotators marked for Cory, Jonathan and Rachel, with false alarms on 12%, 0% and 16% of the
+frames they did not. The event the page fired before this change managed 33%, 9% and 45%.
+A threshold in degrees does not transfer well between people: fluent signers shake the head
+by a few degrees, some by much less than others. The page responds far more reliably to a
+deliberate movement, and we describe it that way.
+
+**Brow furrow could not be improved.** We tried six alternative signals, including brow
+height and inner-brow gap measured directly on the landmarks, and a small fitted model. None
+lifted the weakest signer above 0.64. For two of our signers the `browDown` blendshape sits
+near 0.42 even when the annotators mark nothing, so there is little room left for it to
+rise.
 
 ### 4.3 Emotion models did not read grammar as negative emotion
 
@@ -403,6 +446,8 @@ evidence that pose is uninformative.
 | Structure | 1 skinned mesh, 55 joints, 110 animation channels |
 | Error against the mesh pipeline | 6.4 mm (glTF allows 4 skinning influences; SMPL-X uses up to 10) |
 | Detection coverage on 4 clips, 541 frames | 0.99–1.00 |
+| Root movement between frames, before and after stabilising | 0.32–0.62 m, then 0.006–0.030 m |
+| Finger-joint movement between frames, before and after | 0.061–0.098 rad, then 0.029–0.039 rad |
 | Verified by | three.js `GLTFLoader` in headless Chrome |
 
 No human preference study has been run, so we make no claim about how good the avatar looks.
@@ -413,6 +458,9 @@ No human preference study has been run, so we make no claim about how good the a
 |---|---|---|
 | Emotion models trained and applied with different face crops | All three predicted one class for all 200 clips | Per-frame spread within a clip was 0.0002 |
 | Head yaw read from the wrong matrix entries | Head shake was zero for a real head shake; one "positive result" was produced by the bug | The live demo showed a blank row |
+| Head angles named by an aircraft convention | "Head shake" measured head tilt and "head nod" a head turn; both scored 0.50 and were written up as unreadable | The browser page, written separately, worked; the landmarks settled which was right |
+| The body regressor's depth used as the avatar's position | The avatar jumped 0.32 to 0.62 m between frames | Watching it, then measuring the step size per axis |
+| The software renderer flipped left and right | Every offline avatar video was a mirror image | A test that renders one raised hand and asks which side it is on |
 | Annotation frames read at 30 fps on 24 fps clips | Labels pointed at the wrong frames on 138 of 200 clips | The blink alignment test in section 3.6 |
 | Gloss classifier could only predict one gloss | Its "negative result" was the baseline by construction | A planted-signal positive control |
 | Baseline model trained without the main model's class weights | A five-fold "improvement" that was an artefact | Reading the re-run instead of comparing headlines |
@@ -431,7 +479,8 @@ when available) and runs all three landmarkers on your webcam or on a video file
 | Panel | Shows |
 |---|---|
 | Stage | Face mesh, hand skeletons and upper body drawn over the video, with FPS and per-model latency |
-| Linguistic channel | Brow raise, brow furrow, head shake, head nod, each with the validation result we measured |
+| Linguistic channel | Brow raise, brow furrow, head shake, head nod, each with the validation result we measured. Shake and nod read in degrees of back-and-forth motion |
+| 3D avatar | In the nav bar. On the local server it opens the interactive viewer; on the hosted page it shows rendered frames and says why the viewer cannot be hosted |
 | Affective cues | Smile, frown, eye widening, jaw opening as raw signals, with no emotion label |
 | Head pose and prosody | Yaw, pitch, roll; hand speed and signing-space size in shoulder widths |
 | Timeline | The last twelve seconds of four signals |
@@ -445,12 +494,18 @@ The page is checked in a real browser by `scripts/site_smoke.py`, which runs hea
 with a video file standing in for the camera and reads back what the page measured.
 
 ```bash
-make serve                                   # http://127.0.0.1:8000/live
+make serve                                   # http://127.0.0.1:8000/
 python scripts/site_smoke.py --video my_clip.mp4 --shot out.png
 ```
 
-The server also offers `/` (server-side marker analysis), `/avatar` (the 3D avatar viewer,
-after `make demo-avatar`) and `/api/coverage` (what is and is not claimed).
+The page's head detector is JavaScript and the validation is Python, so a test runs the
+page's own classes in Node and checks them number for number against the Python functions
+that were scored; the thresholds in the page are read from the validation artifact by
+another.
+
+The server also offers `/avatar` (the interactive 3D avatar viewer, after
+`make demo-avatar`), `/server` (the earlier demo, with server-side marker analysis) and
+`/api/coverage` (what is and is not claimed).
 
 ---
 
@@ -459,6 +514,10 @@ after `make demo-avatar`) and `/api/coverage` (what is and is not claimed).
 - **Four signers, 200 utterances.** Every result is leave-one-signer-out, and none should be
   read as general across signers, dialects or recording conditions.
 - **Lab-recorded, scripted signing.** Nothing here is evaluated on conversation.
+- **One known defect is still in the offline code.** `seam.features.markers` reads head tilt
+  for "head shake" and head turn for "head nod". It is recorded, pinned by a test that fails
+  the moment it is corrected, and corrected in the live page and in the validation, but two
+  earlier negative results were computed with it and have not been re-run (section 7).
 - **Emotion labels are annotators' perceptions**, not the signer's internal state, and
   agreement on some classes is low.
 - **We are hearing researchers.** The grammar labels come from ASL linguists and the emotion
@@ -482,7 +541,8 @@ These parts of the original plan are **not done** and are marked as future work.
 | Emotion-modulated avatar | Avatar works; modulation not built | Same dependency |
 | Avatar preference study | Stimuli and blinding ready; zero raters | Five or more raters, ideally including a Deaf signer |
 | Question marking in the confound audit | Too few clips in this corpus | Running perception over 1,354 further utterance videos already on disk |
-| A working head-movement instrument | Unreadable from the face transform | Head pose from higher-resolution crops, or a dedicated estimator |
+| A validated head-movement instrument | Head shake is visible on the correct axis (0.70–0.76) but short of the 0.80 gate; head nod is weak | A threshold that adapts to each signer, and more than four signers to tune on |
+| Re-running the results that used the wrong-axis head marker | Nine results were computed with it; the isolated-sign audit's head-shake rows and the factorized encoder's frame selection are affected. Both are negative results and stay unclaimed | About an hour of compute, then updating every quoted number |
 | Cross-lingual test on Indian/Nepali sign data | Blocked | Establishing the terms of use of the local data |
 
 ---
@@ -492,7 +552,7 @@ These parts of the original plan are **not done** and are marked as future work.
 ```bash
 make setup                 # editable install + pre-commit hooks
 make lint typecheck test   # ruff, mypy, the whole test suite
-make serve                 # live demo at http://127.0.0.1:8000/live
+make serve                 # live demo at http://127.0.0.1:8000/
 make serve-check           # boots the server and asserts every page
 make repro                 # regenerates every cited result, in dependency order
 make provenance            # fails on an untraced number or a stale result

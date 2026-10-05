@@ -510,6 +510,169 @@ def repair_outliers(
     return out, bad
 
 
+def _aa_to_quat(aa: np.ndarray) -> np.ndarray:
+    """(..., 3) axis-angle to (..., 4) unit quaternions, w first."""
+    aa = np.asarray(aa, dtype=np.float64)
+    theta = np.linalg.norm(aa, axis=-1, keepdims=True)
+    half = 0.5 * theta
+    # sin(x)/x with its limit at zero, so a zero rotation is the identity and not NaN.
+    k = np.where(theta > 1e-8, np.sin(half) / np.maximum(theta, 1e-8), 0.5)
+    return np.concatenate([np.cos(half), aa * k], axis=-1)
+
+
+def _quat_to_aa(q: np.ndarray) -> np.ndarray:
+    """(..., 4) unit quaternions, w first, to (..., 3) axis-angle with angle in [0, pi]."""
+    q = np.asarray(q, dtype=np.float64)
+    q = q / np.maximum(np.linalg.norm(q, axis=-1, keepdims=True), 1e-12)
+    q = np.where(q[..., :1] < 0, -q, q)
+    w, v = q[..., :1], q[..., 1:]
+    n = np.linalg.norm(v, axis=-1, keepdims=True)
+    angle = 2.0 * np.arctan2(n, w)
+    return np.where(n > 1e-8, v / np.maximum(n, 1e-8) * angle, 2.0 * v)
+
+
+def smooth_rotations(track: np.ndarray, sigma: float) -> np.ndarray:
+    """Gaussian smoothing over time of an axis-angle track ``(T, J, 3)``, done on the sphere.
+
+    Averaging axis-angle components directly is wrong for anything but tiny rotations: the
+    components of two nearby rotations can differ by a full turn, and their mean is then a
+    third, unrelated rotation. Each joint is instead converted to a unit quaternion, the
+    sign made consistent from frame to frame (``q`` and ``-q`` are the same rotation, and
+    averaging across a sign flip cancels to nothing), averaged with a Gaussian window that
+    is clamped at the clip edges, and renormalised.
+    """
+    track = np.asarray(track, dtype=np.float64)
+    n = track.shape[0]
+    if sigma <= 0 or n < 3:
+        return track.copy()
+    q = _aa_to_quat(track)
+    for t in range(1, n):
+        flip = np.sum(q[t] * q[t - 1], axis=-1, keepdims=True) < 0
+        q[t] = np.where(flip, -q[t], q[t])
+    radius = max(1, int(np.ceil(3 * sigma)))
+    offsets = np.arange(-radius, radius + 1)
+    weights = np.exp(-0.5 * (offsets / sigma) ** 2)
+    out = np.zeros_like(q)
+    for off, w in zip(offsets, weights, strict=True):
+        out += w * q[np.clip(np.arange(n) + off, 0, n - 1)]
+    return _quat_to_aa(out)
+
+
+def stabilise(
+    result: SmplerxResult,
+    *,
+    hands_mean: tuple[np.ndarray, np.ndarray] | None = None,
+    sigma_body: float = 1.5,
+    sigma_hands: float = 1.2,
+    sigma_transl: float = 2.0,
+) -> SmplerxResult:
+    """Remove the regressor's frame-to-frame noise.
+
+    SMPLer-X regresses every frame on its own, and three things about its raw output make
+    an animation built straight from it wrong. All three were measured on clip 1372 after
+    the avatar was seen to "jump back and forth" with unsteady hands.
+
+    **1. Depth is noise.** ``cam_trans`` z has a frame-to-frame standard deviation of
+    0.43 m and a range of 1.8 m on a signer who is sitting still, against 7 cm and 5 cm
+    sideways and vertically. Monocular depth of a far subject is not recoverable per frame,
+    and the body was being moved toward and away from the camera by that noise. Depth is
+    replaced by its median over the clip; the other two axes are smoothed.
+
+    **2. Rotations jitter.** Body joints change by up to 0.44 rad and finger joints by
+    0.75 rad between consecutive frames. Every joint is smoothed on the rotation sphere
+    (:func:`smooth_rotations`). The windows are short - about 60 ms - because signing is
+    fast and a long window would blur one handshape into the next.
+
+    **3. The hand poses are used as they are - the resting hand is NOT added.** SMPL-X
+    layers built with the library default (``flat_hand_mean=False``) add the model's
+    relaxed hand (``hands_meanl`` / ``hands_meanr``, 13 to 52 degrees of curl per joint) to
+    whatever they are given, and the obvious reading is that this regressor's hand output
+    is therefore an offset that needs that mean. It was tried and it is wrong for this
+    runner: on frames where the signer holds flat open hands, the output without the mean
+    renders flat open hands and the output with it renders claws. ``hands_mean`` exists
+    for a regressor whose output really is mean-relative (InterWild is one), and must not
+    be passed for SMPLer-X. What does improve the hands here is the smoothing: finger
+    joints jump by up to 0.75 rad between frames in the raw output.
+
+    Call this after :func:`repair_outliers`, so collapsed frames are replaced before they
+    are averaged into their neighbours, and it does not matter whether :func:`upright` ran
+    first: the depth axis is found from the data as the noisiest translation axis.
+    """
+    frames = result.frames
+    n = len(frames)
+    if n == 0:
+        return result
+
+    transl = np.array([f.global_transl for f in frames], dtype=np.float64)
+    step_sd = np.diff(transl, axis=0).std(axis=0) if n > 1 else np.zeros(3)
+    depth = int(np.argmax(step_sd))
+    steadied = transl.copy()
+    for axis in range(3):
+        if axis == depth and step_sd[axis] > 3.0 * np.median(step_sd) + 1e-9:
+            steadied[:, axis] = np.median(transl[:, axis])
+        elif sigma_transl > 0 and n >= 3:
+            radius = max(1, int(np.ceil(3 * sigma_transl)))
+            offsets = np.arange(-radius, radius + 1)
+            w = np.exp(-0.5 * (offsets / sigma_transl) ** 2)
+            acc = np.zeros(n)
+            for off, wi in zip(offsets, w, strict=True):
+                acc += wi * transl[np.clip(np.arange(n) + off, 0, n - 1), axis]
+            steadied[:, axis] = acc / w.sum()
+
+    orient = smooth_rotations(np.array([f.global_orient for f in frames])[:, None, :], sigma_body)
+    body = smooth_rotations(np.array([f.body_pose for f in frames]), sigma_body)
+    jaw = smooth_rotations(np.array([f.jaw_pose for f in frames])[:, None, :], sigma_body)
+    left = np.array([f.left_hand_pose for f in frames], dtype=np.float64)
+    right = np.array([f.right_hand_pose for f in frames], dtype=np.float64)
+    if hands_mean is not None:
+        mean_l = np.asarray(hands_mean[0], dtype=np.float64).reshape(N_HAND, 3)
+        mean_r = np.asarray(hands_mean[1], dtype=np.float64).reshape(N_HAND, 3)
+        left, right = left + mean_l, right + mean_r
+    left = smooth_rotations(left, sigma_hands)
+    right = smooth_rotations(right, sigma_hands)
+
+    out = [
+        SmplxFrame(
+            global_orient=orient[i, 0],
+            body_pose=body[i],
+            left_hand_pose=left[i],
+            right_hand_pose=right[i],
+            jaw_pose=jaw[i, 0],
+            expression=frames[i].expression,
+            global_transl=steadied[i],
+        )
+        for i in range(n)
+    ]
+    return SmplerxResult(
+        frames=out,
+        betas=result.betas,
+        fps=result.fps,
+        n_requested=result.n_requested,
+        n_detected=result.n_detected,
+        checkpoint=result.checkpoint,
+        n_nobox=result.n_nobox,
+        n_nobox_frames=result.n_nobox_frames,
+    )
+
+
+def jitter(result: SmplerxResult) -> dict[str, float]:
+    """How much the clip shakes: mean frame-to-frame change, per group. Lower is steadier."""
+    f = result.frames
+    if len(f) < 2:
+        return {"body_rad": 0.0, "hands_rad": 0.0, "root_m": 0.0}
+
+    def step(get: object) -> float:
+        a = np.array([get(x) for x in f], dtype=np.float64)  # type: ignore[operator]
+        d = np.diff(a, axis=0)
+        return float(np.linalg.norm(d.reshape(len(d), -1, 3), axis=2).mean())
+
+    return {
+        "body_rad": step(lambda x: x.body_pose),
+        "hands_rad": step(lambda x: np.concatenate([x.left_hand_pose, x.right_hand_pose])),
+        "root_m": step(lambda x: x.global_transl[None, :]),
+    }
+
+
 def recentre_to_origin(result: SmplerxResult) -> SmplerxResult:
     """Move the body so the pelvis sits at the world origin.
 

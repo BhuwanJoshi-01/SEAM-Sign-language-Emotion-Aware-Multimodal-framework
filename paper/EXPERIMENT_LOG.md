@@ -2103,3 +2103,179 @@ The continuous-signing audit earlier today used human markers and does not depen
 this. Anything that needs a marker *without* human annotation - the live demo, any corpus
 beyond the annotated 2,407 utterances - has exactly one that can be trusted.
 
+
+---
+
+## 2026-10-05 — The head markers read the wrong axes; on the right ones head shake is visible
+
+`scripts/validate_markers.py` → `artifacts/m3/marker_validation.json` (the first run of
+today is kept at `artifacts/superseded/head_axes_2026-10-05/marker_validation.json`).
+
+**This entry withdraws one conclusion of the previous one.** That entry said the head
+channel "is not readable from this input at all" and moved the diagnosis "from the
+thresholds to the signal". The signal was never looked at. `markers._euler_from_matrix`
+returns roll, pitch and yaw under the aerospace convention, in which the forward axis is x.
+A face's forward axis in MediaPipe's canonical model is z, with y up. The decomposition is
+correct; the names are not. `markers.signals` reads `yaw` for `head_shake` and `pitch` for
+`head_nod`, so the first measures a head tilt and the second a head turn.
+
+**How it was found.** The live page (`docs/index.html`) was written separately and reads the
+face's forward vector. It responds to a head shake; the offline marker, on the same kind of
+input, never did. Two implementations that disagree cannot settle which is right, so each
+angle was correlated with the face landmarks themselves, which involve no rotation matrix:
+
+| landmark measurement | `markers` roll | `markers` pitch | `markers` yaw | `head_motion` turn | `head_motion` nod | `head_motion` tilt |
+|---|---|---|---|---|---|---|
+| nose moves sideways (a turn) | 0.346 | **0.895** | 0.573 | **0.897** | 0.364 | 0.573 |
+| nose moves up or down (a nod) | **0.816** | 0.342 | 0.383 | 0.346 | **0.833** | 0.383 |
+| eye line rotates (a tilt) | 0.392 | 0.505 | **0.947** | 0.495 | 0.380 | **0.947** |
+
+Median over the clips of the absolute correlation; it is written to the artifact as
+`axis_check`. The column that `head_shake` reads follows the eye line at 0.947.
+
+This is the second defect in that one function. The fix of the day before made `yaw` a
+correct ZYX yaw, and was tested with rotations built in the same convention, so the test
+agreed with the code about a quantity that was not the one wanted.
+
+### Second design
+
+The first design's rows are reproduced unchanged as the baseline. Added, with the gate
+unchanged (validated at 0.80 on each large fold, usable with caution at 0.70):
+
+- **The page's detector, unchanged.** Ported line for line and scored causally: brows as a
+  blendshape mean over a running-percentile baseline, head as two reversals of five degrees
+  inside the window, on the correct axes. Nothing fitted.
+- **A revised page detector**, head markers only: the root-mean-square, in degrees, of the
+  part of the angle that goes back and forth, from three running averages
+  (`head_motion.live_oscillation`). Its three constants are chosen from a declared grid on
+  the training signers, and so is its level threshold, at the score unmarked frames exceed
+  a quarter of the time.
+- **A tuned detector**: one member of a declared family per marker, chosen on the training
+  signers.
+- **A compact fitted detector**: logistic regression on a handful of features that mean
+  something physically.
+
+Disclosed: which axis is which, and what went into the families, were decided after an
+exploratory look at all four signers. No number from that look is reported. Every number
+below comes from a detector whose free choices were made without the held-out signer.
+
+Within-clip AUC:
+
+| marker | detector | Cory | Jonathan | Rachel | Ben | verdict |
+|---|---|---|---|---|---|---|
+| head_shake | `markers` signal (tilt axis) | 0.500 | 0.502 | 0.500 | 0.500 | a defect, not a result |
+| head_shake | page detector, unchanged | 0.623 | 0.467 | 0.696 | 0.626 | not validated |
+| head_shake | **revised page detector** | **0.757** | **0.702** | **0.696** | 0.502 | not validated |
+| head_shake | tuned | 0.691 | 0.493 | 0.618 | 0.658 | not validated |
+| head_shake | compact fitted | 0.744 | 0.588 | 0.760 | 0.756 | not validated |
+| head_nod | `markers` signal (turn axis) | 0.498 | 0.500 | 0.499 | 0.495 | a defect, not a result |
+| head_nod | page detector, unchanged | 0.497 | 0.588 | 0.641 | 0.275 | not validated |
+| head_nod | **revised page detector** | 0.592 | 0.767 | 0.549 | 0.304 | not validated |
+| head_nod | tuned | 0.585 | 0.686 | 0.565 | 0.730 | not validated |
+| head_nod | compact fitted | 0.603 | 0.716 | 0.588 | 0.441 | not validated |
+| brow_raise | page detector, unchanged | 0.834 | 0.802 | 0.814 | 0.672 | validated |
+| brow_raise | tuned | 0.842 | 0.824 | 0.885 | 0.670 | validated |
+| brow_raise | compact fitted | 0.809 | 0.857 | 0.881 | 0.684 | validated |
+| brow_furrow | page detector, unchanged | 0.618 | 0.741 | 0.785 | 0.609 | not validated |
+| brow_furrow | tuned | 0.600 | 0.725 | 0.731 | 0.628 | not validated |
+| brow_furrow | compact fitted | 0.637 | 0.658 | 0.789 | 0.637 | not validated |
+
+Ben has five clips with a marked head shake and one with a marked nod; his column decides
+nothing.
+
+**Head shake is visible.** On the correct axis the revised detector follows the human
+track at 0.757, 0.702 and 0.696 on the three large folds. That is not validated: the worst
+fold is a hair under even the caution gate. It is also not chance, and the statement that
+negation "has no visual instrument here" was wrong as a statement about the input.
+
+**Head nod stays weak.** One fold at 0.767, two under 0.60. No detector in any family
+changes that.
+
+**Brow furrow was not rescued.** Six alternative signals, two of them measured on the
+landmarks rather than taken from blendshapes, and a fitted model: the largest fold stays
+between 0.600 and 0.637.
+
+**Brow raise survives the page's own rescaling.** The running-percentile baseline, started
+cold on every clip, costs a little on one fold and it still passes.
+
+### The page has to say yes or no
+
+AUC scores a ranking. The page fires an event, so the event was scored too, on the held-out
+signer, with the threshold set on the other three. The page's event needs the level over
+its threshold *and* two reversals of two degrees, so that one quick turn is not a shake.
+
+| marker | held-out signer | new event: hits | new event: false alarms | old event: hits | old event: false alarms |
+|---|---|---|---|---|---|
+| head_shake | Cory | 0.400 | 0.122 | 0.333 | 0.120 |
+| head_shake | Jonathan | 0.100 | 0.003 | 0.093 | 0.022 |
+| head_shake | Rachel | 0.520 | 0.161 | 0.451 | 0.118 |
+| head_nod | Cory | 0.034 | 0.015 | 0.179 | 0.104 |
+| head_nod | Jonathan | 0.246 | 0.231 | 0.169 | 0.136 |
+| head_nod | Rachel | 0.098 | 0.087 | 0.222 | 0.134 |
+
+For head shake the new event finds more marked frames at about the same false-alarm rate on
+two signers, and more of both on the third. For head nod it is not an improvement. A
+threshold in degrees does not transfer across signers: one signer's shakes are simply
+smaller than another's. The page responds reliably to a deliberate movement and should not
+be described as detecting the head shakes of fluent signing.
+
+The page's constants and its two thresholds (2.44 and 3.01 degrees) are read from the
+artifact's `shipped_in_page` block by a test, and a second test runs the page's JavaScript
+in Node against the Python functions that were scored.
+
+### What is not fixed, and what it touches
+
+`markers.signals` is unchanged in this commit. Nine cited artifacts were computed with that
+module loaded, and the staleness guard would, correctly, mark every one stale:
+
+| artifact | what in it depends on the head markers |
+|---|---|
+| `audit/marker_labels.json` | the head_shake and head_nod prevalence rows |
+| `audit/confound_audit.json` | the head-shake contrast rows of M1 on isolated signs |
+| `audit/cue_grounding.json` | any cue grounded on head_shake or head_nod |
+| `m4/factorizer_multilabel.json`, `m4/factorizer_multilabel_ablation.json` | the heuristic linguistic labels, and the frame chosen per window by brow_raise plus head_shake evidence |
+| `m4/factorizer_human_labels.json` | the frame chosen per window only; the labels are human |
+| `audit/confound_audit_continuous.json`, `audit/fer_sensitivity.json` | nothing: human markers, the module is only imported |
+| `m3/marker_validation.json` | re-run here; the old rows are kept as the baseline |
+
+None of the affected results is a positive claim: M1 on isolated signs and M4 are both
+recorded as refuted. Their head-marker inputs were nevertheless not what they were said to
+be, and they are to be re-run before either is quoted in a paper. The defect is pinned by a
+strict expected-failure test (`tests/test_head_motion.py`), which starts failing the moment
+`markers.signals` is corrected, so the correction cannot land without the re-run.
+
+**C1 on continuous signing is not affected**: it contrasts human frame-level markers.
+
+### Same day — the avatar: a depth estimate that is noise, and a hand mean that was wrong to add
+
+`scripts/make_avatar_demo.py` → `artifacts/m7a/demo/manifest.json`; the earlier manifest is
+at `artifacts/superseded/avatar_jitter_2026-10-05/manifest.json`.
+
+The avatar "jumped back and forth". Measured per axis, the regressor's camera translation
+is steady in the image plane and close to noise along the depth axis from one frame to the
+next. `smplerx.stabilise` holds the noisiest axis at its median over the clip when it is
+more than three times as unsteady as the others, and smooths every joint rotation with a
+Gaussian window computed on quaternions after aligning their signs, because axis-angle
+numbers wrap around.
+
+Mean movement between consecutive frames, before and after:
+
+| clip | root, m | body joints, rad | finger joints, rad |
+|---|---|---|---|
+| 1372 | 0.324 → 0.006 | 0.022 → 0.011 | 0.061 → 0.029 |
+| 1470684 | 0.356 → 0.014 | 0.033 → 0.015 | 0.077 → 0.034 |
+| 1539625 | 0.620 → 0.030 | 0.047 → 0.018 | 0.098 → 0.039 |
+| 1540021 | 0.377 → 0.013 | 0.039 → 0.017 | 0.085 → 0.034 |
+
+**Tried and rejected: adding the model's resting hand.** SMPL-X layers built with the
+library default add a relaxed hand pose to whatever they are given, and a sibling pipeline
+adds that mean to this regressor's output. Rendered against the source frames, the output
+without the mean shows flat open hands where the signer holds flat open hands, and the
+output with it shows claws. The parameter is kept for a regressor whose output really is
+mean-relative and is not used here; the manifest records `hand_mean_added: false`.
+
+**The software renderer was mirrored.** `render._project` mapped camera-space x to image x
+without the flip that looking down the z axis requires, so every offline avatar video had
+left and right exchanged. A test renders one raised hand and asserts which side it is on.
+
+No rating study has been run; nothing here is a claim about how good the avatar looks.

@@ -207,3 +207,23 @@ largest fold). Head shake and head nod are not recoverable from head pose on the
 even by a fitted detector. Any sentence in the paper that treats the project's visual
 "negation" or "wh-question" markers as measurements of those things is unsupported; only the
 human annotations measure them.
+
+### Same day, fifth update — the head markers, corrected
+
+**Withdrawn.** The statement above that "head shake and head nod are not recoverable from
+head pose on these crops even by a fitted detector". The offline marker read a head tilt
+for head shake and a head turn for head nod (`seam.features.head_motion`; evidence in the
+`axis_check` block of `artifacts/m3/marker_validation.json`).
+
+**Supporting claim, measured, not verified.** On the correct axis head shake follows the
+human frame-level track with a within-clip AUC of 0.757, 0.702 and 0.696 on the three large
+leave-one-signer-out folds. That is above chance and below the registered gate, so the
+status is *visible, not validated*. Head nod is weak (one fold at 0.767, two under 0.60).
+Brow furrow is unchanged: not validated, and no alternative signal tried here improved it.
+
+**Open defect that qualifies two recorded results.** `markers.signals` still reads the
+wrong axes, and nine artifacts were computed with it. The head-shake rows of M1 on isolated
+signs, and the frame selection and heuristic labels of M4, used a head-tilt signal where a
+head-shake signal was intended. Both results are negative and neither is claimed; both are
+to be re-run with the corrected marker before being quoted. C1 on continuous signing used
+human markers and stands as recorded.

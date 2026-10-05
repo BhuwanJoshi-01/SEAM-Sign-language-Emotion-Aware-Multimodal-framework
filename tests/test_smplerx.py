@@ -292,3 +292,113 @@ def test_smplxframe_defaults_are_neutral_not_garbage() -> None:
     assert np.all(f.body_pose == 0)
     assert np.all(f.expression == 0)
     assert f.body_pose.shape == (21, 3)
+
+
+# --- stabilising the regressor's output ------------------------------------------------
+
+
+def _result(frames: list) -> object:
+    from seam.perception.smplerx import SmplerxResult
+
+    return SmplerxResult(
+        frames=frames,
+        betas=np.zeros(10),
+        fps=24.0,
+        n_requested=len(frames),
+        n_detected=len(frames),
+        checkpoint="test",
+    )
+
+
+def _noisy_clip(n: int = 60, seed: int = 0) -> object:
+    """A still, seated body as the regressor reports it: jittery joints, wild depth."""
+    from seam.avatar.synthesis import SmplxFrame
+
+    rng = np.random.default_rng(seed)
+    frames = []
+    for _ in range(n):
+        frames.append(
+            SmplxFrame(
+                global_orient=np.array([0.1, 0.0, 0.0]) + 0.01 * rng.normal(size=3),
+                body_pose=0.2 + 0.05 * rng.normal(size=(21, 3)),
+                left_hand_pose=0.05 * rng.normal(size=(15, 3)),
+                right_hand_pose=0.05 * rng.normal(size=(15, 3)),
+                jaw_pose=0.01 * rng.normal(size=3),
+                expression=np.zeros(10),
+                global_transl=np.array([0.01, 0.6, 22.7])
+                + rng.normal(size=3) * [0.015, 0.011, 0.43],
+            )
+        )
+    return _result(frames)
+
+
+def test_smoothing_is_done_on_the_sphere_not_on_components() -> None:
+    """Two rotations a hair either side of a half turn must average to a half turn.
+
+    Their axis-angle components have opposite signs, so a component-wise mean is close to
+    the identity - a joint that should be bent double comes out straight.
+    """
+    from seam.perception.smplerx import smooth_rotations
+
+    a, b = np.array([0.0, 0.0, np.pi - 0.05]), np.array([0.0, 0.0, -(np.pi - 0.05)])
+    track = np.array([a, b, a, b, a, b, a])[:, None, :]
+    out = smooth_rotations(track, sigma=1.5)
+    angles = np.linalg.norm(out[:, 0], axis=1)
+    assert angles.min() > 3.0, f"averaged across the wrap to {angles.min():.2f} rad"
+    assert np.linalg.norm(track.mean(axis=0)) < 0.5, "the naive mean really is wrong here"
+
+
+def test_smoothing_leaves_a_steady_pose_alone_and_calms_a_noisy_one() -> None:
+    from seam.perception.smplerx import smooth_rotations
+
+    steady = np.tile(np.array([0.3, -0.2, 0.5]), (20, 4, 1))
+    np.testing.assert_allclose(smooth_rotations(steady, 1.5), steady, atol=1e-9)
+
+    rng = np.random.default_rng(0)
+    noisy = steady + 0.05 * rng.normal(size=steady.shape)
+    before = np.abs(np.diff(noisy, axis=0)).mean()
+    after = np.abs(np.diff(smooth_rotations(noisy, 1.5), axis=0)).mean()
+    assert after < 0.5 * before
+    np.testing.assert_allclose(smooth_rotations(noisy, 0.0), noisy)
+
+
+def test_stabilise_removes_the_depth_noise_that_made_the_avatar_jump() -> None:
+    """Measured on clip 1372: depth moved 0.43 m per frame on a signer sitting still."""
+    from seam.perception.smplerx import jitter, stabilise
+
+    clip = _noisy_clip()
+    before, after = jitter(clip), jitter(stabilise(clip))
+    assert before["root_m"] > 0.2
+    assert after["root_m"] < 0.02
+    assert after["body_rad"] < 0.7 * before["body_rad"]
+    assert after["hands_rad"] < 0.7 * before["hands_rad"]
+    depth = np.array([f.global_transl[2] for f in stabilise(clip).frames])
+    assert np.ptp(depth) == 0.0, "depth is held at its median"
+
+
+def test_stabilise_keeps_real_sideways_motion() -> None:
+    """Only the noisy axis is frozen. A signer who leans is still seen to lean."""
+    from seam.perception.smplerx import stabilise
+
+    clip = _noisy_clip()
+    for i, f in enumerate(clip.frames):  # type: ignore[attr-defined]
+        f.global_transl = f.global_transl + np.array([0.004 * i, 0.0, 0.0])
+    xs = np.array([f.global_transl[0] for f in stabilise(clip).frames])
+    assert xs[-1] - xs[0] > 0.18
+
+
+def test_the_resting_hand_is_only_added_when_asked_for() -> None:
+    """The mean hand is for mean-relative regressors; SMPLer-X here is not one.
+
+    Adding it was tried on clip 1372 and turned flat open hands into claws, so the demo
+    does not pass it. The parameter is kept, and pinned, for a regressor that needs it.
+    """
+    from seam.avatar.synthesis import SmplxFrame
+    from seam.perception.smplerx import stabilise
+
+    zero = _result([SmplxFrame() for _ in range(8)])
+    np.testing.assert_allclose(stabilise(zero).frames[3].left_hand_pose, 0.0, atol=1e-9)
+    mean_l, mean_r = np.full(45, 0.4), np.full(45, -0.3)
+    out = stabilise(zero, hands_mean=(mean_l, mean_r))
+    np.testing.assert_allclose(out.frames[3].left_hand_pose, 0.4, atol=1e-9)
+    np.testing.assert_allclose(out.frames[3].right_hand_pose, -0.3, atol=1e-9)
