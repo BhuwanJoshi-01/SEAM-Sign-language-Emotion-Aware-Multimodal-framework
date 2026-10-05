@@ -47,6 +47,8 @@ Most of our original hypotheses were refuted, and we can show exactly why with n
    two-branch encoder that tries to separate grammar from emotion.
 8. **Avatar.** A separate model (SMPLer-X) turns the video into a 3D body, exported as an
    animated glTF file. The sequence is stabilised first, because a per-frame model shakes.
+   The fingers and wrists are not taken from that model, whose hands stay flat: they are
+   solved from MediaPipe's 21 hand points, bone by bone.
 
 **Blendshapes** are the key idea. MediaPipe does not only give face points; it gives 52 named
 scores between 0 and 1 such as `browInnerUp`, `mouthSmileLeft` and `eyeBlinkRight`. They are
@@ -64,11 +66,12 @@ the face in this project is built on them.
 | Can we read brow furrow? | AUC 0.60–0.78 | Not reliably; six other signals did not help |
 | Can we read head shake? | AUC 0.70–0.76 on the correct axis (0.50 before, a bug) | Visible, not validated |
 | Can we read head nod? | AUC 0.55–0.77 | Weak |
-| Do emotion models read grammar as negative emotion? | 0 of 8 markers met the rule | Not supported, on isolated or continuous signing |
-| Does the encoder separate grammar from emotion? | 0.694–0.726; target ≤ 0.60 | No. Refuted in every seed |
-| Does the encoder recognise emotion? | Balanced accuracy 0.48–0.51 | No better than chance |
-| Does pose recognise glosses? | WER 0.920 = baseline 0.920 | Not with 3 examples per gloss |
-| Does the avatar export work? | 55 joints, 6.4 mm error; frame-to-frame jump cut from 0.32–0.62 m to 0.006–0.030 m | Yes, verified in a real 3D viewer |
+| Does a head shake go with negation? | Detected in 25 of 27 negated clips, 80 of 173 others; p = 0.00015 | Yes, on our four signers. Our one positive linguistic finding |
+| Do emotion models read grammar as negative emotion? | Continuous signing: 0 of 8 markers met the rule. Isolated signs: head shake shifts 2 of 3 models, on 12 clips | Not confirmed. One lead, small sample |
+| Does the encoder separate grammar from emotion? | 0.705–0.758; target ≤ 0.60 | No. Refuted in every seed |
+| Does the encoder recognise emotion? | Balanced accuracy 0.49–0.51 | No better than chance |
+| Does pose recognise glosses? | WER 0.920 (body), 0.922 (body + both hands) vs baseline 0.920 | Not with 3 examples per gloss, even with real hand tracking |
+| Does the avatar export work? | 55 joints, 6.4 mm error; frame-to-frame jump cut from 0.32–0.69 m to 0.004–0.035 m | Yes, verified in a real 3D viewer |
 | How much human ground truth? | 43,038 annotated events, 200 of 200 clips joined | Enough to validate against |
 | How well tested? | Over 500 automated tests | Including tests that catch stale results |
 
@@ -85,8 +88,11 @@ Newest first.
 |---|---|---|
 | 5 Oct | Final review | Re-ran every result on corrected code; verdicts held, several finer claims withdrawn |
 | 5 Oct | Head-axis bug | Offline "head shake" was measuring head tilt. On the right axis it reads 0.70–0.76, not 0.50 |
-| 5 Oct | Avatar steadied | The jumping was the regressor's depth estimate; held still and smoothed, 20 times steadier |
-| 5 Oct | Live page is the front page | `/` is the live demo, with the 3D avatar in the nav bar |
+| 5 Oct | Avatar steadied | The jumping was the regressor's depth estimate; held still and smoothed, at least 17 times steadier |
+| 5 Oct | Live page is the front page | `/` is the live demo, with the 3D avatar viewer built into it |
+| 5 Oct | One-hand bug | Two identical hand trackers found the same hand, so "left" and "right" were one hand. Fixed, all 200 clips re-tracked, every experiment re-run |
+| 5 Oct | Avatar hands | Fingers and wrists solved from MediaPipe hand points; finger motion went from 12–24° to 44–76° over a clip |
+| 5 Oct | Share bundle | `scripts/make_share_bundle.py` packs a 23 MB zip with setup and run scripts for Windows and Linux |
 | 5 Oct | Marker validation | Brow raise validated against human labels; furrow not; head markers first read as unreadable |
 | 5 Oct | Confound audit on continuous signing | The test we said was needed: not supported |
 | 5 Oct | Frame-rate bug | Annotations are on a 30 fps timeline, 138 clips are 24 fps; found with a blink test |
@@ -171,15 +177,20 @@ bug: the offline code was measuring head tilt. On the correct axis it reads 0.70
 which is visible but below our 0.80 gate, so we do not call it validated."
 *(Show the marker validation figure.)*
 
-**2:50 – 3:50 · The two hypotheses.** "First: do emotion models read grammar as negative
-emotion? We tested three models on 200 utterances with a rule fixed in advance. No marker met
-it; brow furrow leaned the other way. Second: can an encoder with gradient reversal separate
-grammar from emotion? Cross-prediction AUC was 0.71 against a target of 0.60, in every seed,
-while our positive control passed at 0.98. Both hypotheses are refuted."
+**2:50 – 3:50 · The two hypotheses, and one finding.** "First: do emotion models read
+grammar as negative emotion? On 200 continuous utterances with a rule fixed in advance, no
+marker met it; brow furrow leaned the other way. On isolated signs, head-shake windows did
+shift two of our three models, but that is twelve clips, so we call it a lead and not a
+result. Second: can an encoder with gradient reversal separate grammar from emotion?
+Cross-prediction AUC was 0.71 against a target of 0.60, in every seed, while our positive
+control passed at 0.98. That one is refuted. And one thing did hold: a head shake is
+detected in 25 of 27 negated sentences against 80 of 173 others, and the linguists' own
+marks show the same pattern."
 *(Show the forest plot and the encoder plot.)*
 
-**3:50 – 4:30 · What we learned.** "We found six bugs in our own instruments, including
-annotations read at the wrong frame rate. We caught it by checking blink annotations against
+**3:50 – 4:30 · What we learned.** "We found nine bugs in our own instruments, including
+annotations read at the wrong frame rate, a head shake that was measuring head tilt, and two
+hand trackers that were both following the same hand. We caught it by checking blink annotations against
 the blink signal: AUC went from 0.55 to 0.71 after the fix. Results now carry a fingerprint
 of the code that produced them, and the build fails if that code changes."
 
@@ -252,18 +263,33 @@ measures back-and-forth motion in degrees and fires above 2.44. At that threshol
 alarms on 12%, 0% and 16%. So: reliable for a deliberate movement, not for fluent signing.
 
 **Is that bug fixed everywhere?**
-No, and say so if asked. It is fixed in the live page and in the validation. The old
-function is still in the offline code, because nine results were computed with it and
-changing it means re-running all nine. Two of them used the head marker: the isolated-sign
-audit and the encoder's frame selection. Both are negative results we do not claim. A test
-fails the moment someone fixes the function without re-running them.
+Yes, as of the evening of 5 October. The offline marker now runs the same detector as the
+live page, on the correct axis, and every experiment that used it was re-run together with
+the hand-tracking fix. The old results are kept in `artifacts/superseded/` because the
+experiment log cites them.
+
+**What was the one-hand bug?**
+The Python pipeline built two hand trackers, each asked to find one hand in the same image,
+and filed the first under "left" and the second under "right". Two identical trackers find
+the same hand, so both slots held one hand in every frame. We found it because the avatar's
+hands would not sign, and comparing the two slots showed them identical on 80 of 80 frames.
+The fix is one tracker that finds two hands, assigned to left and right by which of the
+body's wrists each is nearer. After the fix: 19,639 frames with two different hands, none
+identical. The browser demo always tracked two hands correctly.
+
+**How do the avatar's hands work now?**
+The body model's own fingers barely move, 12 to 24 degrees over a clip. We take MediaPipe's
+21 points per hand, build a frame on the rigid palm, and solve each finger joint as the
+smallest rotation that points its bone the way the tracked bone points. The wrist is solved
+the same way. The fingers then open and close through 44 to 76 degrees. We checked it by
+eye against the video; there is no rating study, so we do not claim the signing is good.
 
 **Why did the avatar jitter, and what fixed it?**
 The body model estimates distance from the camera separately for every frame, and that
-estimate is close to noise, so the avatar jumped 0.32 to 0.62 m between frames. We hold
+estimate is close to noise, so the avatar jumped 0.32 to 0.69 m between frames. We hold
 depth at its median and smooth every joint rotation on the rotation sphere, on quaternions,
-because axis-angle numbers wrap around at 180 degrees. Result: 0.006 to 0.030 m, and finger
-jitter halved. We also tried adding the body model's "resting hand" pose and removed it: it
+because axis-angle numbers wrap around at 180 degrees. Result: 0.004 to 0.035 m, and the fingers' frame-to-frame
+shake cut by more than half. We also tried adding the body model's "resting hand" pose and removed it: it
 turned flat open hands into claws.
 
 **What was the frame-rate bug?**

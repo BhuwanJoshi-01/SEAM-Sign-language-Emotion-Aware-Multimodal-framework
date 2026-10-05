@@ -1,0 +1,36 @@
+{
+ "_comment": "Clip-level census of each visual marker on the 200 EmoSign clips, copied from artifacts/audit/marker_labels.json. Data, not code: it is a measurement, it changes when the corpus or the detector does, and keeping it out of markers.py means recording a new measurement does not alter the module every experiment is fingerprinted against. tests/test_syntax_markers.py holds it to the artifact.",
+ "source": "artifacts/audit/marker_labels.json",
+ "markers": {
+  "brow_raise": {
+   "prevalence": 0.855,
+   "zero_fraction": 0.145,
+   "state": "degenerate"
+  },
+  "brow_furrow": {
+   "prevalence": 0.535,
+   "zero_fraction": 0.465,
+   "state": "usable"
+  },
+  "mouth_morpheme": {
+   "prevalence": 0.95,
+   "zero_fraction": 0.05,
+   "state": "degenerate"
+  },
+  "head_shake": {
+   "prevalence": 0.525,
+   "zero_fraction": 0.475,
+   "state": "usable"
+  },
+  "head_nod": {
+   "prevalence": 0.535,
+   "zero_fraction": 0.465,
+   "state": "usable"
+  },
+  "mouth_positive": {
+   "prevalence": 0.905,
+   "zero_fraction": 0.095,
+   "state": "degenerate"
+  }
+ }
+}

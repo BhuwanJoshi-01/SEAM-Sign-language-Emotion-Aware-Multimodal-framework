@@ -102,11 +102,17 @@ if want landmarks; then
   log "[landmarks] ${DESC[landmarks]}"
   run "$PY" -m seam.cli landmarks extract --dataset emosign
   run "$PY" -m seam.cli landmarks face-gate --sample 24
+  # The two hand slots must hold two hands. Until 2026-10-05 they held one hand twice and
+  # nothing checked; this exits non-zero if that ever recurs.
+  run "$PY" scripts/check_hand_slots.py
 fi
 
 if want markers; then
   log "[markers] ${DESC[markers]}"
   run "$PY" scripts/label_markers.py
+  # The negation / head-shake association has been wrong here once, so it is re-checked
+  # against the annotators, a placebo axis and each signer every time it is re-measured.
+  run "$PY" scripts/check_negation_head_shake.py --xml "$XML_DIR"
 fi
 
 if want labels; then
@@ -159,6 +165,9 @@ fi
 if want m5a; then
   log "[m5a] ${DESC[m5a]}"
   run "$PY" scripts/train_recogniser.py
+  # The same test with both hands' shape added. Until 2026-10-05 the two hand slots held
+  # one hand twice, so this variant had never been run on real two-hand data.
+  run "$PY" scripts/train_recogniser.py --part upper+hands
 fi
 
 # The glTF tests skip loudly without the licence-gated SMPL-X model or a Chrome binary;

@@ -44,11 +44,11 @@ path's legs are noise (see §4), and the regressor says nothing about meaning.
 | Stage | What it does | State | Evidence |
 |---|---|---|---|
 | **M0** | Data readiness gate | **OPEN on two reviewer decisions** | `make readiness`: 7/10. Three earlier blockers were false negatives; see §2.1 |
-| **M1** | Marker-induced FER bias | **not supported, measured twice**: isolated signs (heuristic markers) and continuous signing (human frame-level markers, pre-registered rule) | `artifacts/audit/confound_audit.json`, `confound_audit_continuous.json` |
+| **M1** | Marker-induced FER bias | **not supported on continuous signing** (human frame-level markers, pre-registered rule); **head shake supported on isolated signs from 12 clips** after the 2026-10-05 head-axis fix, brows and mouth null | `artifacts/audit/confound_audit.json`, `confound_audit_continuous.json` |
 | **M2** | Latency budget on RTX 3050 | **met**, marginal | 19.7–20.4 FPS, K6 |
-| **M3** | Non-manual instrumentation | **met** | 2,407 utterances, 100% mapped |
+| **M3** | Non-manual instrumentation | **met** | 2,407 utterances, 100% mapped; brow raise validated against human frames; negation ↔ head shake measured (25 of 27 negated clips vs 80 of 173) once both hands and the head's turn were actually tracked |
 | **M3b** | Label quality | **mixed** | kappa 0.639 / 0.734 usable, 0.028 / 0.038 at chance |
-| **M4** | Factorized encoder (linguistic vs affect) | **refuted** | worst cross-AUC 0.694 (heuristic `y_L`) / 0.726 (human `y_L`) on corrected code, vs ≤0.60 |
+| **M4** | Factorized encoder (linguistic vs affect) | **refuted** | worst cross-AUC 0.705 (heuristic `y_L`) / 0.758 (human `y_L`) on corrected code, vs ≤0.60 |
 | **M5a** | Gloss recognition | **gate not met** | WER 0.920 vs most-frequent baseline 0.920; first run superseded (constant predictor, misaligned frames) |
 | **M5b** | Translation (How2Sign) | **not started** | data on disk: 35,176 sentences, 991 shards |
 | **M6** | Emotion-conditioned generation | **not started** | — |
@@ -237,11 +237,11 @@ a measurement - the model predicted one gloss in every fold - and are kept for t
 WER 0.916 against 0.916 (shuffled control 0.911; closed-vocab 0.875). 1,563 tokens, 499
 glosses, 3.1 per gloss, 284 hapax.
 
-**Linguistic and affect information do not separate.** Worst cross-AUC 0.694 with heuristic
-`y_L` and 0.726 with human `y_L` (re-run 2026-10-05 on corrected code), against ≤0.60. Signer
+**Linguistic and affect information do not separate.** Worst cross-AUC 0.705 with heuristic
+`y_L` and 0.758 with human `y_L` (re-run 2026-10-05 on corrected code), against ≤0.60. Signer
 control is 0.98 in both arms, so the instrument can see. Over three seeds no separation loss
 moves the direction the gate fails on, and neither model learns affect (balanced accuracy
-0.481–0.507 against 0.5).
+0.493–0.506 against 0.5).
 
 **No avatar preference result exists.** Both study scripts refuse to invent a baseline,
 correctly. The comparison arm is now defined (§5) and both arms render, but **no human has

@@ -8,6 +8,7 @@ SMPLX ?= /mnt/Volume2/SignLanguagge/NSL Data/Sapien_Pipeline/models/smplx/SMPLX_
 
 .PHONY: help setup lint fmt typecheck test test-fast data readiness emosign landmarks facegate \
         doctor bench train repro provenance alignment paper clean distclean demo-avatar \
+        avatar-check share \
         fetch-how2sign wlasl-index
 
 help: ## List targets
@@ -80,6 +81,12 @@ serve: ## Live browser demo; video is processed client-side, never uploaded  [M7
 
 serve-check: ## Boot the demo server and assert the HTTP contract  [M7]
 	$(PY) scripts/serve_smoke.py
+
+avatar-check: ## Play every avatar clip in the front page's viewer, in headless Chrome  [M7]
+	$(PY) scripts/avatar_smoke.py
+
+share: ## Pack a zip a teammate can run on Windows or Linux without training anything  [release]
+	PYTHONPATH=src $(PY) scripts/make_share_bundle.py
 
 parity-report: ## Print the last parity verdict  [M2]
 	@$(PY) -c "import json,pathlib; d=json.loads(pathlib.Path('artifacts/export/parity.json').read_text()); \

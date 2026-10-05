@@ -19,7 +19,8 @@ fingerprints and score well without reading the sign at all. And a no-duration v
 because clip duration correlates with syntactic class on this corpus and would let a
 duration classifier pass as a sign recogniser.
 
-Writes `artifacts/m5a/recogniser.json`.
+Writes `artifacts/m5a/recogniser.json`, or `recogniser_upper_hands.json` for
+`--part upper+hands`.
 """
 
 from __future__ import annotations
@@ -236,8 +237,10 @@ def main() -> int:
         ),
     }
     out[PROVENANCE_KEY] = stamp(__file__)
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps(out, indent=2) + "\n")
+    # One file per feature set: the hands variant used to overwrite the body-only run.
+    dest = OUT if args.part == "upper" else OUT.with_name("recogniser_upper_hands.json")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(json.dumps(out, indent=2) + "\n")
 
     print(f"\n{'fold':<10}{'n':>6}{'oov%':>7}{'WER':>8}{'closed':>8}{'top1':>7}{'base':>8}")
     for f in real["folds"]:  # type: ignore[index]
@@ -263,7 +266,7 @@ def main() -> int:
     if real["degenerate"]:
         print("DEGENERATE: the model predicts one gloss in every fold; its WER is the baseline's")
     print(f"without duration: {mean('wer', no_dur):.3f}")
-    print(f"\nwrote {OUT.relative_to(REPO)}")
+    print(f"\nwrote {dest.relative_to(REPO)}")
     return 0
 
 

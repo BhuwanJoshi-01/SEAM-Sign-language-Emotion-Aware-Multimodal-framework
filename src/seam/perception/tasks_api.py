@@ -311,21 +311,24 @@ def _ensure(task: TaskLandmarker) -> TaskLandmarker:
         )
     )
 
+    # ONE graph that reports up to two hands. This used to build two identical graphs,
+    # each asked for one hand on the same image, and filed the first under "left" and the
+    # second under "right". Two identical graphs find the same hand: on every frame of
+    # every clip the two slots held the same 21 points, so the project tracked one hand
+    # and called it two. Which hand is which is decided in `assign_hands`.
     hand_path = task._resolve("hand")
-    for handedness in ("Left", "Right"):
-        task._hands.append(
-            vision.HandLandmarker.create_from_options(
-                vision.HandLandmarkerOptions(
-                    base_options=_base_options(hand_path, task._delegate),
-                    running_mode=vision.RunningMode.VIDEO,
-                    num_hands=1,
-                    min_hand_detection_confidence=0.3,
-                    min_hand_presence_confidence=0.3,
-                    min_tracking_confidence=0.3,
-                )
+    task._hands.append(
+        vision.HandLandmarker.create_from_options(
+            vision.HandLandmarkerOptions(
+                base_options=_base_options(hand_path, task._delegate),
+                running_mode=vision.RunningMode.VIDEO,
+                num_hands=2,
+                min_hand_detection_confidence=0.3,
+                min_hand_presence_confidence=0.3,
+                min_tracking_confidence=0.3,
             )
         )
-        del handedness
+    )
 
     pose_path = task._resolve("pose")
     task._pose = vision.PoseLandmarker.create_from_options(
@@ -402,16 +405,25 @@ def process_frame(
         landmarks[start:end] = np.array([[p.x, p.y, p.z] for p in pose_lms[0]], dtype=np.float32)
         presence["pose"] = True
 
-    # -- hands. Each graph reports whichever hand it found; the slot is fixed by
-    # the graph's own construction, and MediaPipe's Left/Right handedness is
-    # anatomical only when the image is not mirrored, which is a documented
-    # property of the ASLLRP and WLASL framings this project consumes.
-    for result, name in zip(hand_results, ("left_hand", "right_hand"), strict=True):
-        found = getattr(result, "hand_landmarks", None)
-        if not found:
-            continue
+    # -- hands. Every hand any graph found, then one decision about whose it is.
+    hands: list[np.ndarray] = []
+    labels: list[str | None] = []
+    for result in hand_results:
+        found = getattr(result, "hand_landmarks", None) or []
+        sides = getattr(result, "handedness", None) or []
+        for i, hand in enumerate(found):
+            hands.append(np.array([[p.x, p.y, p.z] for p in hand], dtype=np.float32))
+            side = sides[i] if i < len(sides) else None
+            labels.append(str(side[0].category_name) if side else None)
+    pose_start, _ = PART_SLICES["pose"]
+    wrists = (
+        (landmarks[pose_start + POSE_LEFT_WRIST, :2], landmarks[pose_start + POSE_RIGHT_WRIST, :2])
+        if presence["pose"]
+        else None
+    )
+    for name, index in assign_hands([h[0, :2] for h in hands], labels, wrists).items():
         start, end = PART_SLICES[name]
-        landmarks[start:end] = np.array([[p.x, p.y, p.z] for p in found[0]], dtype=np.float32)
+        landmarks[start:end] = hands[index]
         presence[name] = True
 
     # -- face + blendshapes
@@ -449,6 +461,59 @@ def process_frame(
         gaze=_gaze_proxy(landmarks),
         presence=presence,
     )
+
+
+#: MediaPipe Pose indices of the wrists. Pose "left" is the person's own left.
+POSE_LEFT_WRIST, POSE_RIGHT_WRIST = 15, 16
+
+#: MediaPipe's hand label assumes a mirrored, selfie image. The videos this project reads
+#: are not mirrored, so its "Left" is the signer's right hand. Used only without a body.
+_LABEL_TO_SLOT = {"Left": "right_hand", "Right": "left_hand"}
+
+
+def assign_hands(
+    hand_wrists: list[np.ndarray],
+    labels: list[str | None],
+    pose_wrists: tuple[np.ndarray, np.ndarray] | None,
+) -> dict[str, int]:
+    """Which detected hand goes in the ``left_hand`` slot and which in ``right_hand``.
+
+    ``hand_wrists`` are the image positions of each detected hand's wrist point, at most
+    two used. With a body in view the hands go to the nearer of the body's own wrists,
+    choosing the pairing with the smaller total distance, so two hands can never land in
+    one slot and a crossed-arm frame is still decided by where the arms actually are. With
+    no body, the hand model's own label is used, swapped, because it assumes a mirror
+    image. Returns ``{slot: index into hand_wrists}`` for the hands that were found.
+    """
+    found = [np.asarray(w, dtype=np.float64)[:2] for w in hand_wrists[:2]]
+    if not found:
+        return {}
+    if pose_wrists is not None:
+        left, right = (np.asarray(w, dtype=np.float64)[:2] for w in pose_wrists)
+        to_left = [float(np.linalg.norm(w - left)) for w in found]
+        to_right = [float(np.linalg.norm(w - right)) for w in found]
+        if len(found) == 1:
+            return {"left_hand" if to_left[0] <= to_right[0] else "right_hand": 0}
+        if to_left[0] + to_right[1] <= to_left[1] + to_right[0]:
+            return {"left_hand": 0, "right_hand": 1}
+        return {"left_hand": 1, "right_hand": 0}
+    out: dict[str, int] = {}
+    for i, label in enumerate(labels[: len(found)]):
+        slot = _LABEL_TO_SLOT.get(label or "")
+        if slot is not None and slot not in out:
+            out[slot] = i
+    if not out:
+        # No body and no usable label: order by image position. In an unmirrored view the
+        # signer's right hand is on the viewer's left.
+        order = sorted(range(len(found)), key=lambda i: found[i][0])
+        out["right_hand"] = order[0]
+        if len(order) > 1:
+            out["left_hand"] = order[1]
+    elif len(found) == 2 and len(out) == 1:
+        taken = next(iter(out.values()))
+        free = "left_hand" if "right_hand" in out else "right_hand"
+        out[free] = 1 - taken
+    return out
 
 
 def _gaze_proxy(landmarks: np.ndarray) -> np.ndarray | None:

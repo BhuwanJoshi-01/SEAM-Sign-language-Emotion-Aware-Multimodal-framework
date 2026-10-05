@@ -2279,3 +2279,251 @@ without the flip that looking down the z axis requires, so every offline avatar 
 left and right exchanged. A test renders one raised hand and asserts which side it is on.
 
 No rating study has been run; nothing here is a claim about how good the avatar looks.
+
+---
+
+## 2026-10-05 — One hand filed twice, and the head markers corrected: everything re-run
+
+Two defects, found the same evening, both in code every result loads. Both were corrected
+together and every stamped experiment was re-run on the corrected code and on re-extracted
+landmarks. The previous files are in `artifacts/superseded/one_hand_wrong_axis_2026-10-05/`,
+and the previous landmark shards beside the current ones in
+`landmarks_one_hand_2026-10-05/`.
+
+### The project tracked one hand and called it two
+
+`tasks_api` built two identical hand graphs, each asked for one hand on the same image, and
+filed the first result under `left_hand` and the second under `right_hand`. Two identical
+graphs find the same hand. It surfaced because the avatar's hands would not sign: before
+solving fingers from the hand points, the two slots were compared and found to be the same
+21 points. `scripts/check_hand_slots.py` → `artifacts/m3/hand_slots.json` is that
+comparison, kept as a check that exits non-zero if it ever recurs.
+
+| extraction | clips | frames with both slots filled | of those, one hand twice | detection, left | detection, right |
+|---|---|---|---|---|---|
+| before the fix | 200 | 22989 | 22989 | 0.928 | 0.928 |
+| after | 200 | 19639 | 0 | 0.895 | 0.876 |
+
+Every frame that claimed two hands held one. The fix is one graph asked for two hands, with
+each detection assigned to the nearer of the body's own wrists (`tasks_api.assign_hands`);
+the hand model's own left/right label is used only when no body is in view, and swapped,
+because it assumes a mirrored image. The browser page always asked one graph for two hands
+and was never affected.
+
+**What used the hand slots.** Signing prosody and cue grounding (the `left_hand` slot),
+stimulus generation, and the `upper+hands` variant of the gloss recogniser, which had
+therefore never been run on two hands. The confound audits, the marker validation and the
+factorizer read the face and the body and do not use the hand slots; they were re-run
+because the module they load changed and because the landmarks were re-extracted.
+
+**A side measurement: re-extraction is not bit-repeatable.** The face graph was not
+touched, yet the two extractions of the same 200 clips do not agree
+exactly:
+
+| frames compared | identical | changed by more than 0.02 in some blendshape | clips with any such frame |
+|---|---|---|---|
+| 24733 | 87.2% | 4.5% | 21 of 200 |
+
+MediaPipe's video mode carries tracking state from frame to frame, and that state is not
+reproduced exactly from run to run. Every number below comes from one extraction, so the
+results are consistent with each other; a re-extraction moves the third decimal, and that
+is the resolution at which two runs of this project should be compared.
+
+### The head markers now read the head
+
+`markers._euler_from_matrix` is a wrapper over `head_motion.head_angles`, so roll, pitch
+and yaw mean tilt, nod and turn. `markers._oscillation` is no longer a rule of thumb (a
+turning point displaced twenty degrees from the clip median, which a fluent signer's head
+shake never reaches) but the detector that was scored against annotation: band energy over
+its threshold, and two reversals. The strict expected-failure test that pinned the defect
+has come off, as it was built to force.
+
+One design error is recorded with it. The marker module held a hard-coded census of its own
+measurements, so recording a new measurement changed the code every artifact is
+fingerprinted against, and measuring something made everything read as stale. The census
+is now `features/marker_census.json`, a data file. For the same reason the head detector's
+constants are fixed in the module and *audited* by the validation instead of being
+re-chosen by it: two members of the grid score within a few ten-thousandths of each other
+for head nod, and which is best flipped between the two extractions.
+
+### Re-run: marker validation
+
+Within-clip AUC against human frame labels. Rows that did not exist or were a defect before
+are marked.
+
+| marker | detector | Cory | Jonathan | Rachel | Ben | before, same order |
+|---|---|---|---|---|---|---|
+| brow_raise | blendshape mean | 0.837 | 0.822 | 0.878 | 0.630 | 0.838 | 0.822 | 0.878 | 0.647 |
+| brow_furrow | blendshape mean | 0.595 | 0.717 | 0.780 | 0.633 | 0.599 | 0.717 | 0.780 | 0.631 |
+| head_shake | offline marker (`markers.signals`) | 0.634 | 0.530 | 0.659 | 0.547 | 0.500 | 0.502 | 0.500 | 0.500 (tilt axis) |
+| head_shake | page detector, held-out choice | 0.757 | 0.702 | 0.696 | 0.502 | 0.757 | 0.702 | 0.696 | 0.502 |
+| head_nod | offline marker (`markers.signals`) | 0.502 | 0.537 | 0.525 | 0.478 | 0.498 | 0.500 | 0.499 | 0.495 (turn axis) |
+| head_nod | page detector, held-out choice | 0.590 | 0.767 | 0.549 | 0.318 | 0.592 | 0.767 | 0.549 | 0.304 |
+
+Verdicts are unchanged: brow raise validated, the other three not. The offline head-shake
+marker is above chance on every large fold where it had been at chance on all of them. It
+scores below the page's level, as it should: it is an on/off event with one threshold,
+which ranks frames more coarsely than a continuous level.
+
+### Re-run: negation and the head shake
+
+`scripts/label_markers.py` has always tested three registered pairings of a syntactic label
+with a visual marker, by permutation, Bonferroni-corrected over the three. Negation against
+head shake is one of them, and it has a history here: its first result was produced by the
+yaw bug and withdrawn, and after that fix the marker was blind.
+
+| | negated clips with a detected head shake | other clips with one | chi-square p |
+|---|---|---|---|
+| before (tilt axis) | 2 of 27 | 18 of 173 | 0.62922 |
+| after (turn axis) | 25 of 27 | 80 of 173 | 1e-05 |
+
+The registered magnitude test (the standardised mean difference of clip-level head-shake
+magnitude, negated against other clips, controlling log duration; the artifact's field is
+named `point_biserial`, which it is not):
+
+| statistic | permutation p | Bonferroni p, three tests | effect detectable at 80% power |
+|---|---|---|---|
+| 0.968 | 0.00015 | 0.00045 | 0.412 |
+
+A result that has been wrong once is checked from more than one side before it is believed.
+`scripts/check_negation_head_shake.py` → `artifacts/audit/negation_head_shake_check.json`
+adds three looks, decided after seeing the result above and labelled so:
+
+| check | result |
+|---|---|
+| The linguists' own head-shake marks | on 20 of 27 negated clips, 69 of 173 others |
+| The detector against those marks, by clip | fires on 65 of 89 clips with one, 40 of 111 without; rank correlation 0.468 |
+| Placebo axis: the same statistic for head nod | 0.071, against 0.968 for head shake |
+| Cory alone | 8 of 8 negated, 51 of 79 others; difference 0.79 |
+| Rachel alone | 13 of 15 negated, 20 of 37 others; difference 0.80 |
+| Ben alone | 3 of 3 negated, 3 of 4 others; difference 0.88 |
+
+The association is in the annotators' marks as well as in ours, it is specific to the shake
+axis, and it holds inside each signer who has negated clips to compare. **Negated clips
+carry more head shake, and the corrected marker measures it.** This is the first positive
+result in the project that has survived its own controls.
+
+What it is not: a validated frame-level head-shake detector (its AUC is in the table above,
+below the gate), nor a claim about more than these four signers. The marker's thresholds
+were set on these same clips against the linguists' head-shake marks. They were not set
+against negation, but the detector is tuned to this corpus and the table above is not an
+out-of-sample estimate. Jonathan has one negated clip and contributes nothing either way.
+
+### Re-run: emotion models on isolated signs (M1)
+
+`scripts/run_confound_audit.py`, unchanged in design. The head-shake row had one marked
+window before, so it had never been a test.
+
+| model | marker | pairs | clips | shift in negative mass | 95% CI | d | p |
+|---|---|---|---|---|---|---|---|
+| fer_cnn_a | head_shake | 14 | 12 | +0.0172 | [+0.0054, +0.0286] | +0.74 | 0.0050 |
+| fer_cnn_b | head_shake | 14 | 12 | +0.0171 | [+0.0062, +0.0317] | +0.74 | 0.0005 |
+| fer_cnn_c | head_shake | 14 | 12 | +0.0063 | [-0.0210, +0.0406] | +0.12 | 0.6925 |
+| uniform null | head_shake | 14 | 12 | +0.0566 | [-0.0860, +0.1808] | +0.27 | 0.5145 |
+| fer_cnn_a | brow_raise | 251 | 202 | +0.0009 | [-0.0019, +0.0040] | +0.04 | 0.5240 |
+| fer_cnn_a | brow_furrow | 268 | 232 | -0.0024 | [-0.0048, +0.0000] | -0.14 | 0.0540 |
+| fer_cnn_b | brow_furrow | 268 | 232 | -0.0024 | [-0.0045, -0.0004] | -0.15 | 0.0210 |
+
+On isolated signs, windows with a head shake are read as more negative than matched windows
+without one by two of the three emotion models, with intervals that exclude zero, and by
+neither the third model nor the uniform null. K1's stated criterion is a non-zero shift in
+two or more models, and for this one marker, on this corpus, it is met. It is the first
+support for C1 anywhere in the project.
+
+It is also twelve clips. The shift is smaller than the effect this design could detect at
+80% power, the third model does not see it, and the classes that move are sadness and
+surprise at the expense of neutral, which is what a face turned away from the camera could
+do to a classifier trained on frontal faces whether or not anything grammatical is
+happening. The brow rows are unchanged in substance: no support, with brow furrow leaning
+the other way.
+
+### Re-run: emotion models on continuous signing (C1)
+
+`scripts/run_confound_audit_continuous.py --force`, so the emotion models were re-scored
+on the re-extracted face boxes instead of read from the afternoon's cache. This audit
+contrasts the linguists' own marks, so neither defect touched its design.
+
+| model | marker | pairs | clips | shift | 95% CI | p | Bonferroni p |
+|---|---|---|---|---|---|---|---|
+| fer_cnn_a | head_shake | 321 | 82 | +0.0120 | [+0.0026, +0.0210] | 0.0095 | 0.0760 |
+| fer_cnn_b | head_shake | 321 | 82 | +0.0057 | [-0.0019, +0.0134] | 0.1455 | 1.0000 |
+| fer_cnn_c | head_shake | 321 | 82 | +0.0072 | [-0.0130, +0.0260] | 0.5100 | 1.0000 |
+| fer_cnn_a | negation | 171 | 34 | +0.0095 | [-0.0029, +0.0221] | 0.1435 | 1.0000 |
+| fer_cnn_b | negation | 171 | 34 | +0.0085 | [-0.0033, +0.0204] | 0.1735 | 1.0000 |
+| fer_cnn_c | negation | 171 | 34 | +0.0071 | [-0.0292, +0.0411] | 0.6765 | 1.0000 |
+
+Markers meeting the registered rule (positive with Bonferroni p under 0.05 in two models,
+placebo not significant): **none**. Head shake: null at the stated MDE.
+
+So the two audits now disagree about head shake in a specific and limited way: support on
+isolated signs from twelve clips and a detected marker, and none under the stricter
+registered rule on continuous signing from many more clips and human marks. The honest
+summary of C1 is no longer "no support anywhere" and is not "supported": it is one marker,
+one corpus, a small sample, and a plausible confound in the head's pose.
+
+### Re-run: the factorized encoder (M4)
+
+| run | worst-fold cross-AUC | before | signer control | affect balanced accuracy, three seeds |
+|---|---|---|---|---|
+| heuristic labels | 0.7053 | 0.6944 | 0.9804 | |
+| human labels | 0.7579 | 0.7264 | 0.9800 | |
+| three-seed ablation, full model | 0.7307 | 0.7214 | 0.9804 | 0.493 to 0.506 (before 0.481 to 0.507) |
+
+Refuted, as before, in every seed and every variant, with the positive control passing. The
+heuristic labels this run was given now include a head-shake label that means head shake,
+and the window's frame is chosen by evidence that includes it. Neither moved the gate. The
+separation target is missed by more than the difference between any two runs.
+
+### Re-run: gloss recognition (M5a)
+
+| features | dimensions | tokens | glosses | WER | most-frequent baseline | shuffled-label control | WER, closed vocabulary | top-1 |
+|---|---|---|---|---|---|---|---|---|
+| upper body | 82 | 1736 | 546 | 0.920 | 0.920 | 0.910 | 0.881 | 0.080 |
+| the same, before | 82 | 1736 | 546 | 0.920 | 0.920 | 0.910 | 0.881 | 0.080 |
+| upper body and both hands | 460 | 1736 | 546 | 0.922 | 0.920 | 0.910 | 0.883 | 0.078 |
+
+The `upper+hands` variant had existed as an option and had never been run on two hands,
+because there never were two. With both hands' shape added the recogniser
+still does not beat always predicting the most frequent gloss.
+Hand shape is where most of the lexical contrast in a sign lives, so this was the variant with a reason to work; that it does not says the limit here is the data, about three examples per gloss with half the test vocabulary unseen in training, and not the feature set.
+
+### The avatar's hands
+
+The body regressor's fingers barely move. `seam.avatar.hand_ik` solves each finger joint
+from MediaPipe's hand points instead (the smallest rotation that points the model's bone
+the way the tracked bone points, in the palm's own frame), and the wrist from where the
+palm faces; `seam.perception.hands3d` supplies the points.
+
+| clip | hand tracked, left / right | finger range over the clip, regressor → solved, left | right |
+|---|---|---|---|
+| 1372 | 0.95 / 0.96 | 18.1 → 56.1 | 13.0 → 43.7 |
+| 1470684 | 0.93 / 0.82 | 12.0 → 55.3 | 12.5 → 55.0 |
+| 1539625 | 0.90 / 0.89 | 21.2 → 57.5 | 23.5 → 50.1 |
+| 1540021 | 0.81 / 0.87 | 18.9 → 75.8 | 13.4 → 45.8 |
+| 1540612 | 0.99 / 0.89 | 17.2 → 45.2 | 14.6 → 49.8 |
+| 1540613 | 0.82 / 0.82 | 17.4 → 67.2 | 20.9 → 57.4 |
+| 154108 | 0.94 / 0.80 | 12.6 → 54.2 | 14.1 → 49.8 |
+| 1575 | 0.97 / 0.95 | 17.1 → 51.8 | 16.8 → 56.0 |
+
+Degrees, the spread over a clip of the mean joint angle. The solver is tested on a synthetic
+hand, where it must reproduce every bone it is given for any orientation, scale and side.
+Against the source frames the solved hands were inspected by eye, which is an inspection
+and not a measurement; no rating study has been run.
+
+The viewer that plays these is now a section of the front page, in that page's design, and
+`scripts/avatar_smoke.py` loads every clip in a real browser. The previous viewer was
+reported by a user to play one of the four clips it listed, and nothing automated would
+have noticed either way.
+
+### What may and may not be claimed after this entry
+
+| | |
+|---|---|
+| Brow raise can be read from blendshapes on unseen signers | verified, unchanged |
+| Negated clips carry more head shake, and the corrected marker measures it | measured, survives its controls, on four signers |
+| Head shake is read as more negative by emotion models | supported on isolated signs from twelve clips; not under the registered rule on continuous signing |
+| A frame-level head-shake detector | not validated |
+| Brow furrow, head nod | not validated |
+| Grammar and affect factorize | refuted, unchanged |
+| Pose recognises glosses at this data scale | not supported |
+| Latency and memory (K5, K6) | measured before the hand fix with two one-hand graphs; not re-measured |

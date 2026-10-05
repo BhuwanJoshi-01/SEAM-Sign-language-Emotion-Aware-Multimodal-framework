@@ -59,7 +59,6 @@ def main() -> int:
         # is a route nobody checks, so both properties are asserted here.
         PAGES = {
             "/server": (b"tasks-vision", b"api/analyse"),
-            "/avatar": (b"/api/demo/manifest", b"importmap"),
             "/api/coverage": (b"api/cue_expectations", b"is not claimed"),
             "/routes": (b"/static/nav.js", b"/api/demo/manifest"),
         }
@@ -166,25 +165,34 @@ def main() -> int:
                 except urllib.error.HTTPError as e:
                     failures.append(f"/figures/{fig.decode()} returned HTTP {e.code}")
 
-        # ── /avatar specifics ────────────────────────────────────────────────
+        # ── the 3D avatar viewer ─────────────────────────────────────────────
+        # It used to be a page of its own, in an older design, and is now a section of the
+        # front page. The old address must lead there, the page must name three.js through
+        # an import map that points beside itself, and three.js must not come from a CDN:
+        # a viewer that needs the network to draw a local file is not a local viewer.
         av = urllib.request.urlopen(f"http://127.0.0.1:{PORT}/avatar", timeout=15).read()
-        if b"cdn.jsdelivr" in av or b"unpkg.com" in av:
-            failures.append(
-                "/avatar loads three.js from a CDN; a product page that needs the network "
-                "to render is not a product page"
-            )
+        if av != page:
+            failures.append("/avatar does not lead to the front page")
+        if b'type="importmap"' not in page or b"./vendor/three/three.module.js" not in page:
+            failures.append("/ has no import map naming the vendored three.js")
+        if b'id="av3d"' not in page:
+            failures.append("/ has no 3D viewer canvas")
+        if b"npm/three" in page or b"unpkg.com/three" in page:
+            failures.append("/ loads three.js from a CDN")
 
-        # Vendored three.js must actually be reachable, or the page is a red screen.
+        # Vendored three.js must actually be reachable, at the address the front page's
+        # import map names and at the one the older pages use.
         for asset in (
+            "/vendor/three/three.module.js",
+            "/vendor/three/examples/jsm/controls/OrbitControls.js",
+            "/vendor/three/examples/jsm/loaders/GLTFLoader.js",
+            "/vendor/three/examples/jsm/utils/BufferGeometryUtils.js",
             "/static/vendor/three/three.module.js",
-            "/static/vendor/three/examples/jsm/controls/OrbitControls.js",
-            "/static/vendor/three/examples/jsm/loaders/GLTFLoader.js",
-            "/static/vendor/three/examples/jsm/utils/BufferGeometryUtils.js",
         ):
             try:
                 body = urllib.request.urlopen(f"http://127.0.0.1:{PORT}{asset}", timeout=30).read()
             except urllib.error.HTTPError as e:
-                failures.append(f"{asset} -> HTTP {e.code}; /avatar cannot load three.js")
+                failures.append(f"{asset} -> HTTP {e.code}; the viewer cannot load three.js")
                 continue
             if len(body) < 1000:
                 failures.append(f"{asset} served {len(body)} bytes; that is not a library")
@@ -193,7 +201,7 @@ def main() -> int:
 
         # Path containment on every file route. `{path:path}` patterns match `../`, so the
         # guard has to be on the resolved path rather than trusted from the route shape.
-        for route in ("/static/vendor/", "/static/", "/api/demo/"):
+        for route in ("/static/vendor/", "/static/", "/api/demo/", "/vendor/three/"):
             url = f"http://127.0.0.1:{PORT}{route}..%2f..%2f..%2fetc%2fpasswd"
             try:
                 body = urllib.request.urlopen(url, timeout=10).read()

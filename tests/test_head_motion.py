@@ -1,8 +1,8 @@
 """Head angles named for what the head does, and the detectors that read them.
 
-`seam.features.markers` reads a head tilt for `head_shake` and a head turn for `head_nod`.
-That went unnoticed because every test of it used angles built with the same convention
-it was written in. The tests here build a rotation from the physical motion - the head
+`seam.features.markers` once read a head tilt for `head_shake` and a head turn for
+`head_nod`. That went unnoticed because every test of it used angles built with the same
+convention it was written in. The tests here build a rotation from the physical motion - the head
 turning about the vertical axis, nodding about the ear-to-ear axis, tilting about the
 nose - and ask which reading moves.
 """
@@ -55,26 +55,20 @@ def test_an_empty_clip_has_no_angles() -> None:
     assert HM.head_angles(np.zeros((0, 4, 4))).shape == (0, 3)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="recorded defect: markers.signals reads euler[:, 2], a head tilt, for head_shake. "
-    "Nine cited artifacts were computed with it; fixing it means re-running them "
-    "(EXPERIMENT_LOG 2026-10-05, 'the head markers read the wrong axes'). When it is fixed "
-    "this passes, strict xfail fails, and this marker must come off.",
-)
-def test_the_offline_head_shake_marker_responds_to_a_head_turn() -> None:
-    rot = _about("vertical", _wave(30.0))
-    sig = VM.signals(np.zeros((len(rot), 52)), rot, fps=FPS)
-    assert np.asarray(sig.head_shake).max() > 0
+def test_the_offline_markers_read_the_motion_they_are_named_for() -> None:
+    """A turn is a shake, a nod is a nod, and a tilt is neither.
 
-
-def test_the_offline_markers_read_a_tilt_as_a_shake_and_a_turn_as_a_nod() -> None:
-    """What the defect is, stated as behaviour, so the log entry cannot drift from the code."""
-    tilt = VM.signals(np.zeros((72, 52)), _about("nose", _wave(30.0)), fps=FPS)
+    For a day this test was a strict expected failure: `markers.signals` read a head tilt
+    for head_shake and a head turn for head_nod, and it was left alone because nine cited
+    artifacts had been computed with it. It was corrected and all of them were re-run
+    together (EXPERIMENT_LOG, 2026-10-05, "one hand and the wrong axis, corrected").
+    """
     turn = VM.signals(np.zeros((72, 52)), _about("vertical", _wave(30.0)), fps=FPS)
-    assert np.asarray(tilt.head_shake).max() > 0
-    assert np.asarray(turn.head_nod).max() > 0
-    assert np.asarray(turn.head_shake).max() == 0
+    nod = VM.signals(np.zeros((72, 52)), _about("ear_to_ear", _wave(30.0)), fps=FPS)
+    tilt = VM.signals(np.zeros((72, 52)), _about("nose", _wave(30.0)), fps=FPS)
+    assert np.asarray(turn.head_shake).max() > 0 and np.asarray(turn.head_nod).max() == 0
+    assert np.asarray(nod.head_nod).max() > 0 and np.asarray(nod.head_shake).max() == 0
+    assert np.asarray(tilt.head_shake).max() == 0 and np.asarray(tilt.head_nod).max() == 0
 
 
 def test_one_turn_of_the_head_is_not_a_shake() -> None:

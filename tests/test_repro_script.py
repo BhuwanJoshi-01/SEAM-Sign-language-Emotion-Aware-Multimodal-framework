@@ -104,11 +104,12 @@ def test_an_unknown_stage_name_is_an_error_not_a_silent_skip(tmp_path: Path) -> 
     assert not any("run_confound_audit" in c for c in calls), "nothing should run on a typo"
 
 
-@pytest.mark.parametrize("stage", ["signstream", "landmarks"])
-def test_multi_command_stages_run_both_commands(tmp_path: Path, stage: str) -> None:
+@pytest.mark.parametrize(("stage", "commands"), [("signstream", 2), ("landmarks", 3)])
+def test_multi_command_stages_run_every_command(tmp_path: Path, stage: str, commands: int) -> None:
+    """`landmarks` gained a third command on 2026-10-05: the check that two hands are two."""
     rc, calls, out = _run(tmp_path, stage)
     if stage == "signstream" and rc != 0 and "SignStream XML not found" in out:
         pytest.skip("SignStream XML is licence-gated and not on this machine")
     assert rc == 0, out
     scripted = [c for c in calls if not c.startswith("-c")]
-    assert len(scripted) == 2, scripted
+    assert len(scripted) == commands, scripted

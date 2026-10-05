@@ -56,6 +56,58 @@
   "artifacts/superseded/head_axes_2026-10-05/marker_validation.json": {
    "by": "artifacts/m3/marker_validation.json",
    "reason": "First marker validation, 2026-10-05. Its heuristic and 61-feature rows are reproduced unchanged in the current file; it lacks the second design (page detector, tuned detector, compact fitted detector) that reads head turn for head_shake and head nod for head_nod. seam.features.markers reads tilt and turn for those two, which is why this file scored both at 0.50."
+  },
+  "artifacts/superseded/one_hand_wrong_axis_2026-10-05/audit/confound_audit.json": {
+   "by": "artifacts/audit/confound_audit.json",
+   "reason": "Computed before two defects were corrected on 2026-10-05: the perception stack filed one hand in both hand slots (two identical one-hand graphs), and seam.features.markers read a head tilt for head_shake and a head turn for head_nod. Kept because EXPERIMENT_LOG entries up to that date cite its numbers."
+  },
+  "artifacts/superseded/one_hand_wrong_axis_2026-10-05/audit/confound_audit_continuous.json": {
+   "by": "artifacts/audit/confound_audit_continuous.json",
+   "reason": "Computed before two defects were corrected on 2026-10-05: the perception stack filed one hand in both hand slots (two identical one-hand graphs), and seam.features.markers read a head tilt for head_shake and a head turn for head_nod. Kept because EXPERIMENT_LOG entries up to that date cite its numbers."
+  },
+  "artifacts/superseded/one_hand_wrong_axis_2026-10-05/audit/cue_grounding.json": {
+   "by": "artifacts/audit/cue_grounding.json",
+   "reason": "Computed before two defects were corrected on 2026-10-05: the perception stack filed one hand in both hand slots (two identical one-hand graphs), and seam.features.markers read a head tilt for head_shake and a head turn for head_nod. Kept because EXPERIMENT_LOG entries up to that date cite its numbers."
+  },
+  "artifacts/superseded/one_hand_wrong_axis_2026-10-05/audit/fer_sensitivity.json": {
+   "by": "artifacts/audit/fer_sensitivity.json",
+   "reason": "Computed before two defects were corrected on 2026-10-05: the perception stack filed one hand in both hand slots (two identical one-hand graphs), and seam.features.markers read a head tilt for head_shake and a head turn for head_nod. Kept because EXPERIMENT_LOG entries up to that date cite its numbers."
+  },
+  "artifacts/superseded/one_hand_wrong_axis_2026-10-05/audit/marker_labels.json": {
+   "by": "artifacts/audit/marker_labels.json",
+   "reason": "Computed before two defects were corrected on 2026-10-05: the perception stack filed one hand in both hand slots (two identical one-hand graphs), and seam.features.markers read a head tilt for head_shake and a head turn for head_nod. Kept because EXPERIMENT_LOG entries up to that date cite its numbers."
+  },
+  "artifacts/superseded/one_hand_wrong_axis_2026-10-05/m3/frame_alignment.json": {
+   "by": "artifacts/m3/frame_alignment.json",
+   "reason": "Computed before two defects were corrected on 2026-10-05: the perception stack filed one hand in both hand slots (two identical one-hand graphs), and seam.features.markers read a head tilt for head_shake and a head turn for head_nod. Kept because EXPERIMENT_LOG entries up to that date cite its numbers."
+  },
+  "artifacts/superseded/one_hand_wrong_axis_2026-10-05/m3/label_agreement.json": {
+   "by": "artifacts/m3/label_agreement.json",
+   "reason": "Computed before two defects were corrected on 2026-10-05: the perception stack filed one hand in both hand slots (two identical one-hand graphs), and seam.features.markers read a head tilt for head_shake and a head turn for head_nod. Kept because EXPERIMENT_LOG entries up to that date cite its numbers."
+  },
+  "artifacts/superseded/one_hand_wrong_axis_2026-10-05/m3/marker_validation.json": {
+   "by": "artifacts/m3/marker_validation.json",
+   "reason": "Computed before two defects were corrected on 2026-10-05: the perception stack filed one hand in both hand slots (two identical one-hand graphs), and seam.features.markers read a head tilt for head_shake and a head turn for head_nod. Kept because EXPERIMENT_LOG entries up to that date cite its numbers."
+  },
+  "artifacts/superseded/one_hand_wrong_axis_2026-10-05/m3/signstream_report.json": {
+   "by": "artifacts/m3/signstream_report.json",
+   "reason": "Computed before two defects were corrected on 2026-10-05: the perception stack filed one hand in both hand slots (two identical one-hand graphs), and seam.features.markers read a head tilt for head_shake and a head turn for head_nod. Kept because EXPERIMENT_LOG entries up to that date cite its numbers."
+  },
+  "artifacts/superseded/one_hand_wrong_axis_2026-10-05/m4/factorizer_human_labels.json": {
+   "by": "artifacts/m4/factorizer_human_labels.json",
+   "reason": "Computed before two defects were corrected on 2026-10-05: the perception stack filed one hand in both hand slots (two identical one-hand graphs), and seam.features.markers read a head tilt for head_shake and a head turn for head_nod. Kept because EXPERIMENT_LOG entries up to that date cite its numbers."
+  },
+  "artifacts/superseded/one_hand_wrong_axis_2026-10-05/m4/factorizer_multilabel.json": {
+   "by": "artifacts/m4/factorizer_multilabel.json",
+   "reason": "Computed before two defects were corrected on 2026-10-05: the perception stack filed one hand in both hand slots (two identical one-hand graphs), and seam.features.markers read a head tilt for head_shake and a head turn for head_nod. Kept because EXPERIMENT_LOG entries up to that date cite its numbers."
+  },
+  "artifacts/superseded/one_hand_wrong_axis_2026-10-05/m4/factorizer_multilabel_ablation.json": {
+   "by": "artifacts/m4/factorizer_multilabel_ablation.json",
+   "reason": "Computed before two defects were corrected on 2026-10-05: the perception stack filed one hand in both hand slots (two identical one-hand graphs), and seam.features.markers read a head tilt for head_shake and a head turn for head_nod. Kept because EXPERIMENT_LOG entries up to that date cite its numbers."
+  },
+  "artifacts/superseded/one_hand_wrong_axis_2026-10-05/m5a/recogniser.json": {
+   "by": "artifacts/m5a/recogniser.json",
+   "reason": "Computed before two defects were corrected on 2026-10-05: the perception stack filed one hand in both hand slots (two identical one-hand graphs), and seam.features.markers read a head tilt for head_shake and a head turn for head_nod. Kept because EXPERIMENT_LOG entries up to that date cite its numbers."
   }
  },
  "unstamped": {}

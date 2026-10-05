@@ -18,8 +18,8 @@ requirement and not an implementation detail:
 the same code the research uses (`seam.features.markers`), and it attaches the
 linguistic context for the utterance when the client supplies an ASLLRP utterance id —
 that part is a real annotation, not a model output. It does **not** return affect
-predictions, because M4 measured that model's affect head at balanced accuracy 0.481 to
-0.507 over three seeds against a 0.5 reference: it does not learn, so shipping its output
+predictions, because M4 measured that model's affect head at balanced accuracy 0.493 to
+0.506 over three seeds against a 0.5 reference: it does not learn, so shipping its output
 in a demo would be presenting a number that carries no information. The reason is
 returned in the payload so the UI can say so rather than showing an empty panel.
 """
@@ -51,8 +51,9 @@ MIN_FRAMES = 8
 #: Balanced accuracy of the M4 affect head, lowest and highest of three seeds, from
 #: ``artifacts/m4/factorizer_multilabel_ablation.json`` (variant ``full``). Quoted in the
 #: refusal below; ``tests/test_serve.py`` fails if it drifts from that artifact. The
-#: figure quoted here until 2026-10-05 was 0.497, from a run made before the yaw fix.
-M4_AFFECT_BALANCED_ACCURACY = (0.481, 0.507)
+#: figure quoted here until 2026-10-05 was 0.497, from a run made before the yaw fix, and
+#: 0.481 to 0.507 until the re-run on two-hand tracking and corrected head axes that evening.
+M4_AFFECT_BALANCED_ACCURACY = (0.493, 0.506)
 
 #: Mean WER of the M5a gloss recogniser and of its most-frequent-gloss baseline, from
 #: ``artifacts/m5a/recogniser.json``; ``tests/test_serve.py`` fails if they drift from it.
@@ -389,10 +390,33 @@ def build_app() -> Any:
             return JSONResponse({"error": f"{name} not found"}, status_code=404)
         return FileResponse(target, media_type="image/png")
 
-    @app.get("/avatar", response_class=HTMLResponse)
+    @app.get("/avatar")
     def avatar_page() -> Any:
-        """The avatar product page: a real skinned GLB playing a real animation clip."""
-        return _serve_page(web, "avatar.html")
+        """The 3D avatar lives in the front page now; this address is kept so links work.
+
+        It used to be a separate page with its own, older design. One site, one look: the
+        viewer is a section of the front page and this route sends the reader to it.
+        """
+        from fastapi.responses import RedirectResponse
+
+        return RedirectResponse("/#avatar", status_code=308)
+
+    @app.get("/vendor/three/{path:path}")
+    def three_for_front_page(path: str) -> Any:
+        """three.js for the front page's avatar viewer, at the address its import map names.
+
+        The front page is one file that also has to work on GitHub Pages, where there is no
+        `/static/`. Its import map therefore points beside itself, at `./vendor/three/`, and
+        this route puts the vendored copy there. Containment is checked on the resolved
+        path, as everywhere else a path arrives from a URL.
+        """
+        base = (web / "vendor" / "three").resolve()
+        target = (base / path).resolve()
+        if not str(target).startswith(str(base) + "/"):
+            return JSONResponse({"error": "path escapes the vendor root"}, status_code=400)
+        if not target.is_file() or target.suffix != ".js":
+            return JSONResponse({"error": f"{path} not found"}, status_code=404)
+        return FileResponse(target, media_type="text/javascript")
 
     @app.get("/api/demo/manifest")
     def demo_manifest() -> Any:

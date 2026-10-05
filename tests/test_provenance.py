@@ -43,11 +43,13 @@ CLAIMED_DOCS = ("EXPERIMENT_LOG.md", "CLAIMS_LEDGER.md")
 #:
 #: The three M4 values changed on 2026-10-05, when M4 was re-run on yaw-fixed code with the
 #: baseline-weighting and checkpoint-selection defects corrected (0.7276 / 0.9729 / 0.5048
-#: before). The gate still fails; see that date in EXPERIMENT_LOG.md.
+#: before). The gate still fails; see that date in EXPERIMENT_LOG.md. They changed again that
+#: evening (0.6944 / 0.9812 / 0.5891 before), when everything was re-run on two-hand tracking
+#: and corrected head axes; the gate still fails.
 REPORT_QUOTED = {
-    "worst_cross_auc": 0.6944,
-    "signer_control_max": 0.9812,
-    "cross_a_to_l": 0.5891,
+    "worst_cross_auc": 0.7053,
+    "signer_control_max": 0.9804,
+    "cross_a_to_l": 0.6250,
     # M5a, re-run 2026-10-05 with the 30 fps -> clip-rate frame mapping and a classifier
     # that can predict more than one gloss (1563 / 499 / 284 / 0.916 / 0.916 / 0.911 before).
     "n_tokens": 1736,

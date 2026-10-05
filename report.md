@@ -192,15 +192,17 @@ in `artifacts/superseded/pre_yawfix/m4/`.
 
 | Quantity | Value | Target | Pass? |
 |---|---|---|---|
-| `worst_cross_auc` | 0.6944 | ≤ 0.60 | **No** |
-| `signer_control_max` | 0.9812 | ≥ 0.80 | Yes |
+| `worst_cross_auc` | 0.7053 | ≤ 0.60 | **No** |
+| `signer_control_max` | 0.9804 | ≥ 0.80 | Yes |
 | `gate_passed` | false | — | — |
 | `folds_excluded` | 1 (Ben, insufficient label support) | — | — |
-| Cross A→L | 0.5891 | — | **not** chance; the earlier 0.5048 was a mean over folds on both sides of 0.5 |
+| Cross A→L | 0.625 | — | **not** chance; the earlier 0.5048 was a mean over folds on both sides of 0.5 |
 
-With human `y_L` the same run gives `worst_cross_auc` 0.7264, so human labels still do not
+With human `y_L` the same run gives `worst_cross_auc` 0.7579, so human labels still do not
 rescue the gate and the decision below stands. Over three seeds the `full` model's
-worst-fold value is 0.710 ± 0.014. Full account: the 2026-10-05 entry of
+worst-fold value is 0.709 ± 0.021. (Re-run on the evening of 2026-10-05, after
+the hand-tracking and head-axis corrections; the values before that re-run were 0.6944 /
+0.9812 / 0.5891 / 0.7264 and are in `artifacts/superseded/one_hand_wrong_axis_2026-10-05/m4/`.) Full account: the 2026-10-05 entry of
 `paper/EXPERIMENT_LOG.md`.
 
 **Confirm you read the artifact, not this table:** the numbers above should match the

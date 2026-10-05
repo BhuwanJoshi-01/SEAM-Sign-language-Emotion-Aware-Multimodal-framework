@@ -2,33 +2,30 @@
 
 Why this module exists
 ----------------------
-`seam.features.markers._euler_from_matrix` returns ``(roll, pitch, yaw)`` using the
-aerospace convention, in which the body's forward axis is x. A face's forward axis in
-MediaPipe's canonical model is z, with y up. The decomposition is correct and the *names*
-are not: measured on the 200 EmoSign clips against the face landmarks themselves,
+A head angle has to be named for what the head does. `seam.features.markers` once took its
+angles from a ZYX Euler decomposition and named them roll, pitch and yaw under the aerospace
+convention, in which the forward axis is x. A face's forward axis in MediaPipe's canonical
+model is z, with y up. The decomposition was correct and the names were not: measured on
+the 200 EmoSign clips against the face landmarks themselves (median per-clip correlation),
 
 ==========================  ===============  ================  ==============
-landmark geometry           that module's    that module's     that module's
+landmark geometry           that code's      that code's       that code's
                             ``roll``         ``pitch``         ``yaw``
 ==========================  ===============  ================  ==============
-nose moves sideways (turn)  -0.03            **0.90**          0.58
-nose moves up/down (nod)    **0.82**         0.03              -0.19
-eye line rotates (tilt)     0.08             -0.29             **-0.95**
+nose moves sideways (turn)  0.35             **0.90**          0.57
+nose moves up/down (nod)    **0.82**         0.34              0.38
+eye line rotates (tilt)     0.39             0.51              **0.95**
 ==========================  ===============  ================  ==============
 
-(median per-clip correlation). `markers.signals` reads ``yaw`` for `head_shake` and
-``pitch`` for `head_nod`, so its head shake measures a head *tilt* and its head nod
-measures a head *turn*. Both scored 0.50 against human annotation, which was read as "head
-movements cannot be seen from this input". They can: on the right axis the same detector
-family scores well above chance (`scripts/validate_markers.py`).
+so its head shake, which read ``yaw``, measured a head *tilt*, and its head nod, which read
+``pitch``, measured a head *turn*. Both scored 0.50 against human annotation and were
+written up as "head movement cannot be seen from this input". It can.
 
-The functions here read the face's own forward and right vectors, which is also what the
-live page (`docs/index.html`, ``headAngles``) does, so the browser and the offline
-validation now measure the same quantity.
-
-`markers.signals` is deliberately left as it is in this change: nine cited artifacts were
-computed with it and the staleness guard would, correctly, mark every one of them stale.
-The defect and the artifacts it touches are recorded in `paper/EXPERIMENT_LOG.md`.
+The functions here read the face's own forward and right vectors, with no Euler order
+involved. `markers._euler_from_matrix` is now a thin wrapper over :func:`head_angles`, the
+live page (`docs/index.html`, ``headAngles``) computes the same thing in JavaScript, and
+`scripts/validate_markers.py` writes the correlation check above to its artifact
+(``axis_check``) on every run, so the names cannot drift from the head again unnoticed.
 """
 
 from __future__ import annotations

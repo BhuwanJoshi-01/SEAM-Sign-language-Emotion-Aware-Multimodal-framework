@@ -57,3 +57,7 @@ wandb/
 .idea/
 .DS_Store
 *.swp
+
+# shareable bundles built by scripts/make_share_bundle.py
+dist/
+.venv/

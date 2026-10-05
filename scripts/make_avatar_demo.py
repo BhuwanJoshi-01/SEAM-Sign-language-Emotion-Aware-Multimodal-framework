@@ -41,8 +41,9 @@ import numpy as np
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 
+from seam.avatar import hand_ik
 from seam.avatar.gltf_export import export_animated_glb, verify_glb_animation
-from seam.avatar.mesh import describe_mesh, smplx_mesh
+from seam.avatar.mesh import _to_full_pose, describe_mesh, smplx_mesh
 from seam.avatar.pose_map import mediapipe_to_smpl24, normalise_to_rest_frame
 from seam.avatar.render import Camera, render_frame
 from seam.avatar.synthesis import (
@@ -50,6 +51,7 @@ from seam.avatar.synthesis import (
     model_rest_pose,
     synthesise_sequence,
 )
+from seam.perception import hands3d
 from seam.perception import smplerx as sx
 
 DEFAULT_VIDEOS = Path("/mnt/DevProd/seam_data/emosign/video")
@@ -188,13 +190,89 @@ def landmark_arm(
     }
 
 
+#: A hand lost for at most this many frames is bridged from the frames either side.
+HAND_BRIDGE_FRAMES = 8
+
+
+def drive_hands(
+    res: sx.SmplerxResult, model: dict, frames_dir: Path, to_world: np.ndarray
+) -> tuple[sx.SmplerxResult, dict]:
+    """Replace the regressor's fingers and wrists with ones solved from tracked hand points.
+
+    The regressor's own fingers barely move (see `seam.avatar.hand_ik`). MediaPipe's hand
+    model is run over the very frames the regressor saw, each hand's 21 points are turned
+    into finger rotations and a wrist rotation, and those replace the regressor's wherever
+    a hand was tracked. Where one was not - and the gap is too long to bridge - the
+    regressor's values stay, so a frame is never left without a hand.
+    """
+    import cv2
+
+    paths = sorted(frames_dir.glob("*.png"))
+    n = min(len(paths), len(res.frames))
+    if n == 0:
+        return res, {"source": "regressor only: no cached frames to track hands in"}
+
+    def frames_rgb():
+        for path in paths[:n]:
+            yield cv2.cvtColor(cv2.imread(str(path)), cv2.COLOR_BGR2RGB)
+
+    tracks = hands3d.track(frames_rgb(), res.fps)
+    parents = np.asarray(model["kintree_table"])[0].astype(np.int64).copy()
+    parents[0] = -1
+    frames = [dataclasses.replace(f) for f in res.frames]
+    stats: dict = {
+        "source": "MediaPipe hand world landmarks, solved to SMPL-X finger and wrist rotations",
+        "tracked_fraction": tracks.coverage(),
+    }
+    for side in hands3d.SIDES:
+        rest = hand_ik.hand_rest_from_model(model, res.betas, side)
+        points = tracks.side(side)[:n]
+        solved, bridged = hand_ik.fill_gaps(
+            [hand_ik.solve_fingers(p, rest) if p is not None else None for p in points],
+            HAND_BRIDGE_FRAMES,
+        )
+        field = f"{side}_hand_pose"
+        before = [hand_ik.mean_bend_deg(getattr(f, field)) for f in frames[:n]]
+        wrist_row = hand_ik.WRIST_JOINT[side] - 1  # body_pose holds joints 1..21
+        wrists_solved = 0
+        for i in range(n):
+            if solved[i] is not None:
+                frames[i] = dataclasses.replace(frames[i], **{field: solved[i]})
+            if points[i] is None:
+                continue
+            world = hand_ik.solve_wrist(points[i], rest, to_world)
+            if world is None:
+                continue
+            pose = _to_full_pose(frames[i], len(parents))
+            elbow = hand_ik.global_rotations(pose, parents)[hand_ik.ELBOW_JOINT[side]]
+            body = frames[i].body_pose.copy()
+            local = hand_ik.wrist_local(world, elbow, body[wrist_row])
+            wrists_solved += int(not np.allclose(local, body[wrist_row]))
+            body[wrist_row] = local
+            frames[i] = dataclasses.replace(frames[i], body_pose=body)
+        after = [hand_ik.mean_bend_deg(getattr(f, field)) for f in frames[:n]]
+        stats[side] = {
+            "frames_with_solved_fingers": int(sum(x is not None for x in solved)),
+            "frames_bridged": int(bridged),
+            "frames_with_solved_wrist": int(wrists_solved),
+            "mean_finger_bend_deg_regressor": round(float(np.mean(before)), 1),
+            "mean_finger_bend_deg_solved": round(float(np.mean(after)), 1),
+            "finger_bend_range_over_clip_deg_regressor": round(float(np.ptp(before)), 1),
+            "finger_bend_range_over_clip_deg_solved": round(float(np.ptp(after)), 1),
+        }
+    return dataclasses.replace(res, frames=frames), stats
+
+
 def smplerx_arm(
     video: Path, model: dict, fps: float | None, batch: int, cache: Path
 ) -> tuple[list, dict]:
     """Arm A: learned SMPL-X regression, made upright, with collapsed frames repaired."""
     res = sx.run(video, fps=fps, batch=batch, work_dir=cache)
     res = sx.upright(res)
+    to_world = np.asarray(getattr(res, "alignment", np.eye(3)), dtype=np.float64)
     res, repaired = sx.repair_outliers(res)
+    # The regressor's fingers barely move, so they are solved from tracked hand points.
+    res, hands = drive_hands(res, model, cache / "frames", to_world)
     # Per-frame regression shakes and its depth estimate is noise. See `sx.stabilise` for
     # the measurements, including why the model's resting hand is deliberately not added.
     before = sx.jitter(res)
@@ -213,6 +291,7 @@ def smplerx_arm(
             "frame_to_frame_after": {k: round(v, 4) for k, v in after.items()},
             "hand_mean_added": False,
         },
+        "hands": hands,
         "betas": [round(float(b), 4) for b in res.betas],
         "source": "SMPLer-X smpler_x_b32 (third-party, third_party weights not vendored)",
     }

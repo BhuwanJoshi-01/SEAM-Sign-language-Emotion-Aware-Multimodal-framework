@@ -273,3 +273,55 @@ def test_gaze_proxy_is_scale_invariant() -> None:
     g2 = T._gaze_proxy(scaled)
     assert g2 is not None
     np.testing.assert_allclose(g1, g2, atol=1e-5)
+
+
+# --- two hands, each in its own slot ---------------------------------------------------
+
+
+def test_two_hands_go_to_the_two_wrists_they_are_nearest() -> None:
+    """Order of detection must not matter, and both hands may never share a slot.
+
+    For as long as this project existed the two slots held the same hand: two identical
+    graphs each asked for one hand on the same image. The assignment is now a decision
+    with a rule, and this is the rule.
+    """
+    from seam.perception.tasks_api import assign_hands
+
+    left_wrist, right_wrist = np.array([0.70, 0.60]), np.array([0.30, 0.60])
+    near_left, near_right = np.array([0.72, 0.55]), np.array([0.27, 0.62])
+    wrists = (left_wrist, right_wrist)
+    assert assign_hands([near_left, near_right], [None, None], wrists) == {
+        "left_hand": 0,
+        "right_hand": 1,
+    }
+    assert assign_hands([near_right, near_left], [None, None], wrists) == {
+        "left_hand": 1,
+        "right_hand": 0,
+    }
+    # Both detections nearer one wrist: they are still two hands, in two slots.
+    both = assign_hands([np.array([0.69, 0.6]), np.array([0.60, 0.6])], [None, None], wrists)
+    assert sorted(both) == ["left_hand", "right_hand"] and sorted(both.values()) == [0, 1]
+    assert both["left_hand"] == 0
+
+
+def test_one_hand_goes_to_the_nearer_wrist_and_none_gives_nothing() -> None:
+    from seam.perception.tasks_api import assign_hands
+
+    wrists = (np.array([0.70, 0.60]), np.array([0.30, 0.60]))
+    assert assign_hands([np.array([0.33, 0.5])], ["Left"], wrists) == {"right_hand": 0}
+    assert assign_hands([np.array([0.66, 0.5])], ["Left"], wrists) == {"left_hand": 0}
+    assert assign_hands([], [], wrists) == {}
+
+
+def test_without_a_body_the_hand_label_is_used_and_it_is_mirrored() -> None:
+    """MediaPipe labels hands as if the image were a selfie; these videos are not."""
+    from seam.perception.tasks_api import assign_hands
+
+    a, b = np.array([0.3, 0.5]), np.array([0.7, 0.5])
+    assert assign_hands([a, b], ["Left", "Right"], None) == {"right_hand": 0, "left_hand": 1}
+    assert assign_hands([a], ["Right"], None) == {"left_hand": 0}
+    # Two hands the model gave the same label: still two slots.
+    same = assign_hands([a, b], ["Left", "Left"], None)
+    assert same == {"right_hand": 0, "left_hand": 1}
+    # No label at all: the signer's right hand is on the viewer's left.
+    assert assign_hands([b, a], [None, None], None) == {"right_hand": 1, "left_hand": 0}

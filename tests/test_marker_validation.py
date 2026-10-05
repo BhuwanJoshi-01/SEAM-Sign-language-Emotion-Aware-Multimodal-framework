@@ -94,29 +94,48 @@ def test_brow_raise_is_the_one_marker_validated_against_human_frames() -> None:
         assert m[other]["verdict_heuristic"] == "not validated", other
 
 
-def test_the_offline_head_markers_score_at_chance_because_they_read_the_wrong_axis() -> None:
+def test_the_offline_head_shake_marker_is_no_longer_at_chance() -> None:
     """0.50 was read as "head movement cannot be seen". It was the wrong axis.
 
-    The legacy rows are kept in the artifact as the baseline, and they stay at chance:
-    `markers.signals` reads a tilt for head_shake and a turn for head_nod
-    (`tests/test_head_motion.py`).
+    `markers.signals` read a tilt for head_shake until 2026-10-05 and scored exactly 0.50 on
+    every fold. Corrected, the same row is above chance on each large fold. It stays below
+    the page's level score, as it should: the offline marker is an on/off event with one
+    hard threshold, which ranks frames more coarsely than the continuous level does.
     """
-    m = _artifact()["markers"]
-    for marker in ("head_shake", "head_nod"):
-        heur = m[marker]["heuristic_within_clip_auc_by_fold"]
-        assert all(abs(heur[f] - 0.5) < 0.02 for f in V.DECIDING_FOLDS), marker
+    shake = _artifact()["markers"]["head_shake"]
+    offline = shake["heuristic_within_clip_auc_by_fold"]
+    level = shake["revised_page_within_clip_auc_by_fold"]
+    for fold in V.DECIDING_FOLDS:
+        assert offline[fold] > 0.52, fold
+        assert offline[fold] < level[fold], fold
 
 
 def test_head_shake_is_readable_on_the_right_axis_but_does_not_pass_the_gate() -> None:
     """Above chance on every large fold; under 0.80 on every one. Both halves are the result."""
     shake = _artifact()["markers"]["head_shake"]
     revised = shake["revised_page_within_clip_auc_by_fold"]
-    legacy = shake["heuristic_within_clip_auc_by_fold"]
     for fold in V.DECIDING_FOLDS:
-        assert revised[fold] > legacy[fold] + 0.15, fold
         assert 0.65 < revised[fold] < V.VALIDATED, fold
     assert shake["verdict_revised_page"] == "not validated"
     assert shake["verdict_compact"] == "not validated"
+
+
+def test_the_angle_columns_are_what_their_names_say() -> None:
+    """Written to the artifact on every run, so the names cannot drift from the head again."""
+    check = _artifact()["axis_check"]["median_abs_correlation"]
+    rows = {"turn": None, "nod": None, "tilt": None}
+    for motion, row in check.items():
+        for name in rows:
+            if f"a {name})" in motion:
+                rows[name] = row
+    assert all(rows.values()), rows
+    assert rows["turn"]["markers.yaw (read as head_shake)"] > 0.8
+    assert rows["nod"]["markers.pitch"] > 0.75
+    assert rows["tilt"]["markers.roll"] > 0.9
+    for name, row in rows.items():
+        assert row[f"head_motion.{name}"] == max(
+            row[k] for k in row if k.startswith("head_motion.")
+        ), name
 
 
 def test_head_nod_stays_weak_on_the_right_axis() -> None:
@@ -142,7 +161,7 @@ def test_the_revised_detector_was_chosen_without_the_held_out_signer() -> None:
         assert set(choice) >= set(V.DECIDING_FOLDS)
         assert set(choice.values()) <= names
         assert m[marker]["shipped_in_page"]["name"] in names
-        assert "not a held-out result" in m[marker]["shipped_in_page"]["note"]
+        assert "not held-out" in m[marker]["shipped_in_page"]["note"]
 
 
 # --- the second design: nothing in it may read a label --------------------------------------

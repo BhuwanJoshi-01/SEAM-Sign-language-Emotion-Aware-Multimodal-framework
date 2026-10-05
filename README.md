@@ -46,10 +46,11 @@ MediaPipe's public sample photo; no dataset video is shown or shipped.*
 | Can the full perception stack run in real time on a 4 GB laptop GPU? | 41.8 ms median, **73.2 ms p95**, 19.7–20.4 FPS; **186 MB** peak VRAM with six models live against a 2,500 MB budget | **Yes** |
 | Can a grammatical marker be read off the face on signers never seen? | Brow raise vs human frame-level annotation: within-clip AUC **0.838 / 0.822 / 0.878** on three held-out signers | **Yes, for brow raise** |
 | Can the other markers be read too? | Brow furrow 0.60–0.78. Head shake **0.70–0.76** and head nod 0.55–0.77 once the correct head axis is read; both had scored 0.50 while our offline code measured the wrong axis | **Partly: above chance, below the 0.80 gate** |
-| Do emotion models read grammar as negative emotion? | Tested twice: 2,565 isolated signs, and 200 continuous utterances with human markers under a pre-registered rule. **No marker met the rule** | **Not supported** |
-| Can a factorized encoder separate grammar from affect? | Worst-fold cross-prediction AUC **0.694–0.726** against a target of ≤ 0.60, in all 3 seeds and 5 ablation variants | **Refuted** |
-| Can pose alone recognise glosses on this corpus? | WER 0.920, equal to always predicting the most frequent gloss | **Not at this data scale** |
-| Can a video become an animated 3D avatar? | SMPL-X body and fingers regressed per frame and exported as a skinned, animated glTF (55 joints, 6.4 mm error); frame-to-frame jump cut from 0.32–0.62 m to 0.006–0.030 m | **Yes** |
+| Does a head shake mark negation in our data? | A head shake is detected in **25 of 27** negated clips and 80 of 173 others (permutation p = 0.00015); the linguists' own marks show the same pattern, and the nod axis shows nothing | **Yes, on these four signers** |
+| Do emotion models read grammar as negative emotion? | Isolated signs: head-shake windows are read as more negative by 2 of 3 models (+0.017 in negative-emotion probability, 12 clips); no brow effect. Continuous signing, human markers, pre-registered rule: **no marker met the rule** | **One marker, small sample; not confirmed on continuous signing** |
+| Can a factorized encoder separate grammar from affect? | Worst-fold cross-prediction AUC **0.705–0.758** against a target of ≤ 0.60, in all 3 seeds and 5 ablation variants | **Refuted** |
+| Can pose alone recognise glosses on this corpus? | WER 0.920 from the body, 0.922 with both hands added; always predicting the most frequent gloss gives 0.920 | **Not at this data scale** |
+| Can a video become an animated 3D avatar? | SMPL-X body and fingers regressed per frame and exported as a skinned, animated glTF (55 joints, 6.4 mm error); frame-to-frame jump cut from 0.32–0.69 m to 0.004–0.035 m; fingers and wrists solved from MediaPipe hand points | **Yes** |
 
 Two of our original hypotheses were refuted. We report them as results, because each was
 measured with an instrument that passes a positive control. The record also contains the
@@ -140,7 +141,7 @@ transformation matrix.
 | Graph | Output | Why we need it |
 |---|---|---|
 | Face Landmarker | 478 3D points, 52 blendshape scores, a 4×4 head transform | Brows, eyes, mouth and head pose: the non-manual channel |
-| Hand Landmarker (×2) | 21 3D points per hand | The manual channel and signing prosody |
+| Hand Landmarker (one graph, two hands) | 21 3D points per hand | The manual channel and signing prosody |
 | Pose Landmarker | 33 body points | Shoulders for normalisation; arms |
 
 Together that is **553 landmarks plus 52 blendshapes per frame**. Three implementation
@@ -293,7 +294,7 @@ out-of-vocabulary floor.
 ### 3.11 Video to 3D avatar
 
 A learned whole-body regressor (**SMPLer-X**, ViT-B) predicts SMPL-X body parameters per
-frame: pose, hand articulation, facial expression and body shape. We convert its output to a
+frame: pose, facial expression and body shape. We convert its output to a
 standard orientation, repair frames where the regressor loses the person, and export one
 **skinned mesh with a real animation clip** in glTF format (55 joints, inverse bind matrices,
 110 animation channels). The export is verified by loading it in a completely independent
@@ -305,6 +306,24 @@ to the next, which made the first avatar jump back and forth; we hold that axis 
 median over the clip. Every joint rotation, including the 30 finger joints, is then smoothed
 with a Gaussian window computed on the rotation sphere (on quaternions, after aligning their
 signs), not on the raw axis-angle numbers, which wrap around at 180 degrees.
+
+**The hands do not come from the body regressor.** A whole-body model sees a hand as a few
+dozen pixels, and its 30 finger joints barely move: over a clip they open and close through
+only 12 to 24 degrees while the signer forms handshapes. We already run a dedicated
+hand model, so the fingers are solved from its 21 points per hand instead:
+
+1. The palm is rigid, so three of its points (wrist, index knuckle, little-finger knuckle)
+   define a frame. We build that frame on the tracked hand and on the body model's rest hand.
+2. Expressed in its own palm frame, each finger bone of the tracked hand is a direction the
+   model's bone has to reach. Each joint's rotation is the smallest rotation that takes its
+   rest bone there, solved down the chain from knuckle to fingertip.
+3. The wrist is solved the same way in world space, from where the palm frame points, and
+   kept only when the result is anatomically possible.
+
+Nothing in this depends on the camera, the hand's size in the image, or the arm. A hand lost
+for up to eight frames is bridged on the rotation sphere; where there is no hand to track,
+the regressor's value stays. The solver is tested on a synthetic hand, where it has to
+reproduce every bone it is given for any orientation and scale, for left and right hands.
 
 ### 3.12 Efficiency
 
@@ -389,40 +408,96 @@ lifted the weakest signer above 0.64. For two of our signers the `browDown` blen
 near 0.42 even when the annotators mark nothing, so there is little room left for it to
 rise.
 
-### 4.3 Emotion models did not read grammar as negative emotion
+### 4.3 Do emotion models read grammar as negative emotion?
+
+We ran the audit on two corpora, and after the corrections of 5 October they no longer say
+the same thing.
+
+**Continuous signing (200 utterances, human frame-level markers, pre-registered rule).**
 
 ![Forest plot of the shift in negative-emotion probability for eight markers across three emotion models, with 95% intervals. Most intervals cross zero.](docs/figures/c1_continuous.png)
 
-On 200 continuous utterances with human frame-level markers (2,646 scored half-second
-windows), **no marker met the pre-registered rule**:
+On 2,646 scored half-second windows, **no marker met the pre-registered rule**:
 
 - **Brow furrow leans the other way** in all three models. This is the marker the usual
   example rests on (a wh-question furrow read as anger).
 - **Brow raise and rhetorical questions lean positive in two models** and do not survive
   correction for multiple tests.
+- **Head shake leans positive in one model** and does not survive correction either.
 - **Yes/no and wh-questions could not be tested**: only 8 and 4 clips contribute.
 
 The same analysis *without* restricting to the signing span reports support for brow raise.
 That version compares signing faces with resting faces, which is a different question. The
 restriction was decided before either analysis ran.
 
-On isolated signs (2,565 WLASL clips) the result was also null, with shifts between −0.008
-and +0.002 against a baseline of 0.297.
+**Isolated signs (2,565 WLASL clips, markers detected by our own code).** For the brows and
+the mouth the result is null, with shifts between -0.008 and +0.002. Head shake is
+different, and it is new: until the head-axis fix this row had one marked window and was
+not a test at all.
 
-**What this does not show:** that the confound does not exist. These are small CNNs, and
-question marking could not be tested on this corpus.
+| Emotion model | Matched pairs | Clips | Shift in negative-emotion probability | 95% interval | p |
+|---|---|---|---|---|---|
+| A | 14 | 12 | +0.0172 | +0.0054 to +0.0286 | 0.0050 |
+| B | 14 | 12 | +0.0171 | +0.0062 to +0.0317 | 0.0005 |
+| C | 14 | 12 | +0.0063 | -0.0210 to +0.0406 | 0.6925 |
+
+Two of three models read head-shake windows as more negative than matched windows of the
+same clip without one, with intervals that exclude zero. That meets the criterion we set at
+the start (a non-zero shift in two or more models), and it is the first support for the
+hypothesis anywhere in the project.
+
+We do not report it as a confirmation, for three reasons we can state:
+
+1. It is **12 clips**. The shift is smaller than the effect this design could detect with
+   80% power.
+2. **It did not replicate** on continuous signing, where the head shakes were marked by
+   linguists and there are many more of them.
+3. **There is a simpler explanation.** The classes that move are sadness and surprise, at the
+   expense of neutral. A face turned away from the camera could do that to a classifier
+   trained on frontal faces, whether or not anything grammatical is happening.
+
+**What this section does not show:** that the confound does or does not exist. These are
+small CNNs, and question marking could not be tested on this corpus.
+
+### 4.3b Negation shows up as a head shake
+
+In ASL a head shake marks negation. Once our head-shake marker was reading the right axis,
+that textbook fact appeared in the data. Each clip has a negation label read from its
+glosses and a head-shake magnitude read from its video.
+
+| | Negated clips | Other clips |
+|---|---|---|
+| Head shake detected by our marker | 25 of 27 | 80 of 173 |
+| Head shake marked by the linguists | 20 of 27 | 69 of 173 |
+
+The difference in head-shake magnitude between negated and other clips is 0.97 pooled
+standard deviations after controlling for clip length (permutation test, p = 0.00015;
+p = 0.00045 after correcting for the three pairings we had registered).
+
+This claim has been wrong here before: an earlier version of it was produced by a bug and
+withdrawn. So we checked it three more ways before writing it down:
+
+- **The annotators see it too** (second row of the table), so it is in the signing and not
+  only in our detector.
+- **It is specific to the shake axis.** The same statistic for head *nod* is 0.07.
+- **It holds inside each signer** who has negated clips to compare: 0.79 for Cory,
+  0.80 for Rachel, 0.88 for Ben.
+
+Limits: 27 negated clips, 15 of them one signer's; negation is read from the glosses by
+rule; and the marker's threshold was set on these clips (against head-shake marks, not
+against negation), so this is not an out-of-sample estimate.
 
 ### 4.4 The factorized encoder does not separate grammar from affect
 
-![Dot plot of worst-fold cross-prediction AUC for five model variants, three seeds each. All lie between 0.69 and 0.81, above the 0.60 target.](docs/figures/m4_gate.png)
+![Dot plot of worst-fold cross-prediction AUC for five model variants, three seeds each. All lie between 0.68 and 0.82, above the 0.60 target.](docs/figures/m4_gate.png)
 
 | Quantity | Result | Target |
 |---|---|---|
-| Worst-fold cross-AUC, heuristic labels | 0.694 | ≤ 0.60 |
-| Worst-fold cross-AUC, human labels | 0.726 | ≤ 0.60 |
-| Over three seeds | 0.710 ± 0.014 | ≤ 0.60 |
-| Signer positive control | 0.981 | ≥ 0.80 |
-| Emotion balanced accuracy | 0.481–0.507 | reference 0.5 |
+| Worst-fold cross-AUC, heuristic labels | 0.705 | ≤ 0.60 |
+| Worst-fold cross-AUC, human labels | 0.758 | ≤ 0.60 |
+| Over three seeds | 0.709 ± 0.021 | ≤ 0.60 |
+| Signer positive control | 0.980 | ≥ 0.80 |
+| Emotion balanced accuracy | 0.493–0.506 | reference 0.5 |
 
 The gate fails in every seed and every ablation variant, while the positive control passes,
 so the instrument can see and the model does not separate. Swapping the heuristic grammar
@@ -435,9 +510,21 @@ annotation well for negation (Cohen's κ = 0.639) and rhetorical questions (0.73
 
 ### 4.5 Gloss recognition
 
-On 1,736 tokens over 546 glosses (3.18 examples per gloss), word error rate is 0.920,
-identical to always predicting the most frequent gloss. This is a data-scale result, not
-evidence that pose is uninformative.
+| Features | Dimensions | WER | Most-frequent-gloss baseline | Shuffled-label control |
+|---|---|---|---|---|
+| Upper body | 82 | 0.920 | 0.920 | 0.910 |
+| Upper body and both hands | 460 | 0.922 | 0.920 | 0.910 |
+
+On 1,736 tokens over 546 glosses (3.18 examples per gloss), word error rate equals that of
+always predicting the most frequent gloss.
+
+The second row is new and was the one with a reason to work. Most of what distinguishes one
+sign from another is the handshape, and until 5 October our pipeline had never really
+tracked two hands (section 4.7), so the hands variant had never had real input. With both
+hands properly tracked it still does not beat the baseline. That points at the data, not
+the features: 25 to 32% of each test signer's tokens are glosses the model never
+saw in training, and the rest have about three examples each. This is a data-scale result,
+not evidence that pose is uninformative.
 
 ### 4.6 Avatar
 
@@ -445,12 +532,18 @@ evidence that pose is uninformative.
 |---|---|
 | Structure | 1 skinned mesh, 55 joints, 110 animation channels |
 | Error against the mesh pipeline | 6.4 mm (glTF allows 4 skinning influences; SMPL-X uses up to 10) |
-| Detection coverage on 4 clips, 541 frames | 0.99–1.00 |
-| Root movement between frames, before and after stabilising | 0.32–0.62 m, then 0.006–0.030 m |
-| Finger-joint movement between frames, before and after | 0.061–0.098 rad, then 0.029–0.039 rad |
-| Verified by | three.js `GLTFLoader` in headless Chrome |
+| Detection coverage on 8 clips, 1,232 frames | 0.99–1.00 |
+| Root movement between frames, before and after stabilising | 0.32–0.69 m, then 0.004–0.035 m (at least 17 times less on every clip) |
+| Each hand tracked by MediaPipe | 80–99% of frames |
+| How far the fingers open and close over a clip, body regressor | 12–24° |
+| The same, solved from MediaPipe's hand points | 44–76° |
+| Finger-joint movement between frames, before and after smoothing | 0.24–0.43 rad, then 0.09–0.16 rad |
+| Verified by | three.js `GLTFLoader` in headless Chrome, which loads and plays every clip (`scripts/avatar_smoke.py`) |
 
-No human preference study has been run, so we make no claim about how good the avatar looks.
+We checked the solved hands by eye against the source frames (an open palm facing the
+camera, a hand at the chin, two flat hands edge-on all come out as in the video). That is
+an inspection, not a measurement: no human preference study has been run, and we make no
+claim about how well the avatar signs.
 
 ### 4.7 What we got wrong, and how we found out
 
@@ -459,8 +552,10 @@ No human preference study has been run, so we make no claim about how good the a
 | Emotion models trained and applied with different face crops | All three predicted one class for all 200 clips | Per-frame spread within a clip was 0.0002 |
 | Head yaw read from the wrong matrix entries | Head shake was zero for a real head shake; one "positive result" was produced by the bug | The live demo showed a blank row |
 | Head angles named by an aircraft convention | "Head shake" measured head tilt and "head nod" a head turn; both scored 0.50 and were written up as unreadable | The browser page, written separately, worked; the landmarks settled which was right |
-| The body regressor's depth used as the avatar's position | The avatar jumped 0.32 to 0.62 m between frames | Watching it, then measuring the step size per axis |
+| The body regressor's depth used as the avatar's position | The avatar jumped 0.32 to 0.69 m between frames | Watching it, then measuring the step size per axis |
 | The software renderer flipped left and right | Every offline avatar video was a mirror image | A test that renders one raised hand and asks which side it is on |
+| Two identical hand trackers, each asked for one hand | Both found the same hand, so the "left" and "right" slots held one hand twice in every frame of every clip. The project tracked one hand and called it two | The avatar's hands would not sign; comparing the two slots showed them identical on 80 of 80 frames |
+| A hard-coded census of the markers kept inside the marker module | Recording a new measurement changed the code every result is fingerprinted against, so measuring something made everything look stale | The re-run itself; the census is now a data file |
 | Annotation frames read at 30 fps on 24 fps clips | Labels pointed at the wrong frames on 138 of 200 clips | The blink alignment test in section 3.6 |
 | Gloss classifier could only predict one gloss | Its "negative result" was the baseline by construction | A planted-signal positive control |
 | Baseline model trained without the main model's class weights | A five-fold "improvement" that was an artefact | Reading the re-run instead of comparing headlines |
@@ -476,11 +571,30 @@ Each is now covered by a test.
 when available) and runs all three landmarkers on your webcam or on a video file you choose.
 **No video or landmark leaves the device.**
 
+**What the site is for.** It does four jobs, in the order the page presents them:
+
+1. **It shows the vision system working.** Anyone with a browser and a camera can see the
+   face mesh, both hands and the body tracked in real time, with the frame rate and each
+   model's latency on screen. That is the part of the project a reader cannot take on trust
+   from a table.
+2. **It is an instrument for the grammar markers.** Raise your brows, furrow them, shake or
+   nod your head, and the read-out for that marker moves, next to the number that says how
+   far that read-out agreed with linguists' annotation. It is how the head-axis bug in
+   section 4.2 was found.
+3. **It is the report's front page.** The results, the figures, the method and the limits
+   are on the same page as the demo, each claim beside its evidence, so it serves as the
+   hosted link for the submission.
+4. **It shows the output side.** The same page plays the 3D avatar built from a signing
+   video.
+
+What it is not: a sign-language translator or an emotion detector. It translates nothing,
+and it deliberately shows no emotion label, because our emotion model did not beat chance.
+
 | Panel | Shows |
 |---|---|
 | Stage | Face mesh, hand skeletons and upper body drawn over the video, with FPS and per-model latency |
 | Linguistic channel | Brow raise, brow furrow, head shake, head nod, each with the validation result we measured. Shake and nod read in degrees of back-and-forth motion |
-| 3D avatar | In the nav bar. On the local server it opens the interactive viewer; on the hosted page it shows rendered frames and says why the viewer cannot be hosted |
+| 3D avatar | A section of the same page, reached from the nav bar. On the local server it is an interactive viewer: orbit, zoom, scrub, half speed, skeleton overlay, one button per utterance, with that clip's measurements beside it. On the hosted page it shows rendered frames and says why the viewer cannot be hosted |
 | Affective cues | Smile, frown, eye widening, jaw opening as raw signals, with no emotion label |
 | Head pose and prosody | Yaw, pitch, roll; hand speed and signing-space size in shoulder widths |
 | Timeline | The last twelve seconds of four signals |
@@ -503,8 +617,8 @@ page's own classes in Node and checks them number for number against the Python 
 that were scored; the thresholds in the page are read from the validation artifact by
 another.
 
-The server also offers `/avatar` (the interactive 3D avatar viewer, after
-`make demo-avatar`), `/server` (the earlier demo, with server-side marker analysis) and
+The 3D viewer is part of that page (run `make demo-avatar` once to build its clips). The
+server also offers `/server` (the earlier demo, with server-side marker analysis) and
 `/api/coverage` (what is and is not claimed).
 
 ---
@@ -514,10 +628,14 @@ The server also offers `/avatar` (the interactive 3D avatar viewer, after
 - **Four signers, 200 utterances.** Every result is leave-one-signer-out, and none should be
   read as general across signers, dialects or recording conditions.
 - **Lab-recorded, scripted signing.** Nothing here is evaluated on conversation.
-- **One known defect is still in the offline code.** `seam.features.markers` reads head tilt
-  for "head shake" and head turn for "head nod". It is recorded, pinned by a test that fails
-  the moment it is corrected, and corrected in the live page and in the validation, but two
-  earlier negative results were computed with it and have not been re-run (section 7).
+- **Latency was measured before the hand-tracking fix.** The 73 ms figure in section 4.1 was
+  taken with two one-hand graphs running; the pipeline now runs one graph that finds two
+  hands. We have not re-measured it, because the benchmark needs the CPU governor set by an
+  administrator. We expect it to be no slower and do not claim so.
+- **Face tracking is not perfectly repeatable.** Extracting the same 200 clips twice gave
+  identical blendshapes on 87% of frames and differences above 0.02 on 4.5%, in 21 clips.
+  Every result here was computed from one extraction, so they are consistent with each
+  other, but a re-extraction moves the third decimal.
 - **Emotion labels are annotators' perceptions**, not the signer's internal state, and
   agreement on some classes is low.
 - **We are hearing researchers.** The grammar labels come from ASL linguists and the emotion
@@ -542,7 +660,6 @@ These parts of the original plan are **not done** and are marked as future work.
 | Avatar preference study | Stimuli and blinding ready; zero raters | Five or more raters, ideally including a Deaf signer |
 | Question marking in the confound audit | Too few clips in this corpus | Running perception over 1,354 further utterance videos already on disk |
 | A validated head-movement instrument | Head shake is visible on the correct axis (0.70–0.76) but short of the 0.80 gate; head nod is weak | A threshold that adapts to each signer, and more than four signers to tune on |
-| Re-running the results that used the wrong-axis head marker | Nine results were computed with it; the isolated-sign audit's head-shake rows and the factorized encoder's frame selection are affected. Both are negative results and stay unclaimed | About an hour of compute, then updating every quoted number |
 | Cross-lingual test on Indian/Nepali sign data | Blocked | Establishing the terms of use of the local data |
 
 ---
@@ -562,6 +679,29 @@ python scripts/make_report_figures.py   # redraws the figures in this README
 Environment: Python 3.12, PyTorch 2.13, MediaPipe 0.10.14, an RTX 3050 (4 GB). The datasets
 are not included; `make readiness` reports what is present and what each missing item blocks.
 The SignStream annotations require a free account with the ASLLRP data portal.
+
+### Running it on another computer, without training anything
+
+For a teammate on Windows or Linux who only wants to run it:
+
+```bash
+python scripts/make_share_bundle.py     # writes dist/SEAM_share.zip, about 23 MB
+```
+
+They extract the zip and follow `START_HERE.md`:
+
+| | Windows | Linux / macOS |
+|---|---|---|
+| Set up once (creates a `.venv`) | `setup_windows.bat` | `./setup_linux.sh` |
+| Start the website | `run_demo.bat` | `./run_demo.sh` |
+| Analyse their own video, offline | `python scripts\analyse_video.py clip.mp4` | `python scripts/analyse_video.py clip.mp4` |
+
+The zip holds the code, the website, MediaPipe's model files, our three trained emotion
+models with their ONNX exports, and every result file, so nothing has to be trained or
+downloaded apart from the Python packages. It never contains dataset video, the SignStream
+annotation files or the SMPL-X body model. The animated avatar clips contain that model's
+mesh, so they go in only with `--with-avatar`, for someone who holds the SMPL-X licence too;
+without them the avatar section shows rendered frames.
 
 ---
 

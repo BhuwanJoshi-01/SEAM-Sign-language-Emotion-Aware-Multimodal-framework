@@ -128,43 +128,80 @@ def test_negation_lexicon_is_not_just_this_corpus() -> None:
 # --- head-marker calibration ----------------------------------------------
 
 
-def test_head_oscillation_requires_large_amplitude_reversals() -> None:
-    """A shake is several large deflections, not one sign change.
-
-    The old test counted sign changes anywhere in the clip, so a single wobble
-    licensed every noisy turning point and head_shake fired on 98% of clips.
-    """
+def test_head_oscillation_ignores_jitter_and_single_turns() -> None:
+    """A shake goes there and back with real energy; jitter and one turn do neither."""
     from seam.features import markers as VM
 
     fps = 25.0
     th = VM.MarkerThresholds()
-    t = np.arange(0, 2.0, 1 / fps)
+    t = np.arange(0, 3.0, 1 / fps)
 
-    # Small-amplitude jitter: many sign changes, none reaching head_angle.
-    jitter = 0.05 * np.sin(2 * np.pi * 9 * t) + 0.02 * np.random.default_rng(0).normal(
-        0, 0.01, t.size
-    )
-    assert not VM._oscillation(jitter, fps, th).any(), "tracking jitter must not read as a shake"
+    # Tracking jitter: fast, about three degrees wide.
+    jitter = 0.05 * np.sin(2 * np.pi * 9 * t)
+    assert not VM._oscillation(jitter, fps, th.shake_rms_deg, th).any()
 
-    # A real shake: repeated large-amplitude direction reversals.
+    # One turn of the head and a hold: energy while it moves, no reversal.
+    turn = np.where(t < 1.0, 0.0, np.minimum((t - 1.0) * 2.0, 0.5))
+    assert not VM._oscillation(turn, fps, th.shake_rms_deg, th).any()
+
+    # A real shake.
     big = 0.5 * np.sin(2 * np.pi * 2.5 * t)
-    assert VM._oscillation(big, fps, th).any(), "a real shake must be detected"
+    out = VM._oscillation(big, fps, th.shake_rms_deg, th)
+    assert out.any(), "a real shake must be detected"
+    assert out[:2].max() == 0.0, "causal: nothing can fire before the head has moved"
 
 
-def test_head_angle_is_used_as_documented_not_halved() -> None:
-    """The field documents ~20 degrees; the code previously used half of it.
+def test_a_small_conversational_shake_is_detected() -> None:
+    """The old rule wanted 20 degrees of displacement; fluent signers shake by a few.
 
-    A threshold of 10 degrees is inside the tracking jitter of a 256x256 face, so
-    this pins the documented value rather than the accidental one.
+    Seven degrees each way at 2 Hz fires at the validated threshold and does not at a
+    threshold set clearly above it, so the threshold is what decides.
     """
     from seam.features import markers as VM
 
     fps = 25.0
-    t = np.arange(0, 2.0, 1 / fps)
-    # Amplitude 0.3 rad: above the halved threshold (0.175), below 0.35.
-    mid = 0.3 * np.sin(2 * np.pi * 2.5 * t)
-    assert not VM._oscillation(mid, fps, VM.MarkerThresholds()).any()
-    assert VM._oscillation(mid, fps, VM.MarkerThresholds(head_angle=0.175)).any()
+    t = np.arange(0, 3.0, 1 / fps)
+    small = np.radians(7.0) * np.sin(2 * np.pi * 2.0 * t)
+    th = VM.MarkerThresholds()
+    out = VM._oscillation(small, fps, th.shake_rms_deg, th)
+    assert out.any()
+    assert np.degrees(out.max()) == pytest.approx(2.7, abs=0.5), "evidence is the RMS, in radians"
+    assert not VM._oscillation(small, fps, 4.0, th).any()
+
+
+def test_head_thresholds_are_the_ones_the_validation_checked() -> None:
+    """The shipped head detector is fixed in this module and audited by the validation.
+
+    Its constants are not re-chosen on every run: several members of the grid score within
+    a few thousandths of each other, and which one is best flips between two extractions
+    of the same videos. So the artifact reports on the shipped member, and this holds two
+    things: its threshold still sits at the false-alarm quantile it was set at, and no
+    other member of the grid is materially better.
+    """
+    import json
+    from pathlib import Path
+
+    from seam.features import markers as VM
+
+    path = Path(__file__).resolve().parents[1] / "artifacts" / "m3" / "marker_validation.json"
+    if not path.is_file():
+        pytest.skip("marker_validation.json not built")
+    markers = json.loads(path.read_text())["markers"]
+    th = VM.MarkerThresholds()
+    for name, constant in (("head_shake", th.shake_rms_deg), ("head_nod", th.nod_rms_deg)):
+        row = markers[name]["shipped_in_page"]
+        assert row["threshold_deg_rms"] == constant
+        assert row["threshold_at_false_alarm_target_now"] == pytest.approx(constant, abs=0.1)
+        assert (row["fast_s"], row["slow_s"], row["hold_s"]) == (
+            VM.HEAD_FAST_S,
+            VM.HEAD_SLOW_S,
+            VM.HEAD_HOLD_S,
+        )
+        assert (row["swing_min_deg"], row["swing_reversals"]) == (th.swing_deg, th.min_reversals)
+        best = row["best_member_on_all_signers"]["mean_within_clip_auc"]
+        assert best - row["mean_within_clip_auc_all_signers"] <= 0.01, (
+            f"{name}: a different member of the grid is now clearly better than the shipped one"
+        )
 
 
 # --- the duration confound -------------------------------------------------

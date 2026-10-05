@@ -342,7 +342,8 @@ LIVE_AXES = {"head_shake": (HM.TURN, HM.NOD), "head_nod": (HM.NOD, HM.TURN)}
 #: *event* also needs the swing gate below, which removes most of those false alarms.
 LIVE_FALSE_ALARM = 0.25
 #: The event needs the angle to have gone there and back: this many reversals of this size.
-SWING_MIN_DEG, SWING_REVERSALS = 2.0, 2
+SWING_MIN_DEG = VM.DEFAULT_THRESHOLDS.swing_deg
+SWING_REVERSALS = VM.DEFAULT_THRESHOLDS.min_reversals
 
 
 def live_name(params: dict[str, float]) -> str:
@@ -531,19 +532,39 @@ def verdict(within_clip: dict[str, float]) -> str:
     return "not validated"
 
 
+#: The constants the live page and `seam.features.markers` both run. Read from the module,
+#: never retyped here, so this script reports on the detector that is actually deployed.
+DEPLOYED = {"contrast": 0.0, "slow_s": VM.HEAD_SLOW_S, "hold_s": VM.HEAD_HOLD_S}
+DEPLOYED_THRESHOLD = {
+    "head_shake": VM.DEFAULT_THRESHOLDS.shake_rms_deg,
+    "head_nod": VM.DEFAULT_THRESHOLDS.nod_rms_deg,
+}
+
+
 def revised_summary(
     clips: list[dict], folds: dict[str, dict], signers: list[str], marker: str
 ) -> dict[str, object]:
-    """Held-out scores of the revised page detector, and the setting the page ships.
+    """Held-out scores of the revised page detector, and a check on the one that ships.
 
-    The held-out rows are what is claimed. The shipped setting is the same choice made on
-    all four signers, as is usual once the evaluation is over; it is never scored on them.
+    The held-out rows are what is claimed: in each fold the detector's constants and its
+    threshold come from the other three signers. What ships is one fixed member of the
+    same grid, the same in the page and in `seam.features.markers`. Several members score
+    within a few thousandths of each other, and which is best flips between two extraction
+    runs of the same videos, so the shipped constants are fixed and checked rather than
+    re-chosen: this block reports how far the shipped member is from the best one, and how
+    far its threshold is from the quantile it was set at. Tests hold both to a tolerance.
     """
     if marker not in LIVE_AXES:
         return {}
     within = {f: folds[f]["revised_page_detector"]["auc_within_clip"] for f in signers}
     family = live_family(marker)
-    name = choose_candidate(clips, marker, family)
+    best = choose_candidate(clips, marker, family)
+    shipped = live_name(DEPLOYED)
+    signal = family[shipped]
+    by_fold = {
+        f: round(mean_within_clip([c for c in clips if c["signer"] == f], marker, signal), 4)
+        for f in signers
+    }
     return {
         "revised_page_within_clip_auc_by_fold": within,
         "verdict_revised_page": verdict(within),
@@ -551,14 +572,27 @@ def revised_summary(
             f: folds[f]["revised_page_detector"]["chosen_on_training_signers"] for f in signers
         },
         "shipped_in_page": {
-            "name": name,
-            **LIVE_PARAMS[name],
-            "fast_s": 0.08,
-            "threshold_deg_rms": round(threshold_at_false_alarm(clips, marker, family[name]), 2),
+            "name": shipped,
+            **DEPLOYED,
+            "fast_s": VM.HEAD_FAST_S,
+            "threshold_deg_rms": DEPLOYED_THRESHOLD[marker],
+            "threshold_at_false_alarm_target_now": round(
+                threshold_at_false_alarm(clips, marker, signal), 2
+            ),
             "false_alarm_target": LIVE_FALSE_ALARM,
-            "swing_min_deg": SWING_MIN_DEG,
-            "swing_reversals": SWING_REVERSALS,
-            "note": "chosen on all four signers for deployment; not a held-out result",
+            "swing_min_deg": VM.DEFAULT_THRESHOLDS.swing_deg,
+            "swing_reversals": VM.DEFAULT_THRESHOLDS.min_reversals,
+            "within_clip_auc_by_signer": by_fold,
+            "mean_within_clip_auc_all_signers": round(mean_within_clip(clips, marker, signal), 4),
+            "best_member_on_all_signers": {
+                "name": best,
+                "mean_within_clip_auc": round(mean_within_clip(clips, marker, family[best]), 4),
+            },
+            "operating_point_all_signers": operating_point(
+                clips, marker, signal, DEPLOYED_THRESHOLD[marker]
+            ),
+            "note": "fixed constants, chosen on all four signers on 2026-10-05, so its own "
+            "scores here are not held-out results; revised_page_within_clip_auc_by_fold is",
         },
     }
 

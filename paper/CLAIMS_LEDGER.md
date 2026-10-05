@@ -227,3 +227,39 @@ signs, and the frame selection and heuristic labels of M4, used a head-tilt sign
 head-shake signal was intended. Both results are negative and neither is claimed; both are
 to be re-run with the corrected marker before being quoted. C1 on continuous signing used
 human markers and stands as recorded.
+
+
+### Same day, sixth update — two defects corrected and everything re-run
+
+Two defects in code every result loads were corrected together: the perception stack filed
+one hand in both hand slots (`artifacts/m3/hand_slots.json`), and `seam.features.markers`
+read a head tilt for head shake and a head turn for head nod. The open defect recorded in
+the fifth update is closed. All stamped artifacts were re-run on re-extracted landmarks; the
+previous files are under `artifacts/superseded/one_hand_wrong_axis_2026-10-05/`.
+
+**New supporting claim, measured and surviving its controls.** Negated clips carry more
+head shake, and the corrected marker measures it: a head shake is detected in
+25 of 27 negated clips and 80 of 173 others; the registered permutation test gives a
+standardised difference of 0.968 with p = 0.00015 (0.00045 after correction over
+the three registered pairings). The linguists' own head-shake marks show the same pattern,
+the nod axis does not, and it holds inside each signer with negated clips
+(`artifacts/audit/negation_head_shake_check.json`). Scope: four signers, 27 negated clips,
+a marker whose thresholds were set on this corpus. This replaces, on corrected code, the
+association that was withdrawn when the yaw decomposition was found to be wrong.
+
+**C1, revised from "no support".** On isolated signs the head-shake row now has data, and
+two of three emotion models read head-shake windows as more negative (a shift of
+0.0172 in negative mass in the first, from 14 matched pairs over 12 clips). That meets K1's
+stated criterion for that one marker. On continuous signing with human marks, re-scored on
+the re-extracted faces, no marker meets the registered rule, head shake included. C1 is
+therefore neither refuted nor confirmed: one marker, one corpus, twelve clips, and a face
+turned from the camera as a competing explanation. No brow marker supports it anywhere.
+
+**Unchanged by the re-run.** Brow raise validated; brow furrow and head nod not; the
+frame-level head-shake read-out visible and not validated; M4 refuted in every seed and
+variant; gloss recognition at its baseline, now also with both hands' shape as input.
+
+**Not re-measured.** K5 and K6 were measured with two one-hand graphs running. The pipeline
+now runs one graph that finds two hands. The benchmark refuses to run without the CPU
+governor set, which needs an administrator, so those figures describe the earlier graph
+layout and are flagged as such wherever they are quoted.

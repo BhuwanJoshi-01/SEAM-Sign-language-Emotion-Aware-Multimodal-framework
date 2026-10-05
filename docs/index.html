@@ -96,6 +96,23 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .legend{display:flex;gap:14px;flex-wrap:wrap;padding:8px 16px 14px;font-size:12px;color:var(--ink-2)}
 .legend i{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:6px;vertical-align:middle}
 
+/* 3D avatar viewer */
+.avgrid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:14px;align-items:start}
+@media (max-width:900px){.avgrid{grid-template-columns:1fr}}
+.stage3d{position:relative;aspect-ratio:4/3;border-radius:calc(var(--r) - 1px) calc(var(--r) - 1px) 0 0;overflow:hidden;
+  background:radial-gradient(120% 90% at 50% 18%,#1a2a4a 0%,#0b1322 55%,#04070d 100%)}
+.stage3d canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab;touch-action:none}
+.stage3d canvas:active{cursor:grabbing}
+.stage3d img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#4a515c}
+.stage3d .msg{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);font-family:var(--mono);font-size:12px;letter-spacing:.06em;
+  background:rgba(2,6,14,.78);border:1px solid var(--line);padding:6px 12px;border-radius:999px;color:var(--ink-2);white-space:nowrap}
+.clips{display:flex;gap:6px;flex-wrap:wrap}
+.clips button{padding:7px 11px;font-size:13px;font-family:var(--mono);font-weight:500}
+.clips button[aria-pressed="true"]{background:linear-gradient(90deg,rgba(62,230,255,.9),rgba(167,139,250,.9));color:#04121c;border-color:transparent}
+.scrub{flex:1;min-width:120px;accent-color:var(--cyan)}
+.avkv{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:7px 16px;margin:0;font-size:14px}
+.avkv dt{color:var(--ink-3)} .avkv dd{margin:0;font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--ink)}
+
 /* channel cards */
 .stack{display:grid;gap:14px}
 .meter{display:grid;grid-template-columns:118px 1fr 52px;align-items:center;gap:10px;margin:9px 0}
@@ -145,6 +162,8 @@ table.res tr:last-child td{border-bottom:0}
 .scroll{overflow-x:auto}
 footer{padding:28px 0 46px;color:var(--ink-3);font-size:13.5px;border-top:1px solid var(--line)}
 </style>
+<!-- three.js for the 3D avatar viewer. Only requested when the local server has clips to show. -->
+<script type="importmap">{"imports":{"three":"./vendor/three/three.module.js","three/addons/":"./vendor/three/examples/jsm/"}}</script>
 </head>
 <body>
 <header class="top"><div class="wrap">
@@ -218,7 +237,7 @@ footer{padding:28px 0 46px;color:var(--ink-3);font-size:13.5px;border-top:1px so
           <div class="meter" id="mRaise"><label>Brow raise</label><div class="bar"><i></i></div><span class="num">0.00</span></div>
           <div style="margin:-4px 0 6px 128px"><span class="badge ok">validated · AUC 0.82–0.88 vs human annotation</span></div>
           <div class="meter" id="mFurrow"><label>Brow furrow</label><div class="bar violet"><i></i></div><span class="num">0.00</span></div>
-          <div style="margin:-4px 0 6px 128px"><span class="badge warn">not validated · AUC 0.60–0.78</span></div>
+          <div style="margin:-4px 0 6px 128px"><span class="badge warn">not validated · AUC 0.59–0.78</span></div>
           <div class="meter" id="mShake"><label>Head shake</label><div class="bar amber"><i></i></div><span class="num">0.00</span></div>
           <div style="margin:-4px 0 6px 128px"><span class="badge warn" id="bShake">above chance · AUC 0.70–0.76 · gate 0.80</span></div>
           <div class="meter" id="mNod"><label>Head nod</label><div class="bar amber"><i></i></div><span class="num">0.00</span></div>
@@ -234,7 +253,7 @@ footer{padding:28px 0 46px;color:var(--ink-3);font-size:13.5px;border-top:1px so
           <div class="meter" id="mFrown"><label>Frown</label><div class="bar rose"><i></i></div><span class="num">0.00</span></div>
           <div class="meter" id="mWide"><label>Eyes wide</label><div class="bar rose"><i></i></div><span class="num">0.00</span></div>
           <div class="meter" id="mJaw"><label>Jaw open</label><div class="bar rose"><i></i></div><span class="num">0.00</span></div>
-          <p class="note">These are measured expression signals, not an emotion verdict. Our trained affect model did not beat chance (balanced accuracy 0.48–0.51), so SEAM withholds an emotion label rather than show one it cannot support.</p>
+          <p class="note">These are measured expression signals, not an emotion verdict. Our trained affect model did not beat chance (balanced accuracy 0.49–0.51), so SEAM withholds an emotion label rather than show one it cannot support.</p>
         </div>
       </div>
 
@@ -271,13 +290,13 @@ footer{padding:28px 0 46px;color:var(--ink-3);font-size:13.5px;border-top:1px so
     <div class="tile"><b>186 MB</b><span>peak VRAM with six models live, against a 2,500 MB budget</span><small>7% of budget</small></div>
     <div class="tile"><b>0 of 8</b><span>grammatical markers read as more negative by emotion models, under a pre-registered rule</span><small>3 FER models · human markers</small></div>
     <div class="tile"><b>0.71</b><span>worst-fold cross-prediction AUC of the factorized encoder; target was ≤ 0.60</span><small>hypothesis refuted, 3 seeds</small></div>
-    <div class="tile"><b>569</b><span>automated tests, including checks that fail when a result outlives its code</span><small>23 more need a licensed body model</small></div>
-    <div class="tile"><b>20×</b><span>steadier 3D avatar: the jump between frames fell from 0.32–0.62 m to 0.006–0.030 m</span><small>4 clips · depth held, rotations smoothed</small></div>
+    <div class="tile"><b>25 of 27</b><span>negated sentences show a detected head shake, against 80 of 173 others. In ASL a head shake marks negation, and the linguists' own marks agree</span><small>permutation p = 0.00015 · nod axis shows nothing</small></div>
+    <div class="tile"><b>17×</b><span>steadier 3D avatar, at least: the jump between frames fell from 0.32–0.69 m to 0.004–0.035 m</span><small>8 clips · depth held, rotations smoothed</small></div>
   </div>
   <div class="figs">
     <figure><img src="figures/marker_validation.png" alt="Dot plot of within-clip AUC on three held-out signers. Brow raise 0.82 to 0.88, above the 0.80 gate. Brow furrow 0.60 to 0.78. Head shake 0.70 to 0.76 and head nod 0.55 to 0.77 on the corrected axes, with hollow markers at 0.50 showing the earlier wrong-axis reading." loading="lazy"><figcaption><b>One marker holds; two more are now visible.</b> Brow raise clears the 0.80 gate on every held-out signer. Head shake and nod read 0.50 until we found our offline code was measuring the wrong head axis; on the right one they are above chance but short of the gate.</figcaption></figure>
-    <figure><img src="figures/c1_continuous.png" alt="Forest plot of eight markers by three FER models; most intervals cross zero and none is positive in two models after correction." loading="lazy"><figcaption><b>Emotion models did not read grammar as anger.</b> On 200 utterances with human markers, no marker met the rule. Brow furrow leaned the opposite way.</figcaption></figure>
-    <figure><img src="figures/m4_gate.png" alt="Dot plot of worst-fold cross-prediction AUC for five model variants; all dots lie between 0.69 and 0.81, above the 0.60 target." loading="lazy"><figcaption><b>Separation failed.</b> No loss term moved the encoder under the target, in any of three seeds.</figcaption></figure>
+    <figure><img src="figures/c1_continuous.png" alt="Forest plot of eight markers by three FER models; most intervals cross zero and none is positive in two models after correction." loading="lazy"><figcaption><b>On continuous signing, emotion models did not read grammar as anger.</b> On 200 utterances with human markers, no marker met the rule. Brow furrow leaned the opposite way. On isolated signs, head shake did shift two of three models, from 12 clips.</figcaption></figure>
+    <figure><img src="figures/m4_gate.png" alt="Dot plot of worst-fold cross-prediction AUC for five model variants; all dots lie between 0.68 and 0.82, above the 0.60 target." loading="lazy"><figcaption><b>Separation failed.</b> No loss term moved the encoder under the target, in any of three seeds.</figcaption></figure>
     <figure><img src="figures/frame_alignment.png" alt="Line chart: for 24 fps clips alignment AUC peaks at 0.73 near scale 0.82; for 30 fps clips it peaks at 0.81 at scale 1.00." loading="lazy"><figcaption><b>A bug we caught with a measurement.</b> Annotations are on a 30 fps timeline; most clips are 24 fps. Blink labels only line up after rescaling.</figcaption></figure>
   </div>
 </div></section>
@@ -285,16 +304,46 @@ footer{padding:28px 0 46px;color:var(--ink-3);font-size:13.5px;border-top:1px so
 <section class="block" id="avatar"><div class="wrap">
   <div class="eyebrow">Output side</div>
   <h2 class="big">The 3D signing avatar</h2>
-  <p class="sub">The same video can be turned into a full 3D body. SMPLer-X regresses SMPL-X pose (body, 30 finger joints, jaw) for every frame, and we export it as an animated, skinned glTF that any 3D viewer can play.</p>
-  <div class="figs">
-    <figure><img src="figures/avatar_strip.png" alt="Five frames of a grey 3D human body model seated and signing: hands rest on the lap, then the right hand rises to the chin and the left hand opens beside it with the fingers spread." width="1474" height="400"><figcaption><b>Five frames of one utterance.</b> Rendered from the exported animation. No video of the signer is shown or shipped.</figcaption></figure>
-    <div class="tile" style="align-self:start">
-      <b>20× steadier</b>
-      <span>The first version jumped back and forth. The cause was the regressor's depth estimate, which is noise from one frame to the next: the body moved 0.32 to 0.62 m per frame. Holding depth still and smoothing every joint rotation on the sphere brings that to 0.006 to 0.030 m, and halves finger jitter.</span>
-      <small>4 clips · measured before and after in the demo manifest</small>
-      <p style="margin:14px 0 0"><a class="btn" id="avatarOpen" href="avatar" hidden>Open the interactive 3D viewer</a></p>
-      <p class="note" id="avatarNote" style="margin-top:12px">The interactive viewer runs on the local server (<code>make demo-avatar</code>, then <code>make serve</code>). It is not hosted here because the SMPL-X body model is licensed and may not be redistributed.</p>
+  <p class="sub">The same video can be turned into a full 3D body. SMPLer-X regresses the body for every frame, MediaPipe's hand model supplies the fingers and wrists, and the result is exported as an animated, skinned glTF that any 3D viewer can play.</p>
+  <div class="avgrid">
+    <div class="panel stage">
+      <div class="stage3d" id="stage3d">
+        <img id="avStill" src="figures/avatar_strip.png" alt="Five frames of a grey 3D human body model seated and signing: hands rest on the lap, then the right hand rises to the chin and the left hand opens beside it with the fingers spread." width="1474" height="400">
+        <canvas id="av3d" hidden aria-label="Interactive 3D avatar. Drag to orbit, scroll to zoom."></canvas>
+        <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
+        <div class="hud" id="avHud" hidden><span>clip <b id="avClipName">–</b></span><span>frame <b id="avFrame">0</b></span><span>hands <b id="avHands">–</b></span></div>
+        <div class="msg" id="avMsg" hidden>loading the 3D viewer…</div>
+      </div>
+      <div class="controls" id="avControls" hidden>
+        <button class="primary" id="avPlay" type="button">Pause</button>
+        <input class="scrub" id="avScrub" type="range" min="0" max="1000" value="0" aria-label="Position in the clip">
+        <label class="toggle"><input type="checkbox" id="avSlow"> Half speed</label>
+        <label class="toggle"><input type="checkbox" id="avSkel"> Skeleton</label>
+        <button id="avReset" type="button">Reset view</button>
+      </div>
+      <div class="controls" id="avClipRow" hidden><span style="font-size:13px;color:var(--ink-3)">Utterance</span><div class="clips" id="avClips"></div></div>
     </div>
+    <aside class="stack">
+      <div class="panel">
+        <div class="hd"><h2>This clip</h2><span class="badge" id="avBadge">rendered frames</span></div>
+        <div class="bd">
+          <dl class="avkv" id="avStats">
+            <dt>Shown here</dt><dd>five frames of one utterance</dd>
+          </dl>
+          <p class="note" id="avatarNote" style="margin-top:12px">The interactive viewer runs on the local server (<code>make demo-avatar</code>, then <code>make serve</code>). It is not hosted here because the SMPL-X body model is licensed and may not be redistributed. No video of the signer is shown or shipped.</p>
+        </div>
+      </div>
+      <div class="tile">
+        <b>Hands that sign</b>
+        <span>A whole-body model sees a hand as a few dozen pixels, and its fingers barely move: 12 to 24 degrees over a clip. We solve the fingers and the wrist from MediaPipe's 21 hand points instead, joint by joint, and the same hands then open and close through 44 to 76 degrees.</span>
+        <small id="avHandsNote">measured on 8 clips · each hand tracked in 80 to 99% of frames</small>
+      </div>
+      <div class="tile">
+        <b>17× steadier</b>
+        <span>The first version jumped back and forth. The cause was the regressor's depth estimate, which is noise from one frame to the next: the body moved 0.32 to 0.69 m per frame. Holding depth still and smoothing every joint rotation on the sphere brings that to 0.004 to 0.035 m, at least 17 times less on every clip.</span>
+        <small>measured before and after in the demo manifest</small>
+      </div>
+    </aside>
   </div>
 </div></section>
 
@@ -319,14 +368,15 @@ footer{padding:28px 0 46px;color:var(--ink-3);font-size:13.5px;border-top:1px so
     <thead><tr><th>Component</th><th>State</th><th>Evidence</th></tr></thead>
     <tbody>
       <tr><td>Real-time perception</td><td><span class="badge ok">works</span></td><td>41.8 ms median, 73.2 ms p95, 19.7–20.4 FPS on an RTX 3050 (4 GB)</td></tr>
-      <tr><td>Brow-raise marker</td><td><span class="badge ok">validated</span></td><td>Within-clip AUC 0.838 / 0.822 / 0.878 on three held-out signers</td></tr>
-      <tr><td>Brow furrow</td><td><span class="badge warn">not validated</span></td><td>0.599 / 0.717 / 0.780: two signers pass 0.70, one does not, and none of six other brow signals fixed it</td></tr>
+      <tr><td>Brow-raise marker</td><td><span class="badge ok">validated</span></td><td>Within-clip AUC 0.837 / 0.822 / 0.878 on three held-out signers</td></tr>
+      <tr><td>Brow furrow</td><td><span class="badge warn">not validated</span></td><td>0.595 / 0.717 / 0.780: two signers pass 0.70, one does not, and none of six other brow signals fixed it</td></tr>
       <tr><td>Head shake</td><td><span class="badge warn">above chance</span></td><td id="eShake">0.757 / 0.702 / 0.696 on the corrected axis, against 0.50 before; short of the 0.80 gate</td></tr>
-      <tr><td>Head nod</td><td><span class="badge warn">weak</span></td><td id="eNod">0.592 / 0.767 / 0.549; readable for one signer only</td></tr>
-      <tr><td>"Emotion models misread grammar"</td><td><span class="badge bad">not supported</span></td><td>Tested on isolated signs and on continuous signing; no marker met the rule</td></tr>
-      <tr><td>Grammar / affect factorized encoder</td><td><span class="badge bad">refuted</span></td><td>Worst-fold cross-AUC 0.694–0.726 against a target of 0.60</td></tr>
-      <tr><td>Gloss recognition</td><td><span class="badge bad">at baseline</span></td><td>WER 0.920 equals always predicting the most frequent gloss, on 200 utterances</td></tr>
-      <tr><td>Expressive 3D avatar</td><td><span class="badge ok">works offline</span></td><td>SMPL-X body and fingers from video, exported as animated glTF; frame-to-frame jump cut from 0.32–0.62 m to 0.006–0.030 m. No human rating study yet</td></tr>
+      <tr><td>Head nod</td><td><span class="badge warn">weak</span></td><td id="eNod">0.590 / 0.767 / 0.549; readable for one signer only</td></tr>
+      <tr><td>Negation shows up as a head shake</td><td><span class="badge ok">measured</span></td><td>Detected in 25 of 27 negated clips and 80 of 173 others; linguists mark one in 20 of 27 and 69 of 173. Four signers</td></tr>
+      <tr><td>"Emotion models misread grammar"</td><td><span class="badge warn">one marker, small sample</span></td><td>Isolated signs: head-shake windows read as more negative by 2 of 3 models, on 12 clips. Continuous signing with human markers: no marker met the pre-registered rule</td></tr>
+      <tr><td>Grammar / affect factorized encoder</td><td><span class="badge bad">refuted</span></td><td>Worst-fold cross-AUC 0.705–0.758 against a target of 0.60</td></tr>
+      <tr><td>Gloss recognition</td><td><span class="badge bad">at baseline</span></td><td>WER 0.920 from the body and 0.922 with both hands added, against 0.920 for always predicting the most frequent gloss. About three examples per gloss</td></tr>
+      <tr><td>Expressive 3D avatar</td><td><span class="badge ok">works offline</span></td><td>SMPL-X body and fingers from video, exported as animated glTF; frame-to-frame jump cut from 0.32–0.69 m to 0.004–0.035 m; fingers and wrists solved from MediaPipe hand points. No human rating study yet</td></tr>
       <tr><td>Sign-to-English translation, emotion-styled text</td><td><span class="badge">future work</span></td><td>Data is prepared (35,176 How2Sign sentences); not trained</td></tr>
     </tbody>
   </table></div>
@@ -334,7 +384,7 @@ footer{padding:28px 0 46px;color:var(--ink-3);font-size:13.5px;border-top:1px so
 </div></section>
 </main>
 
-<footer><div class="wrap">SEAM · computer-vision course project · code, tests and the full experiment log are in the <a href="https://github.com/BhuwanJoshi-01/SEAM-Sign-language-Emotion-Aware-Multimodal-framework">repository</a>. Built on MediaPipe Tasks.</div></footer>
+<footer><div class="wrap">SEAM · computer-vision course project · 598 automated tests · code, tests and the full experiment log are in the <a href="https://github.com/BhuwanJoshi-01/SEAM-Sign-language-Emotion-Aware-Multimodal-framework">repository</a>. Built on MediaPipe Tasks.</div></footer>
 
 <script type="module">
 const $ = (id) => document.getElementById(id);
@@ -678,14 +728,138 @@ const auto = new URLSearchParams(location.search);
 if (auto.get("skeleton") === "1") { $("tPrivacy").checked = true; $("viewport").classList.add("privacy"); }
 if (auto.get("autostart") === "camera") begin("camera");
 
-// The interactive 3D viewer exists only where the local server is: the body model is
-// licensed and cannot be hosted. Where it is there, the nav link goes straight to it; where
-// it is not, this request fails quietly and the avatar section explains why.
+// ── 3D avatar viewer ─────────────────────────────────────────────────────────
+// The animated body exists only where the local server is: the body model is licensed and
+// cannot be hosted. Where the server answers, three.js is loaded and the viewer replaces the
+// still frames; where it does not, this request fails quietly and the stills stay.
+const av = { loaded: 0, clip: null, error: null, duration: 0, bones: 0, ready: false };
+window.__avatar = av;   // read by the automated smoke test
+
+async function startAvatar(manifest) {
+  const clips = (manifest.clips || []).filter((c) => c.arm_a_smplerx && !c.arm_a_smplerx.error && c.arm_a_smplerx.glb);
+  if (!clips.length) return;
+  const msg = $("avMsg"); msg.hidden = false;
+  let THREE, OrbitControls, GLTFLoader;
+  try {
+    THREE = await import("three");
+    ({ OrbitControls } = await import("three/addons/controls/OrbitControls.js"));
+    ({ GLTFLoader } = await import("three/addons/loaders/GLTFLoader.js"));
+  } catch (e) { av.error = "three.js did not load: " + e.message; msg.textContent = "3D viewer unavailable in this browser"; return; }
+
+  const canvas = $("av3d"), stage = $("stage3d");
+  let renderer;
+  try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true }); }
+  catch (e) { av.error = "WebGL unavailable: " + e.message; msg.textContent = "this browser has no WebGL; showing rendered frames"; return; }
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(30, 4 / 3, 0.05, 60);
+  const controls = new OrbitControls(camera, canvas);
+  controls.enableDamping = true; controls.enablePan = false; controls.minDistance = 0.8; controls.maxDistance = 6;
+  const hemi = new THREE.HemisphereLight(0xdfeaff, 0x0a1020, 1.25);
+  const key = new THREE.DirectionalLight(0xffffff, 1.9); key.position.set(1.4, 2.6, 3.2);
+  const rim = new THREE.DirectionalLight(0x3ee6ff, 1.1); rim.position.set(-2.2, 1.6, -2.6);
+  const skin = new THREE.MeshStandardMaterial({ color: 0xd5deee, roughness: 0.62, metalness: 0.04 });
+  const floor = new THREE.GridHelper(4, 24, 0x3ee6ff, 0x1c2c4a); floor.material.transparent = true; floor.material.opacity = 0.35;
+
+  const fit = () => { const w = stage.clientWidth, h = stage.clientHeight; if (!w || !h) return; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); };
+  new ResizeObserver(fit).observe(stage); fit();
+
+  const loader = new GLTFLoader();
+  let mixer = null, action = null, clip = null, root = null, helper = null, home = null, playing = true, visible = true, scrubbing = false;
+  const fps = (manifest.render && manifest.render.fps) || 24;
+
+  function frame(model) {
+    // Frame the signing space from the skeleton as posed now, not from the bind pose.
+    const box = new THREE.Box3(), p = new THREE.Vector3();
+    model.traverse((o) => { if (o.isBone) box.expandByPoint(o.getWorldPosition(p)); });
+    if (box.isEmpty()) box.setFromObject(model);
+    const height = Math.max(box.max.y - box.min.y, 0.6);
+    // Signing happens between the waist and the top of the head, so that is what is framed.
+    const target = new THREE.Vector3((box.min.x + box.max.x) / 2, box.min.y + height * 0.72, (box.min.z + box.max.z) / 2);
+    const dist = (height * 0.56) / Math.tan((camera.fov * Math.PI) / 360);
+    home = { target, pos: new THREE.Vector3(target.x + dist * 0.16, target.y + height * 0.04, target.z + dist) };
+    floor.position.set(target.x, box.min.y - 0.02, target.z);
+    resetView();
+  }
+  function resetView() { if (!home) return; controls.target.copy(home.target); camera.position.copy(home.pos); controls.update(); }
+
+  function describe(c) {
+    const a = c.arm_a_smplerx, h = a.hands || {}, st = a.stabilised || {};
+    const pct = (x) => (x == null ? "–" : Math.round(x * 100) + "%");
+    const tr = h.tracked_fraction || {};
+    const bend = (side) => (h[side] ? `${h[side].finger_bend_range_over_clip_deg_regressor}° → ${h[side].finger_bend_range_over_clip_deg_solved}°` : "–");
+    const rows = [
+      ["Utterance", c.utterance_id],
+      ["Length", `${a.frames} frames · ${(a.frames / fps).toFixed(1)} s`],
+      ["Skeleton", a.glb_check ? `${a.glb_check.channels / 2 | 0} joints, ${a.glb_check.keyframes} keyframes` : "55 joints"],
+      ["Hands tracked", `left ${pct(tr.left)} · right ${pct(tr.right)}`],
+      ["Finger range, left", bend("left")],
+      ["Finger range, right", bend("right")],
+      ["Jump per frame", st.frame_to_frame_before ? `${st.frame_to_frame_before.root_m.toFixed(2)} m → ${st.frame_to_frame_after.root_m.toFixed(3)} m` : "–"],
+    ];
+    $("avStats").innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
+    $("avHands").textContent = h.tracked_fraction ? "MediaPipe · solved" : "regressor";
+  }
+
+  async function load(c) {
+    msg.hidden = false; msg.textContent = "loading clip " + c.utterance_id + "…";
+    for (const b of $("avClips").children) b.setAttribute("aria-pressed", String(b.dataset.id === c.utterance_id));
+    let gltf;
+    try { gltf = await loader.loadAsync("api/demo/" + c.arm_a_smplerx.glb); }
+    catch (e) { av.error = `clip ${c.utterance_id}: ${e.message || e}`; msg.textContent = "could not load clip " + c.utterance_id; return false; }
+    if (mixer) { mixer.stopAllAction(); mixer.uncacheRoot(root); }
+    scene.clear(); scene.add(hemi, key, rim, floor);
+    root = gltf.scene; clip = gltf.animations[0];
+    if (!clip) { av.error = `clip ${c.utterance_id} has no animation`; msg.textContent = "that clip has no animation"; return false; }
+    let bones = 0;
+    root.traverse((o) => { if (o.isMesh) { o.material = skin; o.frustumCulled = false; } if (o.isBone) bones++; });
+    // The mixer's root must be the scene just loaded, and the pose must be applied before
+    // anything is measured: the bind pose is a T-pose a fraction of the posed body's size.
+    mixer = new THREE.AnimationMixer(root); action = mixer.clipAction(clip); action.play(); mixer.update(0);
+    root.updateMatrixWorld(true);
+    scene.add(root);
+    helper = new THREE.SkeletonHelper(root); helper.visible = $("avSkel").checked; scene.add(helper);
+    skin.transparent = helper.visible; skin.opacity = helper.visible ? 0.35 : 1;
+    frame(root); describe(c);
+    $("avClipName").textContent = c.utterance_id;
+    av.clip = c.utterance_id; av.duration = clip.duration; av.bones = bones; av.loaded += 1; av.error = null;
+    msg.hidden = true; return true;
+  }
+
+  // Controls
+  $("avClips").innerHTML = clips.map((c, i) => `<button type="button" data-id="${c.utterance_id}" aria-pressed="false" title="utterance ${c.utterance_id}">${String(i + 1).padStart(2, "0")}</button>`).join("");
+  $("avClips").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) load(clips.find((c) => c.utterance_id === b.dataset.id)); });
+  $("avPlay").onclick = () => { playing = !playing; $("avPlay").textContent = playing ? "Pause" : "Play"; };
+  $("avReset").onclick = resetView;
+  $("avSkel").onchange = (e) => { if (helper) helper.visible = e.target.checked; skin.transparent = e.target.checked; skin.opacity = e.target.checked ? 0.35 : 1; skin.needsUpdate = true; };
+  const scrub = $("avScrub");
+  scrub.oninput = () => { scrubbing = true; if (mixer && clip) { mixer.setTime((scrub.value / 1000) * clip.duration); } };
+  scrub.onchange = () => { scrubbing = false; };
+  new IntersectionObserver((es) => { visible = es[0].isIntersecting; }, { threshold: 0.05 }).observe(stage);
+
+  $("avStill").hidden = true; canvas.hidden = false; $("avHud").hidden = false; $("avControls").hidden = false; $("avClipRow").hidden = false;
+  $("avBadge").textContent = `${clips.length} utterances`; $("avBadge").classList.add("ok");
+  $("avatarNote").textContent = "Drag to orbit, scroll to zoom. The body comes from SMPLer-X and the hands from MediaPipe. No video of the signer is shown or shipped; the viewer is not hosted publicly because the SMPL-X body model is licensed.";
+  fit();
+  av.ready = await load(clips[0]);
+  av.clips = clips.map((c) => c.utterance_id);
+  av.load = (id) => load(clips.find((c) => c.utterance_id === id));   // lets the smoke test try every clip
+
+  const clock = new THREE.Clock();
+  (function tick() {
+    requestAnimationFrame(tick);
+    const dt = Math.min(clock.getDelta(), 0.1);
+    if (!visible) return;
+    if (mixer && playing && !scrubbing) mixer.update(dt * ($("avSlow").checked ? 0.5 : 1));
+    if (mixer && clip && !scrubbing) { const t = action.time % clip.duration; scrub.value = Math.round((t / clip.duration) * 1000); $("avFrame").textContent = String(Math.round(t * fps)).padStart(3, "0"); }
+    controls.update(); renderer.render(scene, camera);
+  })();
+}
+
 fetch("api/demo/manifest", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((m) => {
-  if (!m || !(m.clips || []).length) return;
-  $("avatarOpen").hidden = false; $("navAvatar").href = "avatar";
-  $("avatarNote").textContent = "Running on the local server: the viewer plays the skinned glTF with orbit controls, " + m.clips.length + " clips.";
-}).catch(() => {});
+  if (m && (m.clips || []).length) return startAvatar(m);
+}).catch((e) => { av.error = String(e); });
 </script>
 </body>
 </html>

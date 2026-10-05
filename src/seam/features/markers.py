@@ -31,12 +31,27 @@ stated rather than papered over.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
+from seam.features.head_motion import (
+    BROWSER_FULL_SCALE,
+    NOD,
+    TILT,
+    TURN,
+    head_angles,
+    live_band_rms,
+    reversal_score,
+)
 from seam.perception.tasks_api import BLENDSHAPE_INDEX
+
+#: The three averaging times of the head detector, in seconds: the member of the declared
+#: grid that `scripts/validate_markers.py` chose. The live page uses the same three.
+HEAD_FAST_S, HEAD_SLOW_S, HEAD_HOLD_S = 0.08, 0.4, 0.4
 
 # ---------------------------------------------------------------------------
 # Coefficient groupings
@@ -124,15 +139,13 @@ MARKERS = (
 #: path and nothing else.
 #:
 #: Source: ``paper/EXPERIMENT_LOG.md`` entries 27 (prevalence) and 61 (blind), plus the
-#: re-measurement after the yaw fix.
-MEASURED_DEGENERACY: dict[str, dict[str, object]] = {
-    "brow_raise": {"prevalence": 0.855, "zero_fraction": 0.145, "state": "degenerate"},
-    "brow_furrow": {"prevalence": 0.540, "zero_fraction": 0.460, "state": "usable"},
-    "mouth_morpheme": {"prevalence": 0.950, "zero_fraction": 0.050, "state": "degenerate"},
-    "head_shake": {"prevalence": 0.100, "zero_fraction": 0.900, "state": "blind"},
-    "head_nod": {"prevalence": 0.170, "zero_fraction": 0.830, "state": "blind"},
-    "mouth_positive": {"prevalence": 0.905, "zero_fraction": 0.095, "state": "degenerate"},
-}
+#: re-measurements after the yaw fix and after the head-axis fix. The numbers live in
+#: ``marker_census.json`` beside this file, not in this module: a measurement recorded in
+#: the code that produced it changes that code's fingerprint, and every artifact computed
+#: with it would then read as stale for having been measured.
+MEASURED_DEGENERACY: dict[str, dict[str, object]] = json.loads(
+    Path(__file__).with_name("marker_census.json").read_text(encoding="utf-8")
+)["markers"]
 
 #: A marker is blind when no conclusion is available from it. Named as a predicate rather
 #: than re-tested at each call site so the threshold lives with the measurement.
@@ -246,20 +259,29 @@ class MarkerThresholds:
     #: Minimum fraction of frames in a window that must fire for the window to
     #: count as marker-bearing.
     min_window_fraction: float = 0.25
-    #: Head rotation must exceed this many radians to count as a shake/nod.
-    #: ~20 degrees: enough to exclude tracking jitter, small enough to catch a
-    #: real negation beat.
-    head_angle: float = 0.35
-    #: A shake needs at least this many direction reversals in the yaw signal.
+    #: Back-and-forth energy of the head turn, in degrees RMS, above which a shake counts.
+    #: Not a guess: `scripts/validate_markers.py` sets it where frames the annotators did
+    #: not mark exceed it a quarter of the time (``shipped_in_page``), and a test holds
+    #: this number to that artifact. The earlier rule asked for 20 degrees of displacement,
+    #: which a fluent signer's head shake, a few degrees wide, never reaches.
+    shake_rms_deg: float = 2.44
+    #: The same for the nod axis.
+    nod_rms_deg: float = 3.01
+    #: The angle must also have gone there and back: this many reversals ...
     min_reversals: int = 2
+    #: ... of at least this many degrees each, inside the detector's window. One quick
+    #: turn of the head has energy and no reversal, and is not a shake.
+    swing_deg: float = 2.0
 
     def scaled(self, factor: float) -> MarkerThresholds:
         return MarkerThresholds(
             k=self.k * factor,
             min_spread=self.min_spread,
             min_window_fraction=self.min_window_fraction,
-            head_angle=self.head_angle,
+            shake_rms_deg=self.shake_rms_deg,
+            nod_rms_deg=self.nod_rms_deg,
             min_reversals=self.min_reversals,
+            swing_deg=self.swing_deg,
         )
 
 
@@ -291,82 +313,55 @@ class MarkerSignals:
 
 
 def _euler_from_matrix(rot: np.ndarray) -> np.ndarray:
-    """Extract (roll, pitch, yaw) in radians from (T, 4, 4) transforms.
+    """(roll, pitch, yaw) in radians from (T, 4, 4) transforms, named for a head.
 
-    MediaPipe's facial transformation matrix maps canonical face space to camera
-    space, so the rotation block is orthonormal and the extraction below is the
-    standard decomposition. The straight-up case, where the pitch solution is
-    singular, is resolved with ``np.where`` rather than an ``if``: the input is a
-    per-frame array, and a scalar branch on it raises rather than degrading.
+    * ``roll`` - the head tilting, ear towards shoulder;
+    * ``pitch`` - the head nodding, chin up or down;
+    * ``yaw`` - the head turning left or right, which is the axis a head shake moves.
+
+    MediaPipe's facial transformation matrix maps canonical face space to camera space.
+    In that space the face looks along z with y up, so the three angles are read from the
+    direction the face points (the third column) and its right-hand direction (the first),
+    by `seam.features.head_motion.head_angles`.
+
+    Two earlier versions of this function were wrong in ways no test of theirs could see.
+    The first read yaw from a pair of entries that are not a rotation-matrix pair for it,
+    and returned 0.0 for any pure yaw. The second was a correct ZYX Euler decomposition
+    with the aerospace names, where the forward axis is x: its "yaw" was a head tilt and
+    its "pitch" a head turn, so `head_shake` measured tilting and `head_nod` measured
+    turning. Both were tested with rotations built in the same convention as the code.
+    The check that settles it involves no rotation matrix at all: the nose moves sideways
+    across the face landmarks when ``yaw`` here changes, and the line through the eyes
+    rotates when ``roll`` does (`scripts/validate_markers.py`, ``axis_check``).
     """
     if rot is None or len(rot) == 0:
         return np.zeros((0, 3), dtype=np.float64)
-    r = np.asarray(rot, dtype=np.float64)[:, :3, :3]
-
-    pitch = np.arcsin(np.clip(-r[:, 2, 0], -1.0, 1.0))
-    cos_pitch = np.cos(pitch)
-    singular = np.abs(cos_pitch) < 1e-6
-
-    roll_normal = np.arctan2(r[:, 2, 1], r[:, 2, 2])
-    # Yaw is atan2(r[1,0], r[0,0]). The previous pair, atan2(r[2,0], r[1,0]), is not a
-    # rotation-matrix entry pair for this angle at all: for a pure yaw of any size it
-    # returned exactly 0.0, and for a pure pitch it returned +/-pi/2. That is the one
-    # component `head_shake` reads, so the marker was measured against a quantity that was
-    # identically zero for precisely the motion it exists to detect, and no test covered
-    # the decomposition - only the downstream markers, which all read zero and so passed.
-    yaw_normal = np.arctan2(r[:, 1, 0], r[:, 0, 0])
-    # At pitch = +/-pi/2, r[1,0] and r[0,0] both vanish, so yaw is recovered from the
-    # column that survives: substituting p = +/-pi/2 into Rz(y)Ry(p)Rx(r) gives
-    # r[0,1] = -sin(yaw) and r[1,1] = cos(yaw) for either sign of p. Roll is genuinely
-    # unrecoverable there and is set to 0 below.
-    yaw_singular = np.arctan2(-r[:, 0, 1], r[:, 1, 1])
-
-    roll = np.where(singular, 0.0, roll_normal)
-    yaw = np.where(singular, yaw_singular, yaw_normal)
-    return np.stack([roll, pitch, yaw], axis=1)
+    angles = np.radians(head_angles(np.asarray(rot, dtype=np.float64)))
+    return np.stack([angles[:, TILT], angles[:, NOD], angles[:, TURN]], axis=1)
 
 
-def _oscillation(signal: np.ndarray, fps: float, thresholds: MarkerThresholds) -> np.ndarray:
-    """Per-frame evidence of a directional oscillation in ``signal``.
+def _oscillation(
+    angle: np.ndarray, fps: float, on_deg: float, thresholds: MarkerThresholds
+) -> np.ndarray:
+    """Per-frame evidence that a head angle (radians) is going back and forth.
 
-    Fires where the signal has moved away from its own running baseline and is
-    heading back, i.e. at the turning points of a shake or a nod. The magnitude
-    is the distance from baseline, so a large-amplitude shake scores higher than
-    a small one.
+    The detector that was scored against human annotation, not a rule of thumb: the RMS of
+    the oscillating part of the angle (`head_motion.live_band_rms`) must reach ``on_deg``,
+    and the angle must have reversed ``min_reversals`` times by ``swing_deg`` inside the
+    window (`head_motion.reversal_score`). Where both hold the evidence is that RMS, in
+    radians; elsewhere it is exactly zero, which is what :func:`fire` reads as "no
+    oscillation". It is causal, so the same code can run on a live stream.
+
+    What this replaces asked for turning points displaced 20 degrees from the clip's
+    median. On the 200 EmoSign clips that fires on almost nothing a linguist marked.
     """
-    if len(signal) < 3 or fps <= 0:
-        return np.zeros(len(signal), dtype=np.float64)
-
-    baseline = float(np.median(signal))
-    centred = signal - baseline
-    derivative = np.gradient(centred) * fps
-
-    # A turning point: derivative sign flip while displaced from baseline.
-    turning = np.zeros(len(signal), dtype=bool)
-    for i in range(1, len(signal) - 1):
-        if (
-            np.sign(derivative[i - 1]) != np.sign(derivative[i + 1])
-            and np.sign(derivative[i - 1]) != 0
-        ):
-            turning[i] = True
-
-    magnitude = np.abs(centred)
-    # Threshold at ``head_angle`` itself, as the field documents (~20 degrees).
-    # The previous code used ``head_angle / 2.0``, so the effective threshold was
-    # 10 degrees - half the stated one - which is well inside the tracking jitter
-    # of a 256x256 face. Measured consequence: head_shake fired on 98% of
-    # EmoSign clips and head_nod on 65%, so neither carried information.
-    active = turning & (magnitude > thresholds.head_angle)
-
-    # Require ``min_reversals`` *large-amplitude* turning points, not merely
-    # ``min_reversals`` sign changes somewhere in the clip. The old test was
-    # clip-global: one qualifying sign change anywhere licensed every noisy
-    # turning point in the clip, so a single wobble anywhere turned the whole
-    # signal into "a shake". An oscillation is several large deflections, so the
-    # count has to be of the same kind of event the detector fires on.
-    if int(active.sum()) < thresholds.min_reversals:
-        return np.zeros(len(signal), dtype=np.float64)
-    return np.where(active, magnitude, 0.0)
+    if len(angle) < 3 or fps <= 0:
+        return np.zeros(len(angle), dtype=np.float64)
+    deg = np.degrees(np.asarray(angle, dtype=np.float64))
+    energy = live_band_rms(deg, fps, fast_s=HEAD_FAST_S, slow_s=HEAD_SLOW_S, hold_s=HEAD_HOLD_S)
+    swing = reversal_score(deg, fps, min_deg=thresholds.swing_deg)
+    swinging = swing >= thresholds.min_reversals / BROWSER_FULL_SCALE - 1e-9
+    return np.where((energy >= on_deg) & swinging, np.radians(energy), 0.0)
 
 
 def signals(
@@ -394,8 +389,8 @@ def signals(
         brow_raise=_mean(bs, BROW_RAISE),
         brow_furrow=_mean(bs, BROW_FURROW),
         mouth_morpheme=_mean(bs, MOUTH_MORPHEME),
-        head_shake=_oscillation(euler[:, 2], fps, thresholds),
-        head_nod=_oscillation(euler[:, 1], fps, thresholds),
+        head_shake=_oscillation(euler[:, 2], fps, thresholds.shake_rms_deg, thresholds),
+        head_nod=_oscillation(euler[:, 1], fps, thresholds.nod_rms_deg, thresholds),
         mouth_positive=_mean(bs, MOUTH_POSITIVE),
     )
 
@@ -522,19 +517,20 @@ def clip_presence(
     out: dict[str, dict[str, float | bool | str]] = {}
     for name in MARKERS:
         x = ev[name]
-        # Per-frame bar, in the units clip_evidence actually returns: radians for
-        # head markers, clip-range fraction for blendshapes.
-        if name in ("head_shake", "head_nod"):
-            bar = thresholds.head_angle
-        else:
-            bar = criteria.min_frame_evidence
+        # Per-frame bar, in the units clip_evidence actually returns. Blendshapes: a
+        # fraction of the clip's own range. Head markers: the detector has already
+        # applied its own threshold and returns exactly zero below it, so any evidence at
+        # all is an active frame and the peak criterion has nothing left to add. (The
+        # earlier bar here was 0.35 rad per frame and a 0.8 rad peak - 46 degrees - which
+        # no head shake reaches, so the clip-level view could not see one.)
+        head = name in ("head_shake", "head_nod")
+        bar = 0.0 if head else criteria.min_frame_evidence
         mask = x > bar
         run = _longest_run(mask)
         peak = float(x.max()) if x.size else 0.0
         coverage = float(mask.mean()) if x.size else 0.0
-        present = bool(
-            run >= need and peak >= criteria.min_peak_mads and coverage >= criteria.min_coverage
-        )
+        peak_ok = peak > 0.0 if head else peak >= criteria.min_peak_mads
+        present = bool(run >= need and peak_ok and coverage >= criteria.min_coverage)
         out[name] = {
             "present": present,
             "run_frames": float(run),
@@ -660,7 +656,9 @@ def describe() -> dict[str, object]:
             "k": DEFAULT_THRESHOLDS.k,
             "min_spread": DEFAULT_THRESHOLDS.min_spread,
             "min_window_fraction": DEFAULT_THRESHOLDS.min_window_fraction,
-            "head_angle_rad": DEFAULT_THRESHOLDS.head_angle,
+            "shake_rms_deg": DEFAULT_THRESHOLDS.shake_rms_deg,
+            "nod_rms_deg": DEFAULT_THRESHOLDS.nod_rms_deg,
+            "swing_deg": DEFAULT_THRESHOLDS.swing_deg,
             "min_reversals": DEFAULT_THRESHOLDS.min_reversals,
             "rule": "score > median + k * MAD, computed per clip",
         },

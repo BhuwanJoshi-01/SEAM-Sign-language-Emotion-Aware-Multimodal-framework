@@ -261,6 +261,12 @@ def test_the_front_page_is_the_standalone_live_demo() -> None:
     assert server.status_code == 200
     assert "api/analyse" in server.text and "tasks-vision" in server.text
 
+    avatar = client.get("/avatar", follow_redirects=False)
+    assert avatar.status_code == 308 and avatar.headers["location"] == "/#avatar"
+    three = client.get("/vendor/three/three.module.js")
+    assert three.status_code == 200 and len(three.content) > 100_000
+    assert client.get("/vendor/three/..%2f..%2fnav.js").status_code in (400, 404)
+
     for route in ("/", "/server", "/avatar"):
         assert (
             f"'{route}'"

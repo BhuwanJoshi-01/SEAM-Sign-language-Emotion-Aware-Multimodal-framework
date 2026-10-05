@@ -26,7 +26,7 @@ export const ROUTES = [
   {
     path: '/avatar',
     title: '3D avatar',
-    what: 'Animated skinned glTF from SMPLer-X, beside the per-clip pipeline measurements. Needs `make demo-avatar` first.',
+    what: 'The interactive 3D viewer, a section of the front page: body from SMPLer-X, hands from MediaPipe, played as animated glTF. Needs `make demo-avatar` first.',
     kind: 'page',
   },
   {

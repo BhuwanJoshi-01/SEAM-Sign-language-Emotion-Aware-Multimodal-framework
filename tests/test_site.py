@@ -31,22 +31,50 @@ def test_the_page_needs_no_server() -> None:
     assert "/static/" not in html
     assert "api/analyse" not in html
     assert html.count("fetch(") == 1 and 'fetch("api/demo/manifest"' in html
-    assert ".catch(() => {})" in html, "the probe must fail without a visible error"
+    probe = html[html.index('fetch("api/demo/manifest"') :]
+    assert ".catch(" in probe.split("</script>")[0], "the probe must fail without a visible error"
 
 
-def test_the_avatar_is_reachable_from_the_nav_and_explained_where_it_cannot_run() -> None:
-    """The user could not find the 3D avatar from the page; it has to be in the nav.
+def test_the_avatar_is_part_of_this_page_and_explained_where_it_cannot_run() -> None:
+    """One site, one design: the 3D viewer is a section of this page, not another page.
 
-    On the hosted page there is no viewer (the body model may not be redistributed), so
-    the link must land on something real: a section with rendered frames and the reason.
+    The viewer needs the animated clips, which only the local server has (the body model
+    may not be redistributed). So the nav link lands on a section that is real either way:
+    rendered frames and the reason on the hosted page, the interactive viewer locally.
     """
     html = PAGE.read_text(encoding="utf-8")
     nav = re.search(r'<nav aria-label="Sections">(.*?)</nav>', html, re.S)
     assert nav and 'href="#avatar"' in nav.group(1) and "3D avatar" in nav.group(1)
     assert '<section class="block" id="avatar">' in html
-    assert 'src="figures/avatar_strip.png"' in html
-    assert 'id="avatarOpen" href="avatar" hidden' in html, "the viewer link starts hidden"
+    assert 'id="avStill" src="figures/avatar_strip.png"' in html, "stills for the hosted page"
+    assert '<canvas id="av3d" hidden' in html, "the viewer starts hidden"
+    assert 'id="avControls" hidden' in html and 'id="avClipRow" hidden' in html
     assert "may not be redistributed" in html
+    assert 'href="avatar"' not in html and "avatar.html" not in html, "no link to a second page"
+
+
+def test_three_js_is_named_beside_the_page_and_only_loaded_on_demand() -> None:
+    """The import map must not point at a CDN or at the server's `/static/`.
+
+    The page is one file that is also hosted where there is no server. Its import map
+    names `./vendor/three/`, which the local server provides, and three.js is imported
+    inside `startAvatar`, which only runs once the manifest request has succeeded.
+    """
+    html = PAGE.read_text(encoding="utf-8")
+    found = re.search(r'<script type="importmap">(.*?)</script>', html, re.S)
+    assert found
+    import json
+
+    imports = json.loads(found.group(1))["imports"]
+    assert imports == {
+        "three": "./vendor/three/three.module.js",
+        "three/addons/": "./vendor/three/examples/jsm/",
+    }
+    assert html.index('type="importmap"') < html.index('<script type="module">')
+    viewer = html[html.index("async function startAvatar") :]
+    assert 'await import("three")' in viewer
+    before = html[: html.index("async function startAvatar")]
+    assert 'import("three' not in before, "three.js must not load on the hosted page"
 
 
 def test_all_three_landmarkers_are_loaded() -> None:
@@ -124,26 +152,31 @@ def test_head_badges_quote_the_detector_the_page_actually_runs() -> None:
         assert quoted in text.group(1), (marker, text.group(1))
 
 
-def test_the_page_runs_the_constants_the_validation_chose() -> None:
-    """A threshold typed into the page and a threshold in the artifact would drift apart."""
+def test_the_page_runs_the_constants_the_validation_checked() -> None:
+    """A threshold typed into the page and one in the Python module would drift apart.
+
+    The page, `seam.features.markers` and the validation artifact must name one detector.
+    """
+    from seam.features import markers as VM
+
     html = PAGE.read_text(encoding="utf-8")
     head = re.search(r"const HEAD = \{([^}]*)\}", html)
     assert head
     page = {k.strip(): float(v) for k, v in (kv.split(":") for kv in head.group(1).split(","))}
-    markers = _validation()
-    shake, nod = markers["head_shake"]["shipped_in_page"], markers["head_nod"]["shipped_in_page"]
-    assert (shake["slow_s"], shake["hold_s"], shake["contrast"]) == (
-        nod["slow_s"],
-        nod["hold_s"],
-        nod["contrast"],
-    ), "the page uses one set of averages for both axes"
-    assert page["fast"] == shake["fast_s"]
-    assert page["slow"] == shake["slow_s"] and page["hold"] == shake["hold_s"]
-    assert shake["contrast"] == 0.0, "the page subtracts nothing from the other axis"
-    assert page["shakeOnDeg"] == shake["threshold_deg_rms"]
-    assert page["nodOnDeg"] == nod["threshold_deg_rms"]
+    th = VM.MarkerThresholds()
+    assert (page["fast"], page["slow"], page["hold"]) == (
+        VM.HEAD_FAST_S,
+        VM.HEAD_SLOW_S,
+        VM.HEAD_HOLD_S,
+    )
+    assert (page["shakeOnDeg"], page["nodOnDeg"]) == (th.shake_rms_deg, th.nod_rms_deg)
     gate = re.search(r"new Oscillation\((\d+(?:\.\d+)?), 1300\)", html)
-    assert gate and float(gate.group(1)) == shake["swing_min_deg"]
+    assert gate and float(gate.group(1)) == th.swing_deg
+    markers = _validation()
+    for name in ("head_shake", "head_nod"):
+        shipped = markers[name]["shipped_in_page"]
+        assert shipped["contrast"] == 0.0, "the page subtracts nothing from the other axis"
+        assert (shipped["slow_s"], shipped["hold_s"]) == (page["slow"], page["hold"])
 
 
 def test_the_pages_head_detector_is_the_python_one_number_for_number() -> None:

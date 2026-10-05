@@ -586,7 +586,7 @@ reported; **if no signer participates, that is stated in Limitations, not glosse
   input provenance.
 - **It refuses to display what this build cannot support**, with the measured reason
   inline: affect is withheld because M4 measured 0.497 balanced accuracy against a 0.5
-  reference (0.481–0.507 over three seeds as re-measured 2026-10-05), and gloss recognition
+  reference (0.493–0.506 over three seeds as re-measured 2026-10-05), and gloss recognition
   is withheld because M5a does not beat its most-frequent baseline.
 - **A blind feature is rendered as blind** (zero fraction in the payload), so "no marker"
   and "this instrument cannot tell" stay distinct on screen.
@@ -628,10 +628,10 @@ Never fill a cell from an estimate. Every cell cites a run ID.
 
 | #            | KPI                                           | Reference                                | Target                            | Current                                                       | Milestone |
 | ------------ | --------------------------------------------- | ---------------------------------------- | --------------------------------- | ------------------------------------------------------------- | --------- |
-| **K1** | Non-signer FER bias from grammatical markers | 0 = no bias | ≠ 0, 2+ models, CIs | **no support, measured twice.** Isolated signs (WLASL, heuristic markers): −0.008…+0.002, MDE 0.003–0.008. Continuous signing (EmoSign, human frame-level markers, 2026-10-05): no marker meets the pre-registered rule; brow-marker MDE 0.012–0.037 against baselines of 0.40–0.46 | M1 |
-| **K2** | Disentanglement cross-prediction AUC | 0.5 = perfect | **≤ 0.60**, no affect loss | **not met: 0.6944 heuristic `y_L`, 0.7264 human `y_L`; 0.710 ± 0.014 over 3 seeds** (`artifacts/m4/`, 2026-10-05) | M4 |
-| **K3** | Positive control: signer probe AUC | — | ≥ 0.80 | **met: 0.9812** | M4 |
-| **K4** | EmoSign emotion macro-F1, video-only, LOSO | **eJSL EANwH 21.09**; GPT-4o 20.76 | **> 21.09** | **never measured on a comparable protocol.** Affect balanced accuracy 0.481–0.507 against 0.5, so no affect signal is learned yet | M4 |
+| **K1** | Non-signer FER bias from grammatical markers | 0 = no bias | ≠ 0, 2+ models, CIs | **mixed after the 2026-10-05 corrections.** Continuous signing (EmoSign, human frame-level markers): no marker meets the pre-registered rule; brow-marker MDE 0.012–0.037 against baselines of 0.40–0.46. Isolated signs (WLASL, detected markers): brows and mouth null, −0.008…+0.002; **head shake +0.017 in two of three models, intervals excluding zero, on 12 clips** once the marker read the head's turn (it had one marked window before). Meets the stated criterion for that one marker; not replicated on continuous signing; a turned face is a simpler explanation | M1 |
+| **K2** | Disentanglement cross-prediction AUC | 0.5 = perfect | **≤ 0.60**, no affect loss | **not met: 0.7053 heuristic `y_L`, 0.7579 human `y_L`; 0.709 ± 0.021 over 3 seeds (re-run 2026-10-05 evening on two-hand tracking and corrected head axes)** (`artifacts/m4/`, 2026-10-05) | M4 |
+| **K3** | Positive control: signer probe AUC | — | ≥ 0.80 | **met: 0.9804** | M4 |
+| **K4** | EmoSign emotion macro-F1, video-only, LOSO | **eJSL EANwH 21.09**; GPT-4o 20.76 | **> 21.09** | **never measured on a comparable protocol.** Affect balanced accuracy 0.493–0.506 against 0.5, so no affect signal is learned yet | M4 |
 | **K5** | Peak inference VRAM / p95 latency on the 3050 | 4096 MB hard limit                       | **< 2500 MB / < 400 ms**    | **186 MB, 6 models live / 73.2 ms p95 perception**      | M2, M7    |
 | K6           | Sustained capture FPS                         | —                                       | ≥ 20                             | **20.4 (repeats 19.7-20.4)**                            | M2        |
 | K7 | How2Sign BLEU-4 at ≤80M params | 10.06 published | ≥ 8.0 | not started; data on disk | M5 |
@@ -694,7 +694,7 @@ submission, and what is explicitly **future work**:
 | Milestone | In the submission | Future work |
 | --- | --- | --- |
 | M0–M3 | Data spine, real-time perception, human-annotated markers, marker validation | ASL Citizen, a working head-movement instrument |
-| M1 / K1 | Confound audit on isolated and on continuous signing: not supported | Question marking, which needs the 1,354 further utterance videos |
+| M1 / K1 | Confound audit: not supported on continuous signing; head shake supported on isolated signs from 12 clips | Question marking, which needs the 1,354 further utterance videos; a larger head-shake sample |
 | M4 / K2, K3 | Factorized encoder: refuted, with a passing positive control | — |
 | K4 | — | **Never run** on a protocol comparable to the published baselines |
 | M5a | Gloss recognition: at baseline, as a measurement | The larger corpus |

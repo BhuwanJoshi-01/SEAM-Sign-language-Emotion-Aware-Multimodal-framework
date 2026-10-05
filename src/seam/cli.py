@@ -281,8 +281,10 @@ def cmd_serve(args: argparse.Namespace) -> int:
     app = build_app()
     print(f"SEAM demo on http://{args.host}:{args.port}  (video stays in the browser tab)")
     print("  pages, all linked from each other:")
-    print("    /              webcam demo; MediaPipe in the browser, video never uploaded")
-    print("    /avatar        SMPL-X avatar viewer (needs `make demo-avatar` first)")
+    print(
+        "    /              live demo and 3D avatar; MediaPipe in the browser, video never uploaded"
+    )
+    print("    /server        the earlier demo, with server-side marker analysis")
     print("    /api/coverage  what the system does and does not claim")
     print("    /routes        every route, probed live")
     print("  endpoints:")
